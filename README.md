@@ -103,7 +103,7 @@ Para producción:
 go build -ldflags="-s -w" -o iiif-server main.go
 ```
 
-## Docker (Opcional)
+<!-- ## Docker (Opcional)
 
 ```dockerfile
 FROM golang:1.21-alpine AS builder
@@ -119,4 +119,4 @@ COPY --from=builder /app/iiif-server .
 COPY config.yaml .
 EXPOSE 8080
 CMD ["./iiif-server"]
-```
+``` -->
