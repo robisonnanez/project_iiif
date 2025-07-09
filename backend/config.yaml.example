@@ -1,0 +1,58 @@
+# =============================================================================
+# CONFIGURACIÓN DEL SERVIDOR IIIF PDF
+# =============================================================================
+
+# Configuración del servidor HTTP
+server:
+  port: "8080"                    # Puerto donde escucha el servidor
+  mode: "debug"                   # Modo: debug, release, test
+
+# Configuración de almacenamiento
+storage:
+  data_path: "./data"             # Directorio base para datos
+  images_path: "./data/images"    # Directorio donde se almacenan las imágenes convertidas
+  documents_path: "./data/documents"  # Directorio para metadatos de documentos
+  thumbnails_path: "./data/thumbnails"  # Directorio para miniaturas
+  manifests_path: "./data/manifests"    # Directorio para manifiestos IIIF
+
+# Configuración de procesamiento de PDFs
+pdf:
+  max_file_size: 104857600        # Tamaño máximo de archivo en bytes (100MB)
+  allowed_formats:                # Formatos de archivo permitidos
+    - "pdf"
+  temp_path: "./data/temp"        # Directorio temporal para procesamiento
+
+# Configuración IIIF
+iiif:
+  base_url: "http://localhost:8080"     # URL base del servidor
+  api_version: "3"                      # Versión de la API IIIF (2 o 3)
+  max_width: 2048                       # Ancho máximo de imagen
+  max_height: 2048                      # Alto máximo de imagen
+  cache_enabled: true                   # Habilitar caché de imágenes
+  cache_ttl: 3600                       # Tiempo de vida del caché en segundos
+  tile_size: 512                        # Tamaño de tiles para zoom
+  scale_factors: [1, 2, 4, 8]          # Factores de escala disponibles
+
+# Configuración de conversión de imágenes
+conversion:
+  default_format: "jpg"           # Formato por defecto: jpg, png, webp
+  default_quality: 85             # Calidad por defecto (1-100)
+  enable_ocr: false               # Habilitar reconocimiento de texto (OCR)
+  dpi: 150                        # DPI para conversión de PDF
+  background_color: "white"       # Color de fondo para transparencias
+
+# Configuración de seguridad
+security:
+  enable_auth: false              # Habilitar autenticación
+  log_level: "info"               # Nivel de log: debug, info, warn, error
+  cors_origins:                   # Orígenes permitidos para CORS
+    - "http://localhost:5173"
+    - "http://localhost:3000"
+  max_concurrent_uploads: 5       # Máximo de subidas concurrentes
+
+# Configuración de rendimiento
+performance:
+  max_workers: 4                  # Número máximo de workers para procesamiento
+  queue_size: 100                 # Tamaño de la cola de procesamiento
+  cleanup_interval: 3600          # Intervalo de limpieza en segundos
+  max_cache_size: "1GB"           # Tamaño máximo del caché
