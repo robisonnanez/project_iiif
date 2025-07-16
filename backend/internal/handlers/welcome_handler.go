@@ -201,7 +201,7 @@ func (h *WelcomeHandler) Welcome(c *gin.Context) {
         <div class="logo">IIIF</div>
         
         <h1>Bienvenidos al Proyecto IIIF</h1>
-        <p class="subtitle">Servidor de conversión PDF a IIIF en <strong>localhost:8080</strong></p>
+        <p class="subtitle">Servidor de conversión PDF a IIIF en <strong>` + h.config.IIIF.BaseURL + `</strong></p>
         
         <div class="status">
             Servidor activo y funcionando
@@ -226,20 +226,21 @@ func (h *WelcomeHandler) Welcome(c *gin.Context) {
                 Resolución máx: <strong>` + fmt.Sprintf("%dx%d", h.config.IIIF.MaxWidth, h.config.IIIF.MaxHeight) + `</strong></p>
             </div>
             
-						<!--
+            <!--
             <div class="info-card">
                 <h3>📄 Archivos PDF</h3>
                 <p>Tamaño máx: <strong>` + fmt.Sprintf("%d MB", h.config.PDF.MaxFileSize/(1024*1024)) + `</strong><br>
                 Formatos: <strong>PDF</strong></p>
             </div>
-						-->
+            -->
         </div>
         
         <div class="endpoints">
             <h3>🌐 Endpoints Disponibles</h3>
             
-            <!--
-						<div class="endpoint">
+            <!-- 
+            <div>
+                <div class="endpoint">
                 <span class="method post">POST</span>
                 <span class="url">/api/upload - Subir PDF</span>
             </div>

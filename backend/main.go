@@ -3,6 +3,8 @@ package main
 import (
 	"log"
 	"os"
+	"regexp"
+	"strings"
 
 	"iiif-pdf-server/internal/config"
 	"iiif-pdf-server/internal/handlers"
@@ -38,10 +40,15 @@ func main() {
 	router := gin.Default()
 
 	// Configurar CORS
-	corsConfig := cors.DefaultConfig()
-	corsConfig.AllowOrigins = cfg.Security.CorsOrigins
-	corsConfig.AllowMethods = []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"}
-	corsConfig.AllowHeaders = []string{"Origin", "Content-Type", "Accept", "Authorization"}
+	corsConfig := cors.Config{
+		AllowOriginFunc: func(origin string) bool {
+			return isOriginAllowed(origin, cfg.Security.CorsOrigins)
+		},
+		AllowMethods:     []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
+		AllowHeaders:     []string{"Origin", "Content-Type", "Accept", "Authorization"},
+		AllowCredentials: true,
+		MaxAge:           12 * 3600, // 12 horas
+	}
 	router.Use(cors.New(corsConfig))
 
 	// Middleware para servir archivos estáticos
@@ -117,4 +124,27 @@ func createDirectories(cfg *config.Config) {
 			log.Fatalf("Error creando directorio %s: %v", dir, err)
 		}
 	}
+}
+
+// isOriginAllowed verifica si un origen está permitido, incluyendo wildcards
+func isOriginAllowed(origin string, allowedOrigins []string) bool {
+	for _, allowed := range allowedOrigins {
+		// Coincidencia exacta
+		if origin == allowed {
+			return true
+		}
+
+		// Verificar wildcards
+		if strings.Contains(allowed, "*") {
+			// Convertir patrón wildcard a regex
+			pattern := strings.ReplaceAll(allowed, "*", "([a-zA-Z0-9-]+)")
+			pattern = strings.ReplaceAll(pattern, ".", "\\.")
+			pattern = "^" + pattern + "$"
+
+			if matched, err := regexp.MatchString(pattern, origin); err == nil && matched {
+				return true
+			}
+		}
+	}
+	return false
 }

@@ -24,7 +24,7 @@ pdf:
 
 # Configuración IIIF
 iiif:
-  base_url: "http://localhost:8080"     # URL base del servidor
+  base_url: "https://tu-dominio.com"    # URL base del servidor
   api_version: "3"                      # Versión de la API IIIF (2 o 3)
   max_width: 2048                       # Ancho máximo de imagen
   max_height: 2048                      # Alto máximo de imagen
@@ -46,8 +46,11 @@ security:
   enable_auth: false              # Habilitar autenticación
   log_level: "info"               # Nivel de log: debug, info, warn, error
   cors_origins:                   # Orígenes permitidos para CORS
-    - "http://localhost:5173"
+    - "https://tu-dominio.com"
+    - "https://www.tu-dominio.com"
+    - "https://*.tu-dominio.com"
     - "http://localhost:3000"
+    - "http://localhost:5173"
   max_concurrent_uploads: 5       # Máximo de subidas concurrentes
 
 # Configuración de rendimiento
