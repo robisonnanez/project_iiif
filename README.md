@@ -19,14 +19,18 @@ Servidor Go que convierte archivos PDF a imágenes y los sirve usando el protoco
 ```bash
 # Ubuntu/Debian
 sudo apt-get install libmupdf-dev
+```
 <!--
+```bash
+# Ubuntu/Debian
+sudo apt-get install libmupdf-dev
 # macOS
 brew install mupdf-tools
 
 # Windows
 # Descargar MuPDF desde https://mupdf.com/downloads/ 
--->
 ```
+-->
 
 2. **Clonar y compilar:**
 
