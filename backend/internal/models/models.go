@@ -5,14 +5,25 @@ import "time"
 type PDFDocument struct {
 	ID             string    `json:"id"`
 	Name           string    `json:"name"`
-	UploadDate     time.Time `json:"UploadDate"`
+	UploadDate     time.Time `json:"uploadDate"`
 	Status         string    `json:"status"` // processing, completed, error
 	TotalPages     int       `json:"totalPages"`
 	ConvertedPages int       `json:"convertedPages"`
-	ManifiestURL   string    `json:"manifestUrl,omitempty"`
+	ManifestURL    string    `json:"manifestUrl,omitempty"`
 	ThumbnailURL   string    `json:"thumbnailUrl,omitempty"`
 	FilePath       string    `json:"-"`
 	ImagePaths     []string  `json:"-"`
+}
+
+type DocumentImage struct {
+	ID         string    `json:"id"`
+	DocumentID string    `json:"documentId"`
+	PageNumber int       `json:"pageNumber"`
+	ImagePath  string    `json:"-"`
+	Width      int       `json:"width"`
+	Height     int       `json:"height"`
+	Format     string    `json:"format"`
+	CreatedAt  time.Time `json:"createdAt"`
 }
 
 type ConversionSettings struct {

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"log"
 	"os"
 	"regexp"
@@ -27,10 +28,13 @@ func main() {
 	createDirectories(cfg)
 
 	// Inicializar servicios
-	storage := storage.NewFileStorage(cfg.Storage.DataPath)
-	pdfService := services.NewPDFService(cfg, storage)
-	iiifService := services.NewIIIFService(cfg, storage)
-	documentService := services.NewDocumentService(storage)
+	store, err := newStorage(cfg)
+	if err != nil {
+		log.Fatalf("Error inicializando almacenamiento: %v", err)
+	}
+	pdfService := services.NewPDFService(cfg, store)
+	iiifService := services.NewIIIFService(cfg, store)
+	documentService := services.NewDocumentService(store)
 
 	// Configurar router
 	if cfg.Server.Mode == "production" {
@@ -112,6 +116,7 @@ func main() {
 func createDirectories(cfg *config.Config) {
 	dirs := []string{
 		cfg.Storage.DataPath,
+		cfg.Storage.PDFsPath,
 		cfg.Storage.DocumentsPath,
 		cfg.Storage.ImagesPath,
 		cfg.Storage.ThumbnailsPath,
@@ -123,6 +128,17 @@ func createDirectories(cfg *config.Config) {
 		if err := os.MkdirAll(dir, 0755); err != nil {
 			log.Fatalf("Error creando directorio %s: %v", dir, err)
 		}
+	}
+}
+
+func newStorage(cfg *config.Config) (storage.Storage, error) {
+	switch strings.ToLower(cfg.Storage.Backend) {
+	case "", "local":
+		return storage.NewFileStorage(cfg.Storage.DataPath), nil
+	case "mysql":
+		return storage.NewMySQLStorage(cfg)
+	default:
+		return nil, fmt.Errorf("storage backend no soportado: %s", cfg.Storage.Backend)
 	}
 }
 

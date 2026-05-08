@@ -1,0 +1,17 @@
+[Unit]
+Description=Project IIIF PDF Server
+After=network.target mysql.service
+Wants=mysql.service
+
+[Service]
+Type=simple
+User=robison
+Group=robison
+WorkingDirectory=/opt/project_iiif/backend
+Environment=PATH=/usr/local/go/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+ExecStart=/opt/project_iiif/backend/iiif-server
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

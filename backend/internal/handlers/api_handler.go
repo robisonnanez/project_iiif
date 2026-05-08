@@ -66,7 +66,7 @@ func (h *APIHandler) UploadPDF(c *gin.Context) {
 	}
 
 	// Guardar archivo temporal
-	tempPath := filepath.Join(h.config.PDF.TempPath, "temp_"+header.Filename)
+	tempPath := filepath.Join(h.config.PDF.TempPath, "temp_"+filepath.Base(header.Filename))
 	tempFile, err := os.Create(tempPath)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Error guardando archivo"})

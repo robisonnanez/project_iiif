@@ -2,6 +2,17 @@
 # CONFIGURACIÓN DEL SERVIDOR IIIF PDF
 # =============================================================================
 
+# Backend principal de almacenamiento: local o mysql.
+# Si STORAGE_BACKEND/DB_CONNECTION es mysql, la metadata va a MySQL y los PDFs
+# e imágenes quedan en las rutas configuradas abajo.
+STORAGE_BACKEND: "local"
+DB_CONNECTION: "local"
+DB_HOST: "127.0.0.1"
+DB_PORT: "3306"
+DB_DATABASE: "DB_DATABASE"
+DB_USERNAME: "DB_USERNAME"
+DB_PASSWORD: "DB_PASSWORD"
+
 # Configuración del servidor HTTP
 server:
   port: "8080"                    # Puerto donde escucha el servidor
@@ -9,11 +20,25 @@ server:
 
 # Configuración de almacenamiento
 storage:
+  backend: "local"                 # Backend: local o mysql
   data_path: "./data"             # Directorio base para datos
+  pdfs_path: "./data/pdfs"         # Directorio donde se almacenan PDFs originales
   images_path: "./data/images"    # Directorio donde se almacenan las imágenes convertidas
   documents_path: "./data/documents"  # Directorio para metadatos de documentos
   thumbnails_path: "./data/thumbnails"  # Directorio para miniaturas
   manifests_path: "./data/manifests"    # Directorio para manifiestos IIIF
+
+# Configuración de base de datos para storage.backend=mysql.
+# También puedes usar las claves DB_* de arriba; si están presentes, tienen prioridad.
+database:
+  mysql:
+    host: "127.0.0.1"
+    port: "3306"
+    user: "project_iiif"
+    password: "CAMBIAR_PASSWORD"
+    database: "project_iiif"
+    charset: "utf8mb4"
+    parse_time: true
 
 # Configuración de procesamiento de PDFs
 pdf:

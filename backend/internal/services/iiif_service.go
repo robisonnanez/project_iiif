@@ -82,25 +82,7 @@ func (s *IIIFService) GetManifest(documentID string) (*models.IIIFManifest, erro
 func (s *IIIFService) createCanvas(documentID string, page int, title string) models.IIIFCanvas {
 	canvasID := fmt.Sprintf("%s/api/iiif/%s/canvas/%d", s.config.IIIF.BaseURL, documentID, page)
 
-	// Crear identificador con extensión para mayor claridad
-	// Si el documento es un PDF, usar .pdf en el identificador
-	// Si es una imagen individual, mantener su extensión original
-	var imageIdentifier string
-	if strings.HasSuffix(strings.ToLower(title), ".pdf") {
-		// Para PDFs: documento.pdf_page_1
-		baseID := strings.TrimSuffix(documentID, ".pdf")
-		imageIdentifier = fmt.Sprintf("%s.pdf_page_%d", baseID, page)
-	} else {
-		// Para imágenes individuales: CJUOWBJGIFFZFOQXLRSEUNKE7M.png
-		if page == 1 {
-			imageIdentifier = documentID // Usar el ID completo con extensión
-		} else {
-			// Si por alguna razón una imagen tiene múltiples páginas
-			baseID := strings.TrimSuffix(documentID, filepath.Ext(documentID))
-			ext := filepath.Ext(documentID)
-			imageIdentifier = fmt.Sprintf("%s_page_%d%s", baseID, page, ext)
-		}
-	}
+	imageIdentifier := s.imageIdentifier(documentID, page, title)
 
 	imageID := fmt.Sprintf("%s/iiif/%s/%s", s.config.IIIF.BaseURL, s.config.IIIF.APIVersion, imageIdentifier)
 
@@ -153,24 +135,22 @@ func (s *IIIFService) GetImageInfo(documentID string, page int) (*models.IIIFIma
 		}
 	}
 
-	width, height := s.getImageDimensions(documentID, page)
+	image, err := s.resolveImage(documentID, page)
+	if err != nil {
+		return nil, fmt.Errorf("image not found: %w", err)
+	}
+
+	width, height := image.Width, image.Height
+	if width == 0 || height == 0 {
+		width, height = s.getImageDimensions(documentID, page)
+	}
 	if width == 0 || height == 0 {
 		return nil, fmt.Errorf("image not found")
 	}
 
-	// Crear identificador con extensión
-	var imageIdentifier string
-	if strings.Contains(documentID, ".pdf") {
-		baseID := strings.TrimSuffix(documentID, ".pdf")
-		imageIdentifier = fmt.Sprintf("%s.pdf_page_%d", baseID, page)
-	} else {
-		if page == 1 {
-			imageIdentifier = documentID
-		} else {
-			baseID := strings.TrimSuffix(documentID, filepath.Ext(documentID))
-			ext := filepath.Ext(documentID)
-			imageIdentifier = fmt.Sprintf("%s_page_%d%s", baseID, page, ext)
-		}
+	imageIdentifier := image.ID
+	if imageIdentifier == "" {
+		imageIdentifier = s.imageIdentifier(documentID, page, documentID)
 	}
 
 	imageID := fmt.Sprintf("%s/iiif/%s/%s", s.config.IIIF.BaseURL, s.config.IIIF.APIVersion, imageIdentifier)
@@ -209,38 +189,11 @@ func (s *IIIFService) GetImage(documentID string, page int, size, rotation, qual
 }
 
 func (s *IIIFService) GetImageWithRegion(documentID string, page int, region, size, rotation, quality, format string) ([]byte, string, error) {
-	// Determinar la ruta de la imagen basada en el documentID
-	var imagePath string
-
-	// Si el documentID contiene extensión, es probable que sea una imagen individual
-	if strings.Contains(documentID, ".") && !strings.Contains(documentID, ".pdf") {
-		// Verificar si documentID contiene &
-		if strings.Contains(documentID, "&") {
-			// Obtener el texto antes del &
-			parts := strings.Split(documentID, "&")
-			if len(parts) == 3 {
-				directory_1 := parts[0]
-				directory_2 := parts[1]
-				nameImage := parts[2]
-				// baseID := strings.TrimSuffix(parts[2], filepath.Ext(parts[2]))
-				imagePath = filepath.Join(s.config.Storage.ImagesPath, directory_1, directory_2, nameImage)
-			} else if len(parts) == 2 {
-				directory_1 := parts[0]
-				nameImage := parts[1]
-				imagePath = filepath.Join(s.config.Storage.ImagesPath, directory_1, nameImage)
-			}
-		} else {
-			// Para imágenes individuales
-			imagePath = filepath.Join(s.config.Storage.ImagesPath, documentID)
-		}
-
-		// baseID := strings.TrimSuffix(documentID, filepath.Ext(documentID))
-		// imagePath = filepath.Join(s.config.Storage.ImagesPath, baseID, fmt.Sprintf("page_%d.jpg", page))
-	} else {
-		// Para PDFs o IDs sin extensión
-		cleanID := strings.TrimSuffix(documentID, ".pdf")
-		imagePath = filepath.Join(s.config.Storage.ImagesPath, cleanID, fmt.Sprintf("page_%d.jpg", page))
+	docImage, err := s.resolveImage(documentID, page)
+	if err != nil {
+		return nil, "", err
 	}
+	imagePath := docImage.ImagePath
 
 	// Verificar si el archivo existe
 	if _, err := os.Stat(imagePath); os.IsNotExist(err) {
@@ -388,6 +341,18 @@ func (s *IIIFService) processSize(img image.Image, size string) image.Image {
 }
 
 func (s *IIIFService) getImageDimensions(documentID string, page int) (int, int) {
+	image, err := s.resolveImage(documentID, page)
+	if err == nil {
+		if image.Width > 0 && image.Height > 0 {
+			return image.Width, image.Height
+		}
+		img, err := imaging.Open(image.ImagePath)
+		if err != nil {
+			return 0, 0
+		}
+		bounds := img.Bounds()
+		return bounds.Dx(), bounds.Dy()
+	}
 
 	// Determinar la ruta de la imagen basada en el documentID
 	var imagePath string
@@ -423,6 +388,79 @@ func (s *IIIFService) getImageDimensions(documentID string, page int) (int, int)
 		return 0, 0
 	}
 
+	bounds := img.Bounds()
+	return bounds.Dx(), bounds.Dy()
+}
+
+func (s *IIIFService) resolveImage(identifier string, page int) (*models.DocumentImage, error) {
+	image, err := s.storage.GetDocumentImage(identifier)
+	if err == nil {
+		return image, nil
+	}
+
+	image, err = s.storage.GetDocumentImageByPage(identifier, page)
+	if err == nil {
+		return image, nil
+	}
+
+	imagePath := s.legacyImagePath(identifier, page)
+	if _, statErr := os.Stat(imagePath); statErr != nil {
+		return nil, fmt.Errorf("image not found: %w", err)
+	}
+
+	width, height := imageDimensions(imagePath)
+	return &models.DocumentImage{
+		ID:         identifier,
+		DocumentID: identifier,
+		PageNumber: page,
+		ImagePath:  imagePath,
+		Width:      width,
+		Height:     height,
+		Format:     strings.TrimPrefix(filepath.Ext(imagePath), "."),
+	}, nil
+}
+
+func (s *IIIFService) legacyImagePath(documentID string, page int) string {
+	if strings.Contains(documentID, ".") && !strings.Contains(documentID, ".pdf") {
+		if strings.Contains(documentID, "&") {
+			parts := strings.Split(documentID, "&")
+			if len(parts) == 3 {
+				return filepath.Join(s.config.Storage.ImagesPath, parts[0], parts[1], parts[2])
+			}
+			if len(parts) == 2 {
+				return filepath.Join(s.config.Storage.ImagesPath, parts[0], parts[1])
+			}
+		}
+		return filepath.Join(s.config.Storage.ImagesPath, documentID)
+	}
+
+	cleanID := strings.TrimSuffix(documentID, ".pdf")
+	return filepath.Join(s.config.Storage.ImagesPath, cleanID, fmt.Sprintf("page_%d.jpg", page))
+}
+
+func (s *IIIFService) imageIdentifier(documentID string, page int, title string) string {
+	if image, err := s.storage.GetDocumentImageByPage(documentID, page); err == nil && image.ID != "" {
+		return image.ID
+	}
+
+	if strings.HasSuffix(strings.ToLower(title), ".pdf") {
+		baseID := strings.TrimSuffix(documentID, ".pdf")
+		return fmt.Sprintf("%s.pdf_page_%d", baseID, page)
+	}
+	if page == 1 {
+		return documentID
+	}
+
+	baseID := strings.TrimSuffix(documentID, filepath.Ext(documentID))
+	ext := filepath.Ext(documentID)
+	return fmt.Sprintf("%s_page_%d%s", baseID, page, ext)
+}
+
+func imageDimensions(imagePath string) (int, int) {
+	img, err := imaging.Open(imagePath)
+	if err != nil {
+		return 0, 0
+	}
 	bounds := img.Bounds()
 	return bounds.Dx(), bounds.Dy()
 }
