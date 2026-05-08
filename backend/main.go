@@ -61,10 +61,33 @@ func main() {
 	// Inicializar handlers
 	apiHandler := handlers.NewAPIHandler(pdfService, iiifService, documentService, cfg)
 	welcomeHandler := handlers.NewWelcomeHandler(cfg)
+	frontendHandler := handlers.NewFrontendHandler(cfg)
+	adminHandler := handlers.NewAdminHandler(cfg)
 
 	// Ruta de bienvenida
 	router.GET("/", welcomeHandler.Welcome)
 	router.GET("/health", welcomeHandler.HealthCheck)
+
+	if cfg.Frontend.Enabled {
+		auth := dashboardAuth(cfg)
+
+		dashboard := router.Group("/dashboard")
+		dashboard.Use(auth)
+		{
+			dashboard.GET("", frontendHandler.Dashboard)
+			dashboard.GET("/", frontendHandler.Dashboard)
+			dashboard.Static("/assets", cfg.Frontend.Path+"/assets")
+		}
+
+		admin := router.Group("/admin/api")
+		admin.Use(auth)
+		{
+			admin.GET("/config", adminHandler.GetConfig)
+		}
+	} else {
+		router.GET("/dashboard", frontendHandler.Disabled)
+		router.GET("/dashboard/*path", frontendHandler.Disabled)
+	}
 
 	// Rutas API de gestión
 	api := router.Group("/api")
@@ -140,6 +163,18 @@ func newStorage(cfg *config.Config) (storage.Storage, error) {
 	default:
 		return nil, fmt.Errorf("storage backend no soportado: %s", cfg.Storage.Backend)
 	}
+}
+
+func dashboardAuth(cfg *config.Config) gin.HandlerFunc {
+	if !cfg.Frontend.RequireAuth {
+		return func(c *gin.Context) {
+			c.Next()
+		}
+	}
+
+	return gin.BasicAuth(gin.Accounts{
+		cfg.Frontend.Username: cfg.Frontend.Password,
+	})
 }
 
 // isOriginAllowed verifica si un origen está permitido, incluyendo wildcards

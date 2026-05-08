@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Project IIIF Dashboard</title>
+  <link rel="stylesheet" href="/dashboard/assets/styles.css">
+</head>
+<body>
+  <div class="app">
+    <aside class="sidebar">
+      <div class="brand">
+        <span class="brand-mark">IIIF</span>
+        <div>
+          <strong>Project IIIF</strong>
+          <small>Dashboard</small>
+        </div>
+      </div>
+      <nav class="nav" aria-label="Principal">
+        <button class="nav-item active" data-view="summary">Inicio</button>
+        <button class="nav-item" data-view="upload">Subir PDF</button>
+        <button class="nav-item" data-view="documents">Documentos</button>
+        <button class="nav-item" data-view="config">Configuracion</button>
+      </nav>
+    </aside>
+
+    <main class="content">
+      <header class="header">
+        <div>
+          <h1 id="view-title">Inicio</h1>
+          <p id="view-subtitle">Estado general del servidor IIIF.</p>
+        </div>
+        <button class="secondary" id="refresh-button" type="button">Actualizar</button>
+      </header>
+
+      <section class="view active" id="summary-view">
+        <div class="metrics">
+          <article class="metric">
+            <span>Documentos</span>
+            <strong id="documents-count">0</strong>
+          </article>
+          <article class="metric">
+            <span>Completados</span>
+            <strong id="completed-count">0</strong>
+          </article>
+          <article class="metric">
+            <span>Backend</span>
+            <strong id="storage-backend">-</strong>
+          </article>
+        </div>
+        <div class="panel">
+          <h2>Ultimos documentos</h2>
+          <div id="recent-documents" class="empty">Sin documentos cargados.</div>
+        </div>
+      </section>
+
+      <section class="view" id="upload-view">
+        <div class="panel">
+          <h2>Subir PDF</h2>
+          <form id="upload-form" class="upload-form">
+            <label class="file-picker">
+              <span>Seleccionar PDF</span>
+              <input id="pdf-file" type="file" name="pdf" accept="application/pdf,.pdf" required>
+            </label>
+            <button class="primary" type="submit">Subir y convertir</button>
+          </form>
+          <pre id="upload-result" class="result" hidden></pre>
+        </div>
+      </section>
+
+      <section class="view" id="documents-view">
+        <div class="panel">
+          <h2>Documentos convertidos</h2>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>ID</th>
+                  <th>Nombre</th>
+                  <th>Estado</th>
+                  <th>Paginas</th>
+                  <th>Manifest</th>
+                </tr>
+              </thead>
+              <tbody id="documents-table"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <section class="view" id="config-view">
+        <div class="panel">
+          <h2>Configuracion activa</h2>
+          <div id="config-output" class="config-grid"></div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <script src="/dashboard/assets/app.js"></script>
+</body>
+</html>

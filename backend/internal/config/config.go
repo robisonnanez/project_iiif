@@ -74,6 +74,14 @@ type Config struct {
 		MaxConcurrentUploads int      `yaml:"max_concurrent_uploads"`
 	} `yaml:"security"`
 
+	Frontend struct {
+		Enabled     bool   `yaml:"enabled"`
+		Path        string `yaml:"path"`
+		RequireAuth bool   `yaml:"require_auth"`
+		Username    string `yaml:"username"`
+		Password    string `yaml:"password"`
+	} `yaml:"frontend"`
+
 	Performance struct {
 		MaxWorkers      int    `yaml:"max_workers"`
 		QueueSize       int    `yaml:"queue_size"`
@@ -156,6 +164,15 @@ func applyDefaults(config *Config) {
 	}
 	if config.Database.MySQL.Charset == "" {
 		config.Database.MySQL.Charset = defaults.Database.MySQL.Charset
+	}
+	if config.Frontend.Path == "" {
+		config.Frontend.Path = defaults.Frontend.Path
+	}
+	if config.Frontend.Username == "" {
+		config.Frontend.Username = defaults.Frontend.Username
+	}
+	if config.Frontend.Password == "" {
+		config.Frontend.Password = defaults.Frontend.Password
 	}
 	config.StorageBackend = config.Storage.Backend
 	config.DBConnection = config.Storage.Backend
@@ -272,6 +289,19 @@ func Default() *Config {
 			LogLevel:             "info",
 			CorsOrigins:          []string{"http://localhost:5173", "http://localhost:3000"},
 			MaxConcurrentUploads: 5,
+		},
+		Frontend: struct {
+			Enabled     bool   `yaml:"enabled"`
+			Path        string `yaml:"path"`
+			RequireAuth bool   `yaml:"require_auth"`
+			Username    string `yaml:"username"`
+			Password    string `yaml:"password"`
+		}{
+			Enabled:     false,
+			Path:        "./frontend",
+			RequireAuth: true,
+			Username:    "admin",
+			Password:    "CAMBIAR_PASSWORD",
 		},
 		Performance: struct {
 			MaxWorkers      int    `yaml:"max_workers"`
