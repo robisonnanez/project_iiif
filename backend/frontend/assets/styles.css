@@ -126,7 +126,8 @@ p {
 
 button,
 input,
-select {
+select,
+textarea {
   font: inherit;
 }
 
@@ -210,19 +211,28 @@ select {
 
 .file-picker input,
 .field input,
-.field select {
+.field select,
+.field textarea {
   width: 100%;
   min-width: 0;
 }
 
 .field input,
-.field select {
+.field select,
+.field textarea {
   min-height: 40px;
   border: 1px solid var(--line);
   border-radius: 6px;
   padding: 0 10px;
   color: var(--text);
   background: #fff;
+}
+
+.field textarea {
+  min-height: 180px;
+  padding: 10px;
+  resize: vertical;
+  font-family: Consolas, "Liberation Mono", monospace;
 }
 
 .toolbar-row {
@@ -365,7 +375,7 @@ td code {
 }
 
 .images-table {
-  min-width: 980px;
+  min-width: 1120px;
 }
 
 .images-table th,
@@ -406,6 +416,37 @@ td code {
   background: #fff;
   font-weight: 700;
   text-decoration: none;
+}
+
+.pagination {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 14px;
+  border-top: 1px solid var(--line);
+  background: #fbfdff;
+}
+
+.pagination button {
+  min-width: 38px;
+  min-height: 36px;
+  border: 1px solid var(--line);
+  background: #fff;
+  color: var(--accent);
+  cursor: pointer;
+  font-weight: 700;
+}
+
+.pagination button:hover:not(:disabled),
+.pagination button.active {
+  background: var(--accent);
+  color: #fff;
+}
+
+.pagination button:disabled {
+  color: #94a3b8;
+  background: #eef3f8;
+  cursor: not-allowed;
 }
 
 .toast-stack {

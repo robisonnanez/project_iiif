@@ -5,6 +5,8 @@ import "time"
 type PDFDocument struct {
 	ID             string    `json:"id"`
 	Name           string    `json:"name"`
+	ProjectKey     string    `json:"projectKey,omitempty"`
+	TenantKey      string    `json:"tenantKey,omitempty"`
 	UploadDate     time.Time `json:"uploadDate"`
 	Status         string    `json:"status"` // processing, completed, error
 	TotalPages     int       `json:"totalPages"`
@@ -18,6 +20,8 @@ type PDFDocument struct {
 type DocumentImage struct {
 	ID         string    `json:"id"`
 	DocumentID string    `json:"documentId"`
+	ProjectKey string    `json:"projectKey,omitempty"`
+	TenantKey  string    `json:"tenantKey,omitempty"`
 	PageNumber int       `json:"pageNumber"`
 	ImagePath  string    `json:"-"`
 	Width      int       `json:"width"`
@@ -26,6 +30,11 @@ type DocumentImage struct {
 	MediaType  string    `json:"mediaType,omitempty"`
 	ByteSize   int64     `json:"byteSize,omitempty"`
 	CreatedAt  time.Time `json:"createdAt"`
+}
+
+type Scope struct {
+	ProjectKey string `json:"projectKey"`
+	TenantKey  string `json:"tenantKey,omitempty"`
 }
 
 type BinaryAsset struct {

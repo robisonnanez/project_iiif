@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Project IIIF Dashboard</title>
-  <link rel="stylesheet" href="/dashboard/assets/styles.css?v=20260508-compact-config-images">
+  <link rel="stylesheet" href="/dashboard/assets/styles.css?v=20260510-dashboard-routes-pagination">
 </head>
 <body>
   <div class="app">
@@ -60,6 +60,14 @@
         <div class="panel">
           <h2>Subir PDF</h2>
           <form id="upload-form" class="upload-form">
+            <label class="field">
+              <span>Proyecto</span>
+              <select id="upload-project" name="project"></select>
+            </label>
+            <label class="field" id="upload-tenant-field" hidden>
+              <span>Tenant</span>
+              <select id="upload-tenant" name="tenant"></select>
+            </label>
             <label class="file-picker">
               <span>Seleccionar PDF</span>
               <input id="pdf-file" type="file" name="pdf" accept="application/pdf,.pdf" required>
@@ -73,12 +81,25 @@
       <section class="view" id="documents-view">
         <div class="panel">
           <h2>Documentos convertidos</h2>
+          <div class="toolbar-row">
+            <label class="field">
+              <span>Proyecto</span>
+              <select id="documents-project"></select>
+            </label>
+            <label class="field" id="documents-tenant-field" hidden>
+              <span>Tenant</span>
+              <select id="documents-tenant"></select>
+            </label>
+            <button class="secondary" id="filter-documents-button" type="button">Filtrar</button>
+          </div>
           <div class="table-wrap">
             <table>
               <thead>
                 <tr>
                   <th>ID</th>
                   <th>Nombre</th>
+                  <th>Proyecto</th>
+                  <th>Tenant</th>
                   <th>Estado</th>
                   <th>Paginas</th>
                   <th>Manifest</th>
@@ -94,6 +115,14 @@
         <div class="panel">
           <h2>Imagenes IIIF</h2>
           <div class="toolbar-row">
+            <label class="field">
+              <span>Proyecto</span>
+              <select id="images-project"></select>
+            </label>
+            <label class="field" id="images-tenant-field" hidden>
+              <span>Tenant</span>
+              <select id="images-tenant"></select>
+            </label>
             <label class="field">
               <span>Documento</span>
               <select id="images-document"></select>
@@ -114,6 +143,6 @@
   </div>
   <div class="toast-stack" id="toast-stack" aria-live="polite"></div>
 
-  <script src="/dashboard/assets/app.js?v=20260508-compact-config-images"></script>
+  <script src="/dashboard/assets/app.js?v=20260510-dashboard-routes-pagination"></script>
 </body>
 </html>

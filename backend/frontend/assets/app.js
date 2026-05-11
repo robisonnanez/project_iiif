@@ -1,8 +1,11 @@
 const MASKED_SECRET = "********";
 
 const state = {
-  documents: [],
+  allDocuments: [],
+  filteredDocuments: [],
   config: null,
+  projects: { enabled: false, default_project: "default", items: [] },
+  images: { items: [], page: 1, pageSize: 10 },
   polling: new Map(),
 };
 
@@ -14,34 +17,80 @@ const viewMeta = {
   config: ["Configuracion", "Edita valores permitidos del config.yaml sin exponer secretos."],
 };
 
+const viewRoutes = {
+  summary: "/dashboard/inicio",
+  upload: "/dashboard/subir-pdf",
+  documents: "/dashboard/documentos",
+  images: "/dashboard/imagenes",
+  config: "/dashboard/configuracion",
+};
+
+const routeViews = {
+  "/dashboard": "summary",
+  "/dashboard/": "summary",
+  "/dashboard/inicio": "summary",
+  "/dashboard/subir-pdf": "upload",
+  "/dashboard/documentos": "documents",
+  "/dashboard/imagenes": "images",
+  "/dashboard/configuracion": "config",
+};
+
 const $ = (selector) => document.querySelector(selector);
 const $$ = (selector) => Array.from(document.querySelectorAll(selector));
 
 document.addEventListener("DOMContentLoaded", () => {
   $$(".nav-item").forEach((button) => {
-    button.addEventListener("click", () => showView(button.dataset.view));
+    button.addEventListener("click", () => showView(button.dataset.view, true));
   });
 
   $("#refresh-button").addEventListener("click", refreshCurrentView);
   $("#upload-form").addEventListener("submit", uploadPDF);
   $("#logout-button").addEventListener("click", logout);
   $("#load-images-button").addEventListener("click", loadSelectedImages);
+  $("#filter-documents-button").addEventListener("click", loadDocuments);
+  $("#upload-project").addEventListener("change", () => updateTenantSelect("upload"));
+  $("#documents-project").addEventListener("change", () => {
+    updateTenantSelect("documents");
+    loadDocuments();
+  });
+  $("#documents-tenant").addEventListener("change", loadDocuments);
+  $("#images-project").addEventListener("change", () => {
+    updateTenantSelect("images");
+    resetImages();
+    renderImageDocumentOptions();
+  });
+  $("#images-tenant").addEventListener("change", () => {
+    resetImages();
+    renderImageDocumentOptions();
+  });
+  $("#images-document").addEventListener("change", resetImages);
+  window.addEventListener("popstate", () => showView(viewFromLocation(), false));
 
-  loadDocuments();
+  loadProjects();
   loadConfig();
+  showView(viewFromLocation(), false);
 });
 
-function showView(name) {
+function showView(name, pushRoute = false) {
+  name = viewMeta[name] ? name : "summary";
   $$(".nav-item").forEach((button) => button.classList.toggle("active", button.dataset.view === name));
   $$(".view").forEach((view) => view.classList.toggle("active", view.id === `${name}-view`));
+
+  if (pushRoute) {
+    const nextPath = viewRoutes[name] || "/dashboard";
+    if (window.location.pathname !== nextPath) {
+      window.history.pushState({ view: name }, "", nextPath);
+    }
+  }
 
   const meta = viewMeta[name] || viewMeta.summary;
   $("#view-title").textContent = meta[0];
   $("#view-subtitle").textContent = meta[1];
 
-  if (name === "documents") loadDocuments();
+  if (name === "summary") loadAllDocuments();
+  if (name === "documents") loadDocuments(false);
   if (name === "images") {
-    loadDocuments().then(() => renderImageDocumentOptions());
+    loadAllDocuments().then(() => renderImageDocumentOptions());
   }
   if (name === "config") loadConfig();
 }
@@ -52,8 +101,11 @@ function refreshCurrentView() {
     loadConfig();
   } else if (active === "images") {
     loadSelectedImages();
+  } else if (active === "summary") {
+    loadConfig();
+    loadAllDocuments();
   } else {
-    loadDocuments();
+    loadDocuments(active === "documents");
   }
 }
 
@@ -66,17 +118,31 @@ async function logout() {
   }
 }
 
-async function loadDocuments() {
+function viewFromLocation() {
+  return routeViews[window.location.pathname] || "summary";
+}
+
+async function loadAllDocuments() {
   try {
     const response = await fetch("/api/documents");
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    state.documents = await response.json();
+    state.allDocuments = await response.json();
     renderSummary();
-    renderDocuments();
     renderImageDocumentOptions();
   } catch (error) {
     $("#recent-documents").textContent = `No se pudieron cargar documentos: ${error.message}`;
-    $("#documents-table").innerHTML = `<tr><td colspan="5">No se pudieron cargar documentos.</td></tr>`;
+  }
+}
+
+async function loadDocuments(applyFilters = true) {
+  try {
+    const params = applyFilters ? selectedScopeParams("documents") : "";
+    const response = await fetch(`/api/documents${params ? `?${params}` : ""}`);
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    state.filteredDocuments = await response.json();
+    renderDocuments();
+  } catch (error) {
+    $("#documents-table").innerHTML = `<tr><td colspan="7">No se pudieron cargar documentos: ${escapeHTML(error.message)}</td></tr>`;
   }
 }
 
@@ -92,6 +158,19 @@ async function loadConfig() {
   }
 }
 
+async function loadProjects() {
+  try {
+    const response = await fetch("/admin/api/projects");
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    state.projects = await response.json();
+  } catch (error) {
+    state.projects = state.config?.projects || { enabled: false, default_project: "default", items: [] };
+  }
+  renderProjectControls();
+  await loadAllDocuments();
+  await loadDocuments(false);
+}
+
 async function uploadPDF(event) {
   event.preventDefault();
   const fileInput = $("#pdf-file");
@@ -102,6 +181,7 @@ async function uploadPDF(event) {
 
   const formData = new FormData();
   formData.append("pdf", file);
+  appendScopeToFormData(formData, "upload");
 
   result.hidden = false;
   result.textContent = "Subiendo PDF...";
@@ -119,7 +199,8 @@ async function uploadPDF(event) {
       showToast("PDF recibido. Conversion en proceso...");
       watchDocument(data.id);
     }
-    await loadDocuments();
+    await loadAllDocuments();
+    await loadDocuments(false);
   } catch (error) {
     result.textContent = `Error: ${error.message}`;
   }
@@ -140,12 +221,14 @@ function watchDocument(documentID) {
         window.clearInterval(timer);
         state.polling.delete(documentID);
         showToast("PDF convertido a imagenes correctamente.");
-        await loadDocuments();
+        await loadAllDocuments();
+        await loadDocuments(false);
       } else if (doc.status === "error") {
         window.clearInterval(timer);
         state.polling.delete(documentID);
         showToast("La conversion del PDF fallo.", "error");
-        await loadDocuments();
+        await loadAllDocuments();
+        await loadDocuments(false);
       } else if (attempts >= 120) {
         window.clearInterval(timer);
         state.polling.delete(documentID);
@@ -164,7 +247,7 @@ function watchDocument(documentID) {
 }
 
 function renderSummary() {
-  const docs = Array.isArray(state.documents) ? state.documents : [];
+  const docs = Array.isArray(state.allDocuments) ? state.allDocuments : [];
   $("#documents-count").textContent = docs.length;
   $("#completed-count").textContent = docs.filter((doc) => doc.status === "completed").length;
   $("#storage-backend").textContent = state.config?.storage?.backend || "-";
@@ -195,9 +278,9 @@ function renderSummary() {
 }
 
 function renderDocuments() {
-  const docs = Array.isArray(state.documents) ? state.documents : [];
+  const docs = Array.isArray(state.filteredDocuments) ? state.filteredDocuments : [];
   if (!docs.length) {
-    $("#documents-table").innerHTML = `<tr><td colspan="5">Sin documentos cargados.</td></tr>`;
+    $("#documents-table").innerHTML = `<tr><td colspan="7">Sin documentos cargados.</td></tr>`;
     return;
   }
 
@@ -205,6 +288,8 @@ function renderDocuments() {
     <tr>
       <td><code>${escapeHTML(doc.id || "")}</code></td>
       <td>${escapeHTML(doc.name || "")}</td>
+      <td>${escapeHTML(doc.projectKey || "default")}</td>
+      <td>${escapeHTML(doc.tenantKey || "-")}</td>
       <td>${statusBadge(doc.status)}</td>
       <td>${Number(doc.convertedPages || 0)} / ${Number(doc.totalPages || 0)}</td>
       <td>${doc.manifestUrl ? `<a href="${escapeHTML(doc.manifestUrl)}" target="_blank" rel="noreferrer">Ver</a>` : "-"}</td>
@@ -216,11 +301,16 @@ function renderImageDocumentOptions() {
   const select = $("#images-document");
   if (!select) return;
 
-  const completedDocs = (state.documents || []).filter((doc) => doc.status === "completed");
+  const scope = selectedScope("images");
+  const completedDocs = (state.allDocuments || []).filter((doc) => {
+    if (doc.status !== "completed") return false;
+    if (scope.project && (doc.projectKey || "default") !== scope.project) return false;
+    if (scope.tenant && (doc.tenantKey || "") !== scope.tenant) return false;
+    return true;
+  });
   if (!completedDocs.length) {
     select.innerHTML = `<option value="">Sin documentos completados</option>`;
-    $("#images-gallery").className = "image-gallery empty";
-    $("#images-gallery").textContent = "No hay imagenes disponibles.";
+    resetImages("No hay imagenes disponibles.");
     return;
   }
 
@@ -231,6 +321,15 @@ function renderImageDocumentOptions() {
   if (completedDocs.some((doc) => doc.id === current)) {
     select.value = current;
   }
+}
+
+function resetImages(message = "Selecciona un documento completado.") {
+  state.images.items = [];
+  state.images.page = 1;
+  const gallery = $("#images-gallery");
+  if (!gallery) return;
+  gallery.className = "image-gallery empty";
+  gallery.textContent = message;
 }
 
 async function loadSelectedImages() {
@@ -250,20 +349,29 @@ async function loadSelectedImages() {
     const response = await fetch(`/admin/api/documents/${encodeURIComponent(documentID)}/images`);
     const data = await response.json();
     if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);
-    renderImages(data.images || []);
+    state.images.items = data.images || [];
+    state.images.page = 1;
+    renderImages();
   } catch (error) {
     gallery.className = "image-gallery empty";
     gallery.textContent = `No se pudieron cargar imagenes: ${error.message}`;
   }
 }
 
-function renderImages(images) {
+function renderImages() {
   const gallery = $("#images-gallery");
+  const images = state.images.items || [];
   if (!images.length) {
     gallery.className = "image-gallery empty";
     gallery.textContent = "Este documento no tiene paginas convertidas.";
     return;
   }
+
+  const pageSize = state.images.pageSize;
+  const totalPages = Math.max(1, Math.ceil(images.length / pageSize));
+  state.images.page = Math.min(Math.max(1, state.images.page), totalPages);
+  const start = (state.images.page - 1) * pageSize;
+  const visibleImages = images.slice(start, start + pageSize);
 
   gallery.className = "table-wrap images-table-wrap";
   gallery.innerHTML = `
@@ -273,13 +381,14 @@ function renderImages(images) {
           <th>Miniatura</th>
           <th>Pagina</th>
           <th>ID imagen</th>
+          <th>Proyecto / Tenant</th>
           <th>Dimensiones</th>
           <th>URL IIIF</th>
           <th>Accion</th>
         </tr>
       </thead>
       <tbody>
-        ${images.map((image) => `
+        ${visibleImages.map((image) => `
           <tr>
             <td>
               <a class="thumb-link" href="${escapeHTML(image.iiif_url)}" target="_blank" rel="noreferrer">
@@ -288,6 +397,7 @@ function renderImages(images) {
             </td>
             <td>${Number(image.page_number || 0)}</td>
             <td><code>${escapeHTML(image.image_id || "")}</code></td>
+            <td>${escapeHTML(image.project_key || "default")} ${image.tenant_key ? `/ ${escapeHTML(image.tenant_key)}` : ""}</td>
             <td>${Number(image.width || 0)} x ${Number(image.height || 0)} px</td>
             <td><a class="iiif-url" href="${escapeHTML(image.iiif_url)}" target="_blank" rel="noreferrer">${escapeHTML(image.iiif_url)}</a></td>
             <td><a class="table-action" href="${escapeHTML(image.iiif_url)}" target="_blank" rel="noreferrer">Abrir</a></td>
@@ -295,7 +405,41 @@ function renderImages(images) {
         `).join("")}
       </tbody>
     </table>
+    ${renderImagesPagination(totalPages)}
   `;
+  bindImagesPagination(totalPages);
+}
+
+function renderImagesPagination(totalPages) {
+  const current = state.images.page;
+  const buttons = [];
+  buttons.push(paginationButton("Inicio", 1, current === 1));
+  buttons.push(paginationButton("Previous", current - 1, current === 1));
+  for (let page = 1; page <= totalPages; page += 1) {
+    buttons.push(paginationButton(String(page), page, page === current, page === current));
+  }
+  buttons.push(paginationButton("Next", current + 1, current === totalPages));
+  buttons.push(paginationButton("Ultima", totalPages, current === totalPages));
+  return `<nav class="pagination" aria-label="Paginacion de imagenes">${buttons.join("")}</nav>`;
+}
+
+function paginationButton(label, page, disabled, active = false) {
+  return `
+    <button type="button" class="${active ? "active" : ""}" data-page="${Number(page)}" ${disabled ? "disabled" : ""}>
+      ${escapeHTML(label)}
+    </button>
+  `;
+}
+
+function bindImagesPagination(totalPages) {
+  $$(".pagination [data-page]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const page = Number.parseInt(button.dataset.page, 10);
+      if (!Number.isFinite(page)) return;
+      state.images.page = Math.min(Math.max(1, page), totalPages);
+      renderImages();
+    });
+  });
 }
 
 function renderConfigForm() {
@@ -350,6 +494,13 @@ function renderConfigForm() {
         input("iiif.max_height", "Max height", config.iiif?.max_height || 2048, "number"),
         input("iiif.cache_ttl", "Cache TTL", config.iiif?.cache_ttl || 3600, "number"),
         checkbox("iiif.cache", "Cache activo", Boolean(config.iiif?.cache))
+      ])}
+      ${fieldset("Proyectos", [
+        checkbox("projects.enabled", "Proyectos activos", Boolean(config.projects?.enabled)),
+        input("projects.default_project", "Proyecto por defecto", config.projects?.default_project || "default"),
+        checkbox("projects.require_project", "Proyecto obligatorio", Boolean(config.projects?.require_project)),
+        checkbox("projects.allow_dynamic_tenants", "Permitir tenants dinamicos", Boolean(config.projects?.allow_dynamic_tenants)),
+        textarea("projects.items", "Proyectos JSON", JSON.stringify(config.projects?.items || [], null, 2))
       ])}
     </div>
     <div class="form-actions">
@@ -434,7 +585,88 @@ function collectConfigPayload() {
       cache: checked("iiif.cache"),
       cache_ttl: intValue("iiif.cache_ttl"),
     },
+    projects: {
+      enabled: checked("projects.enabled"),
+      default_project: value("projects.default_project"),
+      require_project: checked("projects.require_project"),
+      allow_dynamic_tenants: checked("projects.allow_dynamic_tenants"),
+      items: parseProjectsItems(value("projects.items")),
+    },
   };
+}
+
+function renderProjectControls() {
+  ["upload", "documents", "images"].forEach((target) => {
+    const select = $(`#${target}-project`);
+    if (!select) return;
+    const current = select.value;
+    const projects = projectItems();
+    const allOption = target === "upload" ? "" : `<option value="">Todos los proyectos</option>`;
+    select.innerHTML = allOption + projects.map((project) => `
+      <option value="${escapeHTML(project.key)}">${escapeHTML(project.name || project.key)}</option>
+    `).join("");
+    const defaultProject = state.projects.default_project || "default";
+    if (target !== "upload" && current === "") {
+      select.value = "";
+    } else {
+      select.value = projects.some((project) => project.key === current) ? current : defaultProject;
+    }
+    updateTenantSelect(target);
+  });
+}
+
+function updateTenantSelect(target) {
+  const projectKey = $(`#${target}-project`)?.value || "";
+  const tenantField = $(`#${target}-tenant-field`);
+  const tenantSelect = $(`#${target}-tenant`);
+  const project = projectItems().find((item) => item.key === projectKey);
+  if (!tenantField || !tenantSelect) return;
+  if (!project?.multitenant) {
+    tenantField.hidden = true;
+    tenantSelect.innerHTML = "";
+    return;
+  }
+  tenantField.hidden = false;
+  tenantSelect.innerHTML = (project.tenants || []).map((tenant) => `
+    <option value="${escapeHTML(tenant)}">${escapeHTML(tenant)}</option>
+  `).join("");
+}
+
+function projectItems() {
+  const items = state.projects?.items || [];
+  if (items.length) return items;
+  return [{ key: "default", name: "Proyecto por defecto", multitenant: false, tenants: [] }];
+}
+
+function selectedScope(target) {
+  const project = $(`#${target}-project`)?.value || "";
+  const tenantField = $(`#${target}-tenant-field`);
+  const tenant = tenantField && !tenantField.hidden ? ($(`#${target}-tenant`)?.value || "") : "";
+  return { project, tenant };
+}
+
+function selectedScopeParams(target) {
+  const scope = selectedScope(target);
+  const params = new URLSearchParams();
+  if (scope.project) params.set("project", scope.project);
+  if (scope.tenant) params.set("tenant", scope.tenant);
+  return params.toString();
+}
+
+function appendScopeToFormData(formData, target) {
+  const scope = selectedScope(target);
+  if (scope.project) formData.append("project", scope.project);
+  if (scope.tenant) formData.append("tenant", scope.tenant);
+}
+
+function parseProjectsItems(value) {
+  try {
+    const parsed = JSON.parse(value || "[]");
+    return Array.isArray(parsed) ? parsed : [];
+  } catch (error) {
+    showToast("El JSON de proyectos no es valido.", "error");
+    return state.config?.projects?.items || [];
+  }
 }
 
 function fieldset(title, fields) {
@@ -451,6 +683,15 @@ function input(name, label, value, type = "text") {
     <label class="field">
       <span>${escapeHTML(label)}</span>
       <input name="${escapeHTML(name)}" type="${escapeHTML(type)}" value="${escapeHTML(value)}">
+    </label>
+  `;
+}
+
+function textarea(name, label, value) {
+  return `
+    <label class="field">
+      <span>${escapeHTML(label)}</span>
+      <textarea name="${escapeHTML(name)}" rows="10">${escapeHTML(value)}</textarea>
     </label>
   `;
 }

@@ -82,6 +82,24 @@ frontend:
   username: "admin"
   password: "CAMBIAR_PASSWORD"
 
+projects:
+  enabled: true
+  default_project: "default"
+  require_project: false
+  allow_dynamic_tenants: false
+  items:
+    - key: "default"
+      name: "Proyecto por defecto"
+      multitenant: false
+      tenants: []
+    - key: "metavisor"
+      name: "Metavisor"
+      multitenant: true
+      tenants:
+        - "sunat"
+        - "demo"
+        - "uniguajira"
+
 performance:
   max_workers: 4
   queue_size: 100

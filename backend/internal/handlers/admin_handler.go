@@ -24,6 +24,16 @@ func (h *AdminHandler) GetConfig(c *gin.Context) {
 	c.JSON(http.StatusOK, h.sanitizedConfig())
 }
 
+func (h *AdminHandler) GetProjects(c *gin.Context) {
+	c.JSON(http.StatusOK, gin.H{
+		"enabled":               h.config.Projects.Enabled,
+		"default_project":       h.config.Projects.DefaultProject,
+		"require_project":       h.config.Projects.RequireProject,
+		"allow_dynamic_tenants": h.config.Projects.AllowDynamicTenants,
+		"items":                 h.config.Projects.Items,
+	})
+}
+
 func (h *AdminHandler) UpdateConfig(c *gin.Context) {
 	// Guarda solo campos permitidos del formulario para evitar sobrescribir secretos o YAML arbitrario.
 	var payload editableConfigPayload
@@ -60,7 +70,8 @@ func (h *AdminHandler) UpdateConfig(c *gin.Context) {
 func (h *AdminHandler) GetDocumentImages(c *gin.Context) {
 	// Expone identificadores IIIF seguros para la galeria sin revelar rutas internas ni BLOBs.
 	documentID := c.Param("id")
-	if _, err := h.documentService.GetDocument(documentID); err != nil {
+	doc, err := h.documentService.GetDocument(documentID)
+	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Documento no encontrado"})
 		return
 	}
@@ -79,6 +90,8 @@ func (h *AdminHandler) GetDocumentImages(c *gin.Context) {
 		items = append(items, gin.H{
 			"image_id":    identifier,
 			"document_id": image.DocumentID,
+			"project_key": image.ProjectKey,
+			"tenant_key":  image.TenantKey,
 			"page_number": image.PageNumber,
 			"width":       image.Width,
 			"height":      image.Height,
@@ -90,7 +103,12 @@ func (h *AdminHandler) GetDocumentImages(c *gin.Context) {
 		})
 	}
 
-	c.JSON(http.StatusOK, gin.H{"document_id": documentID, "images": items})
+	c.JSON(http.StatusOK, gin.H{
+		"document_id": documentID,
+		"project_key": doc.ProjectKey,
+		"tenant_key":  doc.TenantKey,
+		"images":      items,
+	})
 }
 
 func (h *AdminHandler) sanitizedConfig() gin.H {
@@ -135,6 +153,13 @@ func (h *AdminHandler) sanitizedConfig() gin.H {
 		"binary_storage": gin.H{
 			"mode":      h.config.BinaryStorage.Mode,
 			"temp_path": h.config.BinaryStorage.TempPath,
+		},
+		"projects": gin.H{
+			"enabled":               h.config.Projects.Enabled,
+			"default_project":       h.config.Projects.DefaultProject,
+			"require_project":       h.config.Projects.RequireProject,
+			"allow_dynamic_tenants": h.config.Projects.AllowDynamicTenants,
+			"items":                 h.config.Projects.Items,
 		},
 		"iiif": gin.H{
 			"base_url":    h.config.IIIF.BaseURL,
@@ -203,6 +228,13 @@ type editableConfigPayload struct {
 		CacheEnabled bool   `json:"cache"`
 		CacheTTL     int    `json:"cache_ttl"`
 	} `json:"iiif"`
+	Projects struct {
+		Enabled             bool                   `json:"enabled"`
+		DefaultProject      string                 `json:"default_project"`
+		RequireProject      bool                   `json:"require_project"`
+		AllowDynamicTenants bool                   `json:"allow_dynamic_tenants"`
+		Items               []config.ProjectConfig `json:"items"`
+	} `json:"projects"`
 }
 
 func applyEditableConfig(next, current *config.Config, payload editableConfigPayload) error {
@@ -263,6 +295,17 @@ func applyEditableConfig(next, current *config.Config, payload editableConfigPay
 	next.IIIF.MaxHeight = payload.IIIF.MaxHeight
 	next.IIIF.CacheEnabled = payload.IIIF.CacheEnabled
 	next.IIIF.CacheTTL = payload.IIIF.CacheTTL
+	next.Projects.Enabled = payload.Projects.Enabled
+	next.Projects.DefaultProject = payload.Projects.DefaultProject
+	next.Projects.RequireProject = payload.Projects.RequireProject
+	next.Projects.AllowDynamicTenants = payload.Projects.AllowDynamicTenants
+	next.Projects.Items = payload.Projects.Items
+	if next.Projects.DefaultProject == "" {
+		next.Projects.DefaultProject = "default"
+	}
+	if len(next.Projects.Items) == 0 {
+		next.Projects.Items = []config.ProjectConfig{{Key: "default", Name: "Proyecto por defecto", Multitenant: false, Tenants: []string{}}}
+	}
 	return nil
 }
 

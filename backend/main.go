@@ -78,6 +78,11 @@ func main() {
 		{
 			dashboard.GET("", frontendHandler.Dashboard)
 			dashboard.GET("/", frontendHandler.Dashboard)
+			dashboard.GET("/inicio", frontendHandler.Dashboard)
+			dashboard.GET("/subir-pdf", frontendHandler.Dashboard)
+			dashboard.GET("/documentos", frontendHandler.Dashboard)
+			dashboard.GET("/imagenes", frontendHandler.Dashboard)
+			dashboard.GET("/configuracion", frontendHandler.Dashboard)
 			dashboard.Static("/assets", cfg.Frontend.Path+"/assets")
 		}
 
@@ -86,6 +91,7 @@ func main() {
 		{
 			admin.GET("/config", adminHandler.GetConfig)
 			admin.PUT("/config", adminHandler.UpdateConfig)
+			admin.GET("/projects", adminHandler.GetProjects)
 			admin.GET("/documents/:id/images", adminHandler.GetDocumentImages)
 		}
 	} else {
@@ -162,7 +168,7 @@ func createDirectories(cfg *config.Config) {
 func newStorage(cfg *config.Config) (storage.Storage, error) {
 	switch strings.ToLower(cfg.Storage.Backend) {
 	case "", "local":
-		return storage.NewFileStorage(cfg.Storage.DataPath), nil
+		return storage.NewFileStorageFromConfig(cfg), nil
 	case "mysql":
 		return storage.NewMySQLStorage(cfg)
 	case "postgres", "postgresql", "mongo", "mongodb":

@@ -1,8 +1,12 @@
 package config
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
+
+	"iiif-pdf-server/internal/models"
 
 	"gopkg.in/yaml.v2"
 )
@@ -90,12 +94,27 @@ type Config struct {
 		Password    string `yaml:"password"`
 	} `yaml:"frontend"`
 
+	Projects struct {
+		Enabled             bool            `yaml:"enabled"`
+		DefaultProject      string          `yaml:"default_project"`
+		RequireProject      bool            `yaml:"require_project"`
+		AllowDynamicTenants bool            `yaml:"allow_dynamic_tenants"`
+		Items               []ProjectConfig `yaml:"items"`
+	} `yaml:"projects"`
+
 	Performance struct {
 		MaxWorkers      int    `yaml:"max_workers"`
 		QueueSize       int    `yaml:"queue_size"`
 		CleanupInterval int    `yaml:"cleanup_interval"`
 		MaxCacheSize    string `yaml:"max_cache_size"`
 	} `yaml:"performance"`
+}
+
+type ProjectConfig struct {
+	Key         string   `yaml:"key" json:"key"`
+	Name        string   `yaml:"name" json:"name"`
+	Multitenant bool     `yaml:"multitenant" json:"multitenant"`
+	Tenants     []string `yaml:"tenants" json:"tenants"`
 }
 
 func Load(filename string) (*Config, error) {
@@ -237,6 +256,12 @@ func applyDefaults(config *Config) {
 	if config.Frontend.Password == "" {
 		config.Frontend.Password = defaults.Frontend.Password
 	}
+	if config.Projects.DefaultProject == "" {
+		config.Projects.DefaultProject = defaults.Projects.DefaultProject
+	}
+	if len(config.Projects.Items) == 0 {
+		config.Projects.Items = defaults.Projects.Items
+	}
 	config.StorageBackend = config.Storage.Backend
 	config.DBConnection = config.Storage.Backend
 	config.DBHost = config.Database.MySQL.Host
@@ -373,6 +398,21 @@ func Default() *Config {
 			Username:    "admin",
 			Password:    "CAMBIAR_PASSWORD",
 		},
+		Projects: struct {
+			Enabled             bool            `yaml:"enabled"`
+			DefaultProject      string          `yaml:"default_project"`
+			RequireProject      bool            `yaml:"require_project"`
+			AllowDynamicTenants bool            `yaml:"allow_dynamic_tenants"`
+			Items               []ProjectConfig `yaml:"items"`
+		}{
+			Enabled:             false,
+			DefaultProject:      "default",
+			RequireProject:      false,
+			AllowDynamicTenants: false,
+			Items: []ProjectConfig{
+				{Key: "default", Name: "Proyecto por defecto", Multitenant: false, Tenants: []string{}},
+			},
+		},
 		Performance: struct {
 			MaxWorkers      int    `yaml:"max_workers"`
 			QueueSize       int    `yaml:"queue_size"`
@@ -393,4 +433,55 @@ func Default() *Config {
 	cfg.DBPassword = cfg.Database.MySQL.Password
 	cfg.DBDatabase = cfg.Database.MySQL.Database
 	return cfg
+}
+
+func (config *Config) ResolveScope(project, tenant string) (*models.Scope, error) {
+	project = strings.TrimSpace(project)
+	tenant = strings.TrimSpace(tenant)
+	if project == "" {
+		project = config.Projects.DefaultProject
+	}
+	if project == "" {
+		project = "default"
+	}
+
+	if !config.Projects.Enabled {
+		return &models.Scope{ProjectKey: project}, nil
+	}
+	if config.Projects.RequireProject && project == "" {
+		return nil, fmt.Errorf("project es obligatorio")
+	}
+
+	item, ok := config.ProjectByKey(project)
+	if !ok {
+		return nil, fmt.Errorf("project no configurado: %s", project)
+	}
+	if !item.Multitenant {
+		return &models.Scope{ProjectKey: project}, nil
+	}
+	if tenant == "" {
+		return nil, fmt.Errorf("tenant es obligatorio para el proyecto %s", project)
+	}
+	if !config.Projects.AllowDynamicTenants && !hasTenant(item, tenant) {
+		return nil, fmt.Errorf("tenant no configurado para %s: %s", project, tenant)
+	}
+	return &models.Scope{ProjectKey: project, TenantKey: tenant}, nil
+}
+
+func (config *Config) ProjectByKey(key string) (ProjectConfig, bool) {
+	for _, item := range config.Projects.Items {
+		if strings.EqualFold(item.Key, key) {
+			return item, true
+		}
+	}
+	return ProjectConfig{}, false
+}
+
+func hasTenant(project ProjectConfig, tenant string) bool {
+	for _, item := range project.Tenants {
+		if strings.EqualFold(item, tenant) {
+			return true
+		}
+	}
+	return false
 }

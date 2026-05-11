@@ -15,6 +15,7 @@ Servidor Go que convierte archivos PDF a imágenes y los sirve usando el protoco
 - ✅ Galería de imágenes IIIF por documento
 - ✅ Configuración editable desde el dashboard con secretos enmascarados
 - ✅ Almacenamiento MySQL BLOB para PDFs e imágenes convertidas
+- ✅ Organización opcional por proyecto y tenant
 
 ## Instalación
 
@@ -62,6 +63,7 @@ Edita `config.yaml` para personalizar:
 - Parámetros de conversión
 - Frontend administrativo
 - Conexión MySQL y modo de almacenamiento binario
+- Proyectos consumidores y tenants opcionales
 
 Para MySQL BLOB usa:
 
@@ -80,6 +82,30 @@ binary_storage:
 ```
 
 Cuando `DB_CONNECTION`/`STORAGE_BACKEND` sea `mysql`, los PDFs e imágenes se guardan como BLOB en la base de datos. El disco local solo se usa para temporales durante la conversión.
+
+### Proyectos y multitenant
+
+```yaml
+projects:
+  enabled: true
+  default_project: "default"
+  require_project: false
+  allow_dynamic_tenants: false
+  items:
+    - key: "default"
+      name: "Proyecto por defecto"
+      multitenant: false
+      tenants: []
+    - key: "metavisor"
+      name: "Metavisor"
+      multitenant: true
+      tenants:
+        - "sunat"
+        - "demo"
+        - "uniguajira"
+```
+
+`POST /api/upload` acepta `project` y `tenant` por form-data o por headers `X-IIIF-Project` y `X-IIIF-Tenant`. Si el proyecto no es multitenant, `tenant` se ignora. Si es multitenant, `tenant` es obligatorio.
 
 ## Dashboard
 
@@ -122,6 +148,7 @@ http://localhost:8080/iiif/3/{image_id}/full/max/0/default.jpg
 ### Administración
 - `GET /admin/api/config` - Configuración saneada
 - `PUT /admin/api/config` - Guardar configuración permitida
+- `GET /admin/api/projects` - Listar proyectos y tenants configurados
 - `GET /admin/api/documents/:id/images` - Listar imágenes IIIF de un documento
 
 ### IIIF

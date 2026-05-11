@@ -79,8 +79,15 @@ func (h *APIHandler) UploadPDF(c *gin.Context) {
 		return
 	}
 
+	scope, err := h.requestScope(c)
+	if err != nil {
+		os.Remove(tempPath)
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
 	// Procesar PDF
-	doc, err := h.pdfService.ProcessPDF(tempPath, header.Filename, settings)
+	doc, err := h.pdfService.ProcessPDF(tempPath, header.Filename, settings, scope)
 	if err != nil {
 		os.Remove(tempPath)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Error procesando PDF"})
@@ -91,7 +98,15 @@ func (h *APIHandler) UploadPDF(c *gin.Context) {
 }
 
 func (h *APIHandler) GetDocuments(c *gin.Context) {
-	docs, err := h.documentService.GetAllDocuments()
+	project := strings.TrimSpace(c.Query("project"))
+	tenant := strings.TrimSpace(c.Query("tenant"))
+	var docs []*models.PDFDocument
+	var err error
+	if project != "" || tenant != "" {
+		docs, err = h.documentService.GetDocumentsByScope(project, tenant)
+	} else {
+		docs, err = h.documentService.GetAllDocuments()
+	}
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Error obteniendo documentos"})
 		return
@@ -251,6 +266,11 @@ func (h *APIHandler) GetImageDefault(c *gin.Context) {
 // - documento.pdf_page_3 (PDF con página específica)
 // - documento_page_1 (sin extensión)
 func (h *APIHandler) parseIdentifier(identifier string) (string, int, error) {
+	if strings.Contains(identifier, "~") {
+		parts := strings.Split(identifier, "~")
+		identifier = parts[len(parts)-1]
+	}
+
 	// Guardar la extensión original si existe
 	originalExt := ""
 	if strings.Contains(identifier, ".") {
@@ -288,4 +308,19 @@ func (h *APIHandler) parseIdentifier(identifier string) (string, int, error) {
 	}
 
 	return identifier, 1, nil
+}
+
+func (h *APIHandler) requestScope(c *gin.Context) (*models.Scope, error) {
+	project := firstNonEmpty(c.PostForm("project"), c.GetHeader("X-IIIF-Project"))
+	tenant := firstNonEmpty(c.PostForm("tenant"), c.GetHeader("X-IIIF-Tenant"))
+	return h.config.ResolveScope(project, tenant)
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return strings.TrimSpace(value)
+		}
+	}
+	return ""
 }

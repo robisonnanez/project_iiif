@@ -33,7 +33,7 @@ func NewPDFService(config *config.Config, storage storage.Storage) *PDFService {
 	}
 }
 
-func (s *PDFService) ProcessPDF(sourcePath string, filename string, settings models.ConversionSettings) (*models.PDFDocument, error) {
+func (s *PDFService) ProcessPDF(sourcePath string, filename string, settings models.ConversionSettings, scope *models.Scope) (*models.PDFDocument, error) {
 	if settings.Format == "" {
 		settings.Format = s.config.Conversion.DefaultFormat
 	}
@@ -42,6 +42,9 @@ func (s *PDFService) ProcessPDF(sourcePath string, filename string, settings mod
 	}
 
 	documentID := uuid.New().String()
+	if scope == nil {
+		scope = &models.Scope{ProjectKey: s.config.Projects.DefaultProject}
+	}
 	pdfPath := ""
 	pdfData, err := os.ReadFile(sourcePath)
 	if err != nil {
@@ -49,7 +52,7 @@ func (s *PDFService) ProcessPDF(sourcePath string, filename string, settings mod
 	}
 
 	if !s.usesDatabaseBlobs() {
-		pdfPath = filepath.Join(s.config.Storage.PDFsPath, documentID+filepath.Ext(filename))
+		pdfPath = filepath.Join(s.scopePath(s.config.Storage.PDFsPath, scope), documentID+filepath.Ext(filename))
 		if err := copyFile(sourcePath, pdfPath); err != nil {
 			return nil, fmt.Errorf("error storing original PDF: %w", err)
 		}
@@ -58,6 +61,8 @@ func (s *PDFService) ProcessPDF(sourcePath string, filename string, settings mod
 	doc := &models.PDFDocument{
 		ID:             documentID,
 		Name:           filename,
+		ProjectKey:     scope.ProjectKey,
+		TenantKey:      scope.TenantKey,
 		UploadDate:     time.Now(),
 		Status:         "processing",
 		FilePath:       pdfPath,
@@ -107,7 +112,7 @@ func (s *PDFService) convertPDFToImages(doc *models.PDFDocument, sourcePath stri
 
 	imageDir := ""
 	if !s.usesDatabaseBlobs() {
-		imageDir = filepath.Join(s.config.Storage.ImagesPath, doc.ID)
+		imageDir = filepath.Join(s.scopePath(s.config.Storage.ImagesPath, &models.Scope{ProjectKey: doc.ProjectKey, TenantKey: doc.TenantKey}), doc.ID)
 		if err := os.MkdirAll(imageDir, 0755); err != nil {
 			doc.Status = "error"
 			s.storage.UpdateDocument(doc)
@@ -145,6 +150,8 @@ func (s *PDFService) convertPDFToImages(doc *models.PDFDocument, sourcePath stri
 		image := &models.DocumentImage{
 			ID:         uuid.New().String(),
 			DocumentID: doc.ID,
+			ProjectKey: doc.ProjectKey,
+			TenantKey:  doc.TenantKey,
 			PageNumber: i + 1,
 			ImagePath:  imagePath,
 			Width:      bounds.Dx(),
@@ -170,7 +177,7 @@ func (s *PDFService) convertPDFToImages(doc *models.PDFDocument, sourcePath stri
 		s.storage.UpdateDocument(doc)
 
 		if i == 0 && !s.usesDatabaseBlobs() {
-			thumbnailPath := filepath.Join(s.config.Storage.ThumbnailsPath, doc.ID+".jpg")
+			thumbnailPath := filepath.Join(s.scopePath(s.config.Storage.ThumbnailsPath, &models.Scope{ProjectKey: doc.ProjectKey, TenantKey: doc.TenantKey}), doc.ID+".jpg")
 			thumbnail := imaging.Resize(pageImage, 200, 0, imaging.Lanczos)
 			if err := s.saveImage(thumbnail, thumbnailPath, models.ConversionSettings{Format: "jpg", Quality: 80}); err == nil {
 				doc.ThumbnailURL = fmt.Sprintf("%s/static/thumbnails/%s.jpg", s.config.IIIF.BaseURL, doc.ID)
@@ -184,6 +191,21 @@ func (s *PDFService) convertPDFToImages(doc *models.PDFDocument, sourcePath stri
 	doc.ManifestURL = fmt.Sprintf("%s/api/iiif/%s/manifest", s.config.IIIF.BaseURL, doc.ID)
 
 	s.storage.UpdateDocument(doc)
+}
+
+func (s *PDFService) scopePath(base string, scope *models.Scope) string {
+	if !s.config.Projects.Enabled || scope == nil || strings.TrimSpace(scope.ProjectKey) == "" {
+		return base
+	}
+	root := s.config.Storage.DataPath
+	rel, err := filepath.Rel(root, base)
+	if err != nil || strings.HasPrefix(rel, "..") {
+		rel = filepath.Base(base)
+	}
+	if strings.TrimSpace(scope.TenantKey) != "" {
+		return filepath.Join(root, "projects", scope.ProjectKey, "tenants", scope.TenantKey, rel)
+	}
+	return filepath.Join(root, "projects", scope.ProjectKey, rel)
 }
 
 func (s *PDFService) encodeImage(img image.Image, settings models.ConversionSettings) ([]byte, string, error) {
