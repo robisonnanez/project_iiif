@@ -62,17 +62,19 @@ func main() {
 	apiHandler := handlers.NewAPIHandler(pdfService, iiifService, documentService, cfg)
 	welcomeHandler := handlers.NewWelcomeHandler(cfg)
 	frontendHandler := handlers.NewFrontendHandler(cfg)
-	adminHandler := handlers.NewAdminHandler(cfg)
+	adminHandler := handlers.NewAdminHandler(cfg, documentService)
+	authHandler := handlers.NewAuthHandler(cfg)
 
 	// Ruta de bienvenida
 	router.GET("/", welcomeHandler.Welcome)
 	router.GET("/health", welcomeHandler.HealthCheck)
+	router.POST("/auth/login", authHandler.Login)
+	router.POST("/auth/logout", authHandler.Logout)
+	router.GET("/auth/me", authHandler.Me)
 
 	if cfg.Frontend.Enabled {
-		auth := dashboardAuth(cfg)
-
 		dashboard := router.Group("/dashboard")
-		dashboard.Use(auth)
+		dashboard.Use(authHandler.RequireSession())
 		{
 			dashboard.GET("", frontendHandler.Dashboard)
 			dashboard.GET("/", frontendHandler.Dashboard)
@@ -80,9 +82,11 @@ func main() {
 		}
 
 		admin := router.Group("/admin/api")
-		admin.Use(auth)
+		admin.Use(authHandler.RequireSession())
 		{
 			admin.GET("/config", adminHandler.GetConfig)
+			admin.PUT("/config", adminHandler.UpdateConfig)
+			admin.GET("/documents/:id/images", adminHandler.GetDocumentImages)
 		}
 	} else {
 		router.GET("/dashboard", frontendHandler.Disabled)
@@ -145,6 +149,7 @@ func createDirectories(cfg *config.Config) {
 		cfg.Storage.ThumbnailsPath,
 		cfg.Storage.ManifestsPath,
 		cfg.PDF.TempPath,
+		cfg.BinaryStorage.TempPath,
 	}
 
 	for _, dir := range dirs {
@@ -160,21 +165,11 @@ func newStorage(cfg *config.Config) (storage.Storage, error) {
 		return storage.NewFileStorage(cfg.Storage.DataPath), nil
 	case "mysql":
 		return storage.NewMySQLStorage(cfg)
+	case "postgres", "postgresql", "mongo", "mongodb":
+		return nil, fmt.Errorf("storage backend %s reconocido pero todavia no implementado", cfg.Storage.Backend)
 	default:
 		return nil, fmt.Errorf("storage backend no soportado: %s", cfg.Storage.Backend)
 	}
-}
-
-func dashboardAuth(cfg *config.Config) gin.HandlerFunc {
-	if !cfg.Frontend.RequireAuth {
-		return func(c *gin.Context) {
-			c.Next()
-		}
-	}
-
-	return gin.BasicAuth(gin.Accounts{
-		cfg.Frontend.Username: cfg.Frontend.Password,
-	})
 }
 
 // isOriginAllowed verifica si un origen está permitido, incluyendo wildcards

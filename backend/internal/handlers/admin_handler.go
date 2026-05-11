@@ -2,22 +2,99 @@ package handlers
 
 import (
 	"net/http"
+	"strconv"
+	"strings"
 
 	"iiif-pdf-server/internal/config"
+	"iiif-pdf-server/internal/services"
 
 	"github.com/gin-gonic/gin"
 )
 
 type AdminHandler struct {
-	config *config.Config
+	config          *config.Config
+	documentService *services.DocumentService
 }
 
-func NewAdminHandler(config *config.Config) *AdminHandler {
-	return &AdminHandler{config: config}
+func NewAdminHandler(config *config.Config, documentService *services.DocumentService) *AdminHandler {
+	return &AdminHandler{config: config, documentService: documentService}
 }
 
 func (h *AdminHandler) GetConfig(c *gin.Context) {
+	c.JSON(http.StatusOK, h.sanitizedConfig())
+}
+
+func (h *AdminHandler) UpdateConfig(c *gin.Context) {
+	// Guarda solo campos permitidos del formulario para evitar sobrescribir secretos o YAML arbitrario.
+	var payload editableConfigPayload
+	if err := c.ShouldBindJSON(&payload); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "configuracion invalida"})
+		return
+	}
+
+	next := *h.config
+	if err := applyEditableConfig(&next, h.config, payload); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	next.SourcePath = h.config.SourcePath
+	next.ApplyDefaults()
+
+	configPath := next.SourcePath
+	if configPath == "" {
+		configPath = "config.yaml"
+	}
+	if err := config.Save(configPath, &next); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "no se pudo guardar config.yaml: " + err.Error()})
+		return
+	}
+
+	*h.config = next
 	c.JSON(http.StatusOK, gin.H{
+		"message":          "Configuracion guardada. Reinicia el servicio para aplicar cambios sensibles.",
+		"requires_restart": true,
+		"config":           h.sanitizedConfig(),
+	})
+}
+
+func (h *AdminHandler) GetDocumentImages(c *gin.Context) {
+	// Expone identificadores IIIF seguros para la galeria sin revelar rutas internas ni BLOBs.
+	documentID := c.Param("id")
+	if _, err := h.documentService.GetDocument(documentID); err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Documento no encontrado"})
+		return
+	}
+
+	images, err := h.documentService.GetDocumentImages(documentID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Error obteniendo imagenes"})
+		return
+	}
+
+	base := strings.TrimRight(h.config.IIIF.BaseURL, "/")
+	items := make([]gin.H, 0, len(images))
+	for _, image := range images {
+		identifier := image.ID
+		servicePath := "/iiif/" + h.config.IIIF.APIVersion + "/" + identifier
+		items = append(items, gin.H{
+			"image_id":    identifier,
+			"document_id": image.DocumentID,
+			"page_number": image.PageNumber,
+			"width":       image.Width,
+			"height":      image.Height,
+			"format":      image.Format,
+			"media_type":  image.MediaType,
+			"byte_size":   image.ByteSize,
+			"iiif_url":    base + servicePath + "/full/max/0/default.jpg",
+			"info_url":    base + servicePath + "/info.json",
+		})
+	}
+
+	c.JSON(http.StatusOK, gin.H{"document_id": documentID, "images": items})
+}
+
+func (h *AdminHandler) sanitizedConfig() gin.H {
+	return gin.H{
 		"server": gin.H{
 			"port": h.config.Server.Port,
 			"mode": h.config.Server.Mode,
@@ -55,6 +132,10 @@ func (h *AdminHandler) GetConfig(c *gin.Context) {
 			"username":     h.config.Frontend.Username,
 			"password":     maskedSecret(h.config.Frontend.Password),
 		},
+		"binary_storage": gin.H{
+			"mode":      h.config.BinaryStorage.Mode,
+			"temp_path": h.config.BinaryStorage.TempPath,
+		},
 		"iiif": gin.H{
 			"base_url":    h.config.IIIF.BaseURL,
 			"api_version": h.config.IIIF.APIVersion,
@@ -62,7 +143,7 @@ func (h *AdminHandler) GetConfig(c *gin.Context) {
 			"max_height":  h.config.IIIF.MaxHeight,
 			"cache":       h.config.IIIF.CacheEnabled,
 		},
-	})
+	}
 }
 
 func maskedSecret(value string) string {
@@ -70,4 +151,149 @@ func maskedSecret(value string) string {
 		return ""
 	}
 	return "********"
+}
+
+type editableConfigPayload struct {
+	Server struct {
+		Port string `json:"port"`
+		Mode string `json:"mode"`
+	} `json:"server"`
+	Storage struct {
+		Backend        string `json:"backend"`
+		DataPath       string `json:"data_path"`
+		PDFsPath       string `json:"pdfs_path"`
+		ImagesPath     string `json:"images_path"`
+		DocumentsPath  string `json:"documents_path"`
+		ThumbnailsPath string `json:"thumbnails_path"`
+		ManifestsPath  string `json:"manifests_path"`
+	} `json:"storage"`
+	Database struct {
+		DBConnection string `json:"DB_CONNECTION"`
+		DBHost       string `json:"DB_HOST"`
+		DBPort       string `json:"DB_PORT"`
+		DBDatabase   string `json:"DB_DATABASE"`
+		DBUsername   string `json:"DB_USERNAME"`
+		DBPassword   string `json:"DB_PASSWORD"`
+		MySQL        struct {
+			Host      string `json:"host"`
+			Port      string `json:"port"`
+			User      string `json:"user"`
+			Password  string `json:"password"`
+			Database  string `json:"database"`
+			Charset   string `json:"charset"`
+			ParseTime bool   `json:"parse_time"`
+		} `json:"mysql"`
+	} `json:"database"`
+	Frontend struct {
+		Enabled     bool   `json:"enabled"`
+		Path        string `json:"path"`
+		RequireAuth bool   `json:"require_auth"`
+		Username    string `json:"username"`
+		Password    string `json:"password"`
+	} `json:"frontend"`
+	BinaryStorage struct {
+		Mode     string `json:"mode"`
+		TempPath string `json:"temp_path"`
+	} `json:"binary_storage"`
+	IIIF struct {
+		BaseURL      string `json:"base_url"`
+		APIVersion   string `json:"api_version"`
+		MaxWidth     int    `json:"max_width"`
+		MaxHeight    int    `json:"max_height"`
+		CacheEnabled bool   `json:"cache"`
+		CacheTTL     int    `json:"cache_ttl"`
+	} `json:"iiif"`
+}
+
+func applyEditableConfig(next, current *config.Config, payload editableConfigPayload) error {
+	if err := validatePort(payload.Server.Port, "server.port"); err != nil {
+		return err
+	}
+	if err := validatePort(payload.Database.DBPort, "DB_PORT"); err != nil {
+		return err
+	}
+	if err := validatePort(payload.Database.MySQL.Port, "database.mysql.port"); err != nil {
+		return err
+	}
+	if !allowedValue(payload.Storage.Backend, "local", "mysql", "postgres", "postgresql", "mongo", "mongodb") {
+		return &configError{"storage.backend debe ser local, mysql, postgres, postgresql, mongo o mongodb"}
+	}
+	if !allowedValue(payload.BinaryStorage.Mode, "local", "database") {
+		return &configError{"binary_storage.mode debe ser local o database"}
+	}
+	if payload.IIIF.MaxWidth <= 0 || payload.IIIF.MaxHeight <= 0 {
+		return &configError{"iiif.max_width y iiif.max_height deben ser mayores que cero"}
+	}
+
+	next.Server.Port = payload.Server.Port
+	next.Server.Mode = payload.Server.Mode
+	next.Storage.Backend = payload.Storage.Backend
+	next.Storage.DataPath = payload.Storage.DataPath
+	next.Storage.PDFsPath = payload.Storage.PDFsPath
+	next.Storage.ImagesPath = payload.Storage.ImagesPath
+	next.Storage.DocumentsPath = payload.Storage.DocumentsPath
+	next.Storage.ThumbnailsPath = payload.Storage.ThumbnailsPath
+	next.Storage.ManifestsPath = payload.Storage.ManifestsPath
+
+	next.Database.MySQL.Host = payload.Database.MySQL.Host
+	next.Database.MySQL.Port = payload.Database.MySQL.Port
+	next.Database.MySQL.User = payload.Database.MySQL.User
+	next.Database.MySQL.Password = secretOrCurrent(payload.Database.MySQL.Password, current.Database.MySQL.Password)
+	next.Database.MySQL.Database = payload.Database.MySQL.Database
+	next.Database.MySQL.Charset = payload.Database.MySQL.Charset
+	next.Database.MySQL.ParseTime = payload.Database.MySQL.ParseTime
+
+	next.DBConnection = payload.Database.DBConnection
+	next.DBHost = payload.Database.DBHost
+	next.DBPort = payload.Database.DBPort
+	next.DBDatabase = payload.Database.DBDatabase
+	next.DBUsername = payload.Database.DBUsername
+	next.DBPassword = secretOrCurrent(payload.Database.DBPassword, current.DBPassword)
+
+	next.Frontend.Enabled = payload.Frontend.Enabled
+	next.Frontend.Path = payload.Frontend.Path
+	next.Frontend.RequireAuth = payload.Frontend.RequireAuth
+	next.Frontend.Username = payload.Frontend.Username
+	next.Frontend.Password = secretOrCurrent(payload.Frontend.Password, current.Frontend.Password)
+	next.BinaryStorage.Mode = payload.BinaryStorage.Mode
+	next.BinaryStorage.TempPath = payload.BinaryStorage.TempPath
+	next.IIIF.BaseURL = payload.IIIF.BaseURL
+	next.IIIF.APIVersion = payload.IIIF.APIVersion
+	next.IIIF.MaxWidth = payload.IIIF.MaxWidth
+	next.IIIF.MaxHeight = payload.IIIF.MaxHeight
+	next.IIIF.CacheEnabled = payload.IIIF.CacheEnabled
+	next.IIIF.CacheTTL = payload.IIIF.CacheTTL
+	return nil
+}
+
+func validatePort(value, field string) error {
+	port, err := strconv.Atoi(value)
+	if err != nil || port < 1 || port > 65535 {
+		return &configError{field + " debe ser un puerto entre 1 y 65535"}
+	}
+	return nil
+}
+
+func allowedValue(value string, allowed ...string) bool {
+	for _, item := range allowed {
+		if strings.EqualFold(value, item) {
+			return true
+		}
+	}
+	return false
+}
+
+func secretOrCurrent(value, current string) string {
+	if value == maskedSecret(current) {
+		return current
+	}
+	return value
+}
+
+type configError struct {
+	message string
+}
+
+func (e *configError) Error() string {
+	return e.message
 }

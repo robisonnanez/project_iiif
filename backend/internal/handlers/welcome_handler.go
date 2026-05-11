@@ -23,7 +23,7 @@ func NewWelcomeHandler(config *config.Config) *WelcomeHandler {
 func (h *WelcomeHandler) Welcome(c *gin.Context) {
 	loginButton := ""
 	if h.config.Frontend.Enabled {
-		loginButton = `<a class="button" href="/dashboard">Iniciar sesion</a>`
+		loginButton = `<button class="button" id="login-open" type="button">Iniciar sesion</button>`
 	}
 
 	htmlBody := fmt.Sprintf(`<!DOCTYPE html>
@@ -86,7 +86,39 @@ func (h *WelcomeHandler) Welcome(c *gin.Context) {
             text-decoration: none;
             font-weight: 700;
             white-space: nowrap;
+            border: 0;
+            cursor: pointer;
         }
+        .modal-backdrop {
+            position: fixed;
+            inset: 0;
+            display: none;
+            align-items: center;
+            justify-content: center;
+            background: rgba(15, 23, 42, 0.45);
+            padding: 20px;
+        }
+        .modal-backdrop.open { display: flex; }
+        .modal {
+            width: min(420px, 100%%);
+            background: white;
+            border-radius: 8px;
+            border: 1px solid #dbe3ef;
+            padding: 22px;
+            box-shadow: 0 24px 70px rgba(15, 23, 42, 0.25);
+        }
+        .modal h2 { margin: 0 0 12px; font-size: 22px; }
+        .modal label { display: grid; gap: 6px; margin: 12px 0; color: #526173; font-size: 14px; }
+        .modal input {
+            min-height: 40px;
+            border: 1px solid #cfd9e6;
+            border-radius: 6px;
+            padding: 0 10px;
+            font: inherit;
+        }
+        .modal-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 16px; }
+        .button.secondary { color: #1f2937; background: #eef3f8; }
+        .login-error { color: #b91c1c; min-height: 20px; font-size: 14px; }
         .grid {
             display: grid;
             grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -174,6 +206,62 @@ func (h *WelcomeHandler) Welcome(c *gin.Context) {
         </section>
         <p class="footer">Compatible con IIIF Image API 3.0 y Presentation API 3.0.</p>
     </main>
+    <div class="modal-backdrop" id="login-modal" aria-hidden="true">
+        <form class="modal" id="login-form">
+            <h2>Iniciar sesion</h2>
+            <p>Ingresa con el usuario y password configurados en config.yaml.</p>
+            <label>Usuario
+                <input id="login-username" name="username" autocomplete="username" required>
+            </label>
+            <label>Password
+                <input id="login-password" name="password" type="password" autocomplete="current-password" required>
+            </label>
+            <div class="login-error" id="login-error"></div>
+            <div class="modal-actions">
+                <button class="button secondary" id="login-cancel" type="button">Cancelar</button>
+                <button class="button" type="submit">Ingresar</button>
+            </div>
+        </form>
+    </div>
+    <script>
+        const openButton = document.getElementById("login-open");
+        const modal = document.getElementById("login-modal");
+        const form = document.getElementById("login-form");
+        const cancel = document.getElementById("login-cancel");
+        const error = document.getElementById("login-error");
+
+        function closeModal() {
+            modal?.classList.remove("open");
+            if (error) error.textContent = "";
+        }
+
+        openButton?.addEventListener("click", () => {
+            modal.classList.add("open");
+            document.getElementById("login-username")?.focus();
+        });
+        cancel?.addEventListener("click", closeModal);
+        modal?.addEventListener("click", (event) => {
+            if (event.target === modal) closeModal();
+        });
+        form?.addEventListener("submit", async (event) => {
+            event.preventDefault();
+            error.textContent = "";
+            const response = await fetch("/auth/login", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    username: document.getElementById("login-username").value,
+                    password: document.getElementById("login-password").value
+                })
+            });
+            if (response.ok) {
+                window.location.href = "/dashboard";
+                return;
+            }
+            const data = await response.json().catch(() => ({}));
+            error.textContent = data.error || "No se pudo iniciar sesion";
+        });
+    </script>
 </body>
 </html>`,
 		html.EscapeString(h.config.IIIF.BaseURL),

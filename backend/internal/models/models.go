@@ -23,7 +23,16 @@ type DocumentImage struct {
 	Width      int       `json:"width"`
 	Height     int       `json:"height"`
 	Format     string    `json:"format"`
+	MediaType  string    `json:"mediaType,omitempty"`
+	ByteSize   int64     `json:"byteSize,omitempty"`
 	CreatedAt  time.Time `json:"createdAt"`
+}
+
+type BinaryAsset struct {
+	ID        string `json:"id"`
+	Data      []byte `json:"-"`
+	MediaType string `json:"mediaType"`
+	ByteSize  int64  `json:"byteSize"`
 }
 
 type ConversionSettings struct {

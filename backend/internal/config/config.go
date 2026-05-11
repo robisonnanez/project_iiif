@@ -2,11 +2,14 @@ package config
 
 import (
 	"os"
+	"path/filepath"
 
 	"gopkg.in/yaml.v2"
 )
 
 type Config struct {
+	SourcePath string `yaml:"-"`
+
 	StorageBackend string `yaml:"STORAGE_BACKEND"`
 	DBConnection   string `yaml:"DB_CONNECTION"`
 	DBHost         string `yaml:"DB_HOST"`
@@ -47,6 +50,11 @@ type Config struct {
 		AllowedFormats []string `yaml:"allowed_formats"`
 		TempPath       string   `yaml:"temp_path"`
 	} `yaml:"pdf"`
+
+	BinaryStorage struct {
+		Mode     string `yaml:"mode"`
+		TempPath string `yaml:"temp_path"`
+	} `yaml:"binary_storage"`
 
 	IIIF struct {
 		BaseURL      string `yaml:"base_url"`
@@ -103,7 +111,52 @@ func Load(filename string) (*Config, error) {
 	}
 
 	applyDefaults(&config)
+	config.SourcePath = resolvedPath(filename)
 	return &config, nil
+}
+
+func Save(filename string, config *Config) error {
+	applyDefaults(config)
+	data, err := yaml.Marshal(config)
+	if err != nil {
+		return err
+	}
+	tempFile, err := os.CreateTemp(filepath.Dir(filename), ".config-*.yaml")
+	if err != nil {
+		return err
+	}
+	tempName := tempFile.Name()
+	if _, err := tempFile.Write(data); err != nil {
+		tempFile.Close()
+		os.Remove(tempName)
+		return err
+	}
+	if err := tempFile.Chmod(0600); err != nil {
+		tempFile.Close()
+		os.Remove(tempName)
+		return err
+	}
+	if err := tempFile.Close(); err != nil {
+		os.Remove(tempName)
+		return err
+	}
+	return os.Rename(tempName, filename)
+}
+
+func resolvedPath(filename string) string {
+	absolute, err := filepath.Abs(filename)
+	if err != nil {
+		absolute = filename
+	}
+	resolved, err := filepath.EvalSymlinks(absolute)
+	if err != nil {
+		return absolute
+	}
+	return resolved
+}
+
+func (config *Config) ApplyDefaults() {
+	applyDefaults(config)
 }
 
 func applyDefaults(config *Config) {
@@ -164,6 +217,16 @@ func applyDefaults(config *Config) {
 	}
 	if config.Database.MySQL.Charset == "" {
 		config.Database.MySQL.Charset = defaults.Database.MySQL.Charset
+	}
+	if config.BinaryStorage.Mode == "" {
+		if config.Storage.Backend == "local" {
+			config.BinaryStorage.Mode = "local"
+		} else {
+			config.BinaryStorage.Mode = defaults.BinaryStorage.Mode
+		}
+	}
+	if config.BinaryStorage.TempPath == "" {
+		config.BinaryStorage.TempPath = defaults.BinaryStorage.TempPath
 	}
 	if config.Frontend.Path == "" {
 		config.Frontend.Path = defaults.Frontend.Path
@@ -246,6 +309,13 @@ func Default() *Config {
 			MaxFileSize:    100 * 1024 * 1024, // 100MB
 			AllowedFormats: []string{"pdf"},
 			TempPath:       "./data/temp",
+		},
+		BinaryStorage: struct {
+			Mode     string `yaml:"mode"`
+			TempPath string `yaml:"temp_path"`
+		}{
+			Mode:     "database",
+			TempPath: "./data/temp",
 		},
 		IIIF: struct {
 			BaseURL      string `yaml:"base_url"`

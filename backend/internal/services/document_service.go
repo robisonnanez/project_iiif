@@ -23,6 +23,10 @@ func (s *DocumentService) GetDocument(id string) (*models.PDFDocument, error) {
 	return s.storage.GetDocument(id)
 }
 
+func (s *DocumentService) GetDocumentImages(id string) ([]*models.DocumentImage, error) {
+	return s.storage.GetDocumentImages(id)
+}
+
 func (s *DocumentService) DeleteDocument(id string) error {
 	return s.storage.DeleteDocument(id)
 }

@@ -70,14 +70,14 @@ func (ms *MySQLStorage) GetDocument(id string) (*models.PDFDocument, error) {
 	`, id)
 
 	doc := &models.PDFDocument{}
-	var thumbnailPath, manifestURL sql.NullString
+	var pdfPath, thumbnailPath, manifestURL sql.NullString
 	if err := row.Scan(
 		&doc.ID,
 		&doc.Name,
 		&doc.Status,
 		&doc.TotalPages,
 		&doc.ConvertedPages,
-		&doc.FilePath,
+		&pdfPath,
 		&thumbnailPath,
 		&manifestURL,
 		&doc.UploadDate,
@@ -85,6 +85,7 @@ func (ms *MySQLStorage) GetDocument(id string) (*models.PDFDocument, error) {
 		return nil, fmt.Errorf("document not found: %w", err)
 	}
 
+	doc.FilePath = pdfPath.String
 	doc.ThumbnailURL = thumbnailPath.String
 	doc.ManifestURL = manifestURL.String
 	doc.ImagePaths = ms.getImagePaths(doc.ID)
@@ -105,20 +106,21 @@ func (ms *MySQLStorage) GetAllDocuments() ([]*models.PDFDocument, error) {
 	var docs []*models.PDFDocument
 	for rows.Next() {
 		doc := &models.PDFDocument{}
-		var thumbnailPath, manifestURL sql.NullString
+		var pdfPath, thumbnailPath, manifestURL sql.NullString
 		if err := rows.Scan(
 			&doc.ID,
 			&doc.Name,
 			&doc.Status,
 			&doc.TotalPages,
 			&doc.ConvertedPages,
-			&doc.FilePath,
+			&pdfPath,
 			&thumbnailPath,
 			&manifestURL,
 			&doc.UploadDate,
 		); err != nil {
 			return nil, err
 		}
+		doc.FilePath = pdfPath.String
 		doc.ThumbnailURL = thumbnailPath.String
 		doc.ManifestURL = manifestURL.String
 		doc.ImagePaths = ms.getImagePaths(doc.ID)
@@ -146,29 +148,49 @@ func (ms *MySQLStorage) DeleteDocument(id string) error {
 	return nil
 }
 
+func (ms *MySQLStorage) SaveDocumentPDF(documentID string, data []byte, mediaType string) error {
+	_, err := ms.db.Exec(`
+		UPDATE documents
+		SET pdf_blob = ?, pdf_media_type = ?, pdf_size = ?
+		WHERE id = ?
+	`, data, mediaType, len(data), documentID)
+	return err
+}
+
 func (ms *MySQLStorage) SaveDocumentImage(image *models.DocumentImage) error {
 	if image.CreatedAt.IsZero() {
 		image.CreatedAt = time.Now()
 	}
 
 	_, err := ms.db.Exec(`
-		INSERT INTO document_images (id, document_id, page_number, image_path, width, height, format, created_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+		INSERT INTO document_images (id, document_id, page_number, image_path, width, height, format, media_type, byte_size, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON DUPLICATE KEY UPDATE
 			document_id = VALUES(document_id),
 			page_number = VALUES(page_number),
 			image_path = VALUES(image_path),
 			width = VALUES(width),
 			height = VALUES(height),
-			format = VALUES(format)
-	`, image.ID, image.DocumentID, image.PageNumber, image.ImagePath, image.Width, image.Height, image.Format, image.CreatedAt)
+			format = VALUES(format),
+			media_type = VALUES(media_type),
+			byte_size = VALUES(byte_size)
+	`, image.ID, image.DocumentID, image.PageNumber, nullString(image.ImagePath), image.Width, image.Height, image.Format, nullString(image.MediaType), image.ByteSize, image.CreatedAt)
 
+	return err
+}
+
+func (ms *MySQLStorage) SaveDocumentImageData(imageID string, data []byte, mediaType string) error {
+	_, err := ms.db.Exec(`
+		UPDATE document_images
+		SET image_blob = ?, media_type = ?, byte_size = ?
+		WHERE id = ?
+	`, data, mediaType, len(data), imageID)
 	return err
 }
 
 func (ms *MySQLStorage) GetDocumentImage(id string) (*models.DocumentImage, error) {
 	row := ms.db.QueryRow(`
-		SELECT id, document_id, page_number, image_path, width, height, format, created_at
+		SELECT id, document_id, page_number, image_path, width, height, format, media_type, byte_size, created_at
 		FROM document_images
 		WHERE id = ?
 	`, id)
@@ -177,11 +199,61 @@ func (ms *MySQLStorage) GetDocumentImage(id string) (*models.DocumentImage, erro
 
 func (ms *MySQLStorage) GetDocumentImageByPage(documentID string, page int) (*models.DocumentImage, error) {
 	row := ms.db.QueryRow(`
-		SELECT id, document_id, page_number, image_path, width, height, format, created_at
+		SELECT id, document_id, page_number, image_path, width, height, format, media_type, byte_size, created_at
 		FROM document_images
 		WHERE document_id = ? AND page_number = ?
 	`, documentID, page)
 	return scanDocumentImage(row)
+}
+
+func (ms *MySQLStorage) GetDocumentImages(documentID string) ([]*models.DocumentImage, error) {
+	// Entrega las paginas del documento ordenadas para la galeria administrativa.
+	rows, err := ms.db.Query(`
+		SELECT id, document_id, page_number, image_path, width, height, format, media_type, byte_size, created_at
+		FROM document_images
+		WHERE document_id = ?
+		ORDER BY page_number
+	`, documentID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var images []*models.DocumentImage
+	for rows.Next() {
+		image, err := scanDocumentImageRows(rows)
+		if err != nil {
+			return nil, err
+		}
+		images = append(images, image)
+	}
+	return images, rows.Err()
+}
+
+func (ms *MySQLStorage) GetDocumentImageData(id string) (*models.BinaryAsset, error) {
+	row := ms.db.QueryRow(`
+		SELECT id, image_blob, media_type, byte_size
+		FROM document_images
+		WHERE id = ?
+	`, id)
+
+	asset := &models.BinaryAsset{}
+	var data []byte
+	var mediaType sql.NullString
+	var byteSize sql.NullInt64
+	if err := row.Scan(&asset.ID, &data, &mediaType, &byteSize); err != nil {
+		return nil, fmt.Errorf("image blob not found: %w", err)
+	}
+	if len(data) == 0 {
+		return nil, fmt.Errorf("image blob is empty")
+	}
+	asset.Data = data
+	asset.MediaType = mediaType.String
+	asset.ByteSize = byteSize.Int64
+	if asset.ByteSize == 0 {
+		asset.ByteSize = int64(len(data))
+	}
+	return asset, nil
 }
 
 func (ms *MySQLStorage) upsertDocument(doc *models.PDFDocument) error {
@@ -201,13 +273,13 @@ func (ms *MySQLStorage) upsertDocument(doc *models.PDFDocument) error {
 			thumbnail_path = VALUES(thumbnail_path),
 			manifest_url = VALUES(manifest_url),
 			updated_at = NOW()
-	`, doc.ID, doc.Name, doc.Status, doc.TotalPages, doc.ConvertedPages, doc.FilePath, nullString(doc.ThumbnailURL), nullString(doc.ManifestURL), doc.UploadDate)
+	`, doc.ID, doc.Name, doc.Status, doc.TotalPages, doc.ConvertedPages, nullString(doc.FilePath), nullString(doc.ThumbnailURL), nullString(doc.ManifestURL), doc.UploadDate)
 
 	return err
 }
 
 func (ms *MySQLStorage) getImagePaths(documentID string) []string {
-	rows, err := ms.db.Query("SELECT image_path FROM document_images WHERE document_id = ? ORDER BY page_number", documentID)
+	rows, err := ms.db.Query("SELECT image_path FROM document_images WHERE document_id = ? AND image_path IS NOT NULL ORDER BY page_number", documentID)
 	if err != nil {
 		return nil
 	}
@@ -225,18 +297,49 @@ func (ms *MySQLStorage) getImagePaths(documentID string) []string {
 
 func scanDocumentImage(row *sql.Row) (*models.DocumentImage, error) {
 	image := &models.DocumentImage{}
+	var imagePath, mediaType sql.NullString
+	var byteSize sql.NullInt64
 	if err := row.Scan(
 		&image.ID,
 		&image.DocumentID,
 		&image.PageNumber,
-		&image.ImagePath,
+		&imagePath,
 		&image.Width,
 		&image.Height,
 		&image.Format,
+		&mediaType,
+		&byteSize,
 		&image.CreatedAt,
 	); err != nil {
 		return nil, fmt.Errorf("image not found: %w", err)
 	}
+	image.ImagePath = imagePath.String
+	image.MediaType = mediaType.String
+	image.ByteSize = byteSize.Int64
+	return image, nil
+}
+
+func scanDocumentImageRows(rows *sql.Rows) (*models.DocumentImage, error) {
+	image := &models.DocumentImage{}
+	var imagePath, mediaType sql.NullString
+	var byteSize sql.NullInt64
+	if err := rows.Scan(
+		&image.ID,
+		&image.DocumentID,
+		&image.PageNumber,
+		&imagePath,
+		&image.Width,
+		&image.Height,
+		&image.Format,
+		&mediaType,
+		&byteSize,
+		&image.CreatedAt,
+	); err != nil {
+		return nil, err
+	}
+	image.ImagePath = imagePath.String
+	image.MediaType = mediaType.String
+	image.ByteSize = byteSize.Int64
 	return image, nil
 }
 

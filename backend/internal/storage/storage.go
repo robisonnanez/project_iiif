@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"iiif-pdf-server/internal/models"
 )
@@ -15,9 +16,13 @@ type Storage interface {
 	GetAllDocuments() ([]*models.PDFDocument, error)
 	DeleteDocument(id string) error
 	UpdateDocument(doc *models.PDFDocument) error
+	SaveDocumentPDF(documentID string, data []byte, mediaType string) error
 	SaveDocumentImage(image *models.DocumentImage) error
+	SaveDocumentImageData(imageID string, data []byte, mediaType string) error
 	GetDocumentImage(id string) (*models.DocumentImage, error)
 	GetDocumentImageByPage(documentID string, page int) (*models.DocumentImage, error)
+	GetDocumentImages(documentID string) ([]*models.DocumentImage, error)
+	GetDocumentImageData(id string) (*models.BinaryAsset, error)
 }
 
 type FileStorage struct {
@@ -110,6 +115,10 @@ func (fs *FileStorage) UpdateDocument(doc *models.PDFDocument) error {
 	return fs.SaveDocument(doc)
 }
 
+func (fs *FileStorage) SaveDocumentPDF(documentID string, data []byte, mediaType string) error {
+	return nil
+}
+
 func (fs *FileStorage) SaveDocumentImage(image *models.DocumentImage) error {
 	imageDir := filepath.Join(fs.basePath, "images", image.DocumentID)
 	if err := os.MkdirAll(imageDir, 0755); err != nil {
@@ -123,6 +132,10 @@ func (fs *FileStorage) SaveDocumentImage(image *models.DocumentImage) error {
 	}
 
 	return os.WriteFile(imagePath, data, 0664)
+}
+
+func (fs *FileStorage) SaveDocumentImageData(imageID string, data []byte, mediaType string) error {
+	return nil
 }
 
 func (fs *FileStorage) GetDocumentImage(id string) (*models.DocumentImage, error) {
@@ -160,7 +173,58 @@ func (fs *FileStorage) GetDocumentImageByPage(documentID string, page int) (*mod
 		DocumentID: documentID,
 		PageNumber: page,
 		ImagePath:  imagePath,
-		Format:     filepath.Ext(imagePath),
+		Format:     normalizeFormat(filepath.Ext(imagePath)),
+	}, nil
+}
+
+func (fs *FileStorage) GetDocumentImages(documentID string) ([]*models.DocumentImage, error) {
+	// Lista las paginas convertidas para que el dashboard pueda construir URLs IIIF sin tocar rutas internas.
+	imagesDir := filepath.Join(fs.basePath, "images", documentID)
+	files, err := os.ReadDir(imagesDir)
+	if err == nil {
+		var images []*models.DocumentImage
+		for _, file := range files {
+			if file.IsDir() || filepath.Ext(file.Name()) != ".json" {
+				continue
+			}
+			id := strings.TrimSuffix(file.Name(), ".json")
+			image, err := fs.GetDocumentImage(id)
+			if err == nil {
+				images = append(images, image)
+			}
+		}
+		return images, nil
+	}
+
+	doc, err := fs.GetDocument(documentID)
+	if err != nil {
+		return nil, err
+	}
+
+	images := make([]*models.DocumentImage, 0, len(doc.ImagePaths))
+	for index := range doc.ImagePaths {
+		image, err := fs.GetDocumentImageByPage(documentID, index+1)
+		if err == nil {
+			images = append(images, image)
+		}
+	}
+	return images, nil
+}
+
+func (fs *FileStorage) GetDocumentImageData(id string) (*models.BinaryAsset, error) {
+	image, err := fs.GetDocumentImage(id)
+	if err != nil {
+		return nil, err
+	}
+	data, err := os.ReadFile(image.ImagePath)
+	if err != nil {
+		return nil, err
+	}
+	return &models.BinaryAsset{
+		ID:        id,
+		Data:      data,
+		MediaType: mediaTypeForFormat(image.Format),
+		ByteSize:  int64(len(data)),
 	}, nil
 }
 
@@ -184,4 +248,25 @@ func (fs *FileStorage) findImageMetadata(id string) (string, error) {
 		return "", fmt.Errorf("image metadata not found")
 	}
 	return found, nil
+}
+
+func mediaTypeForFormat(format string) string {
+	switch normalizeFormat(format) {
+	case "png":
+		return "image/png"
+	case "webp":
+		return "image/webp"
+	default:
+		return "image/jpeg"
+	}
+}
+
+func normalizeFormat(format string) string {
+	if len(format) > 0 && format[0] == '.' {
+		format = format[1:]
+	}
+	if format == "jpeg" {
+		return "jpg"
+	}
+	return format
 }

@@ -33,6 +33,8 @@ body {
   background: #102033;
   color: #fff;
   padding: 24px 18px;
+  display: flex;
+  flex-direction: column;
 }
 
 .brand {
@@ -64,7 +66,8 @@ body {
   gap: 8px;
 }
 
-.nav-item {
+.nav-item,
+.logout-button {
   border: 0;
   border-radius: 6px;
   padding: 12px 14px;
@@ -79,6 +82,17 @@ body {
 .nav-item.active {
   background: rgba(255, 255, 255, 0.1);
   color: #fff;
+}
+
+.logout-button {
+  margin-top: auto;
+  width: 100%;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  color: #fff;
+}
+
+.logout-button:hover {
+  background: rgba(255, 255, 255, 0.12);
 }
 
 .content {
@@ -111,7 +125,8 @@ p {
 }
 
 button,
-input {
+input,
+select {
   font: inherit;
 }
 
@@ -186,14 +201,36 @@ input {
   align-items: center;
 }
 
-.file-picker {
+.file-picker,
+.field {
   display: grid;
   gap: 8px;
   color: var(--muted);
 }
 
-.file-picker input {
-  min-width: min(420px, 100%);
+.file-picker input,
+.field input,
+.field select {
+  width: 100%;
+  min-width: 0;
+}
+
+.field input,
+.field select {
+  min-height: 40px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 0 10px;
+  color: var(--text);
+  background: #fff;
+}
+
+.toolbar-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: end;
+  margin-bottom: 18px;
 }
 
 .result {
@@ -267,11 +304,130 @@ td code {
   background: #fbfdff;
 }
 
+.config-card legend {
+  padding: 0 6px;
+  font-weight: 800;
+}
+
 .config-card pre {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   margin: 0;
   color: #334155;
+}
+
+.config-form {
+  display: grid;
+  gap: 16px;
+}
+
+.form-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 18px;
+}
+
+.config-form .config-card {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 14px;
+  align-content: start;
+  padding: 18px;
+}
+
+.check-field {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  color: var(--muted);
+  min-height: 32px;
+}
+
+.check-field input {
+  width: auto;
+  margin: 0;
+}
+
+.form-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+}
+
+.muted {
+  color: var(--muted);
+}
+
+.images-table-wrap {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.images-table {
+  min-width: 980px;
+}
+
+.images-table th,
+.images-table td {
+  vertical-align: middle;
+}
+
+.thumb-link {
+  display: block;
+  width: 86px;
+  height: 96px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #e5edf7;
+  overflow: hidden;
+}
+
+.image-thumb {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: contain;
+}
+
+.iiif-url {
+  display: block;
+  max-width: 360px;
+  overflow-wrap: anywhere;
+}
+
+.table-action {
+  display: inline-flex;
+  align-items: center;
+  min-height: 34px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #fff;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.toast-stack {
+  position: fixed;
+  right: 20px;
+  bottom: 20px;
+  display: grid;
+  gap: 10px;
+  width: min(360px, calc(100vw - 40px));
+  z-index: 20;
+}
+
+.toast {
+  border-radius: 8px;
+  padding: 14px 16px;
+  color: #fff;
+  background: #166534;
+  box-shadow: 0 16px 42px rgba(15, 23, 42, 0.2);
+}
+
+.toast.error {
+  background: var(--danger);
 }
 
 a {
@@ -292,7 +448,8 @@ a {
   }
 
   .metrics,
-  .config-grid {
+  .config-grid,
+  .form-grid {
     grid-template-columns: 1fr;
   }
 

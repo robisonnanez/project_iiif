@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Project IIIF Dashboard</title>
-  <link rel="stylesheet" href="/dashboard/assets/styles.css">
+  <link rel="stylesheet" href="/dashboard/assets/styles.css?v=20260508-compact-config-images">
 </head>
 <body>
   <div class="app">
@@ -20,8 +20,10 @@
         <button class="nav-item active" data-view="summary">Inicio</button>
         <button class="nav-item" data-view="upload">Subir PDF</button>
         <button class="nav-item" data-view="documents">Documentos</button>
+        <button class="nav-item" data-view="images">Imagenes</button>
         <button class="nav-item" data-view="config">Configuracion</button>
       </nav>
+      <button class="logout-button" id="logout-button" type="button">Cerrar sesion</button>
     </aside>
 
     <main class="content">
@@ -88,15 +90,30 @@
         </div>
       </section>
 
+      <section class="view" id="images-view">
+        <div class="panel">
+          <h2>Imagenes IIIF</h2>
+          <div class="toolbar-row">
+            <label class="field">
+              <span>Documento</span>
+              <select id="images-document"></select>
+            </label>
+            <button class="secondary" id="load-images-button" type="button">Cargar imagenes</button>
+          </div>
+          <div id="images-gallery" class="image-gallery empty">Selecciona un documento completado.</div>
+        </div>
+      </section>
+
       <section class="view" id="config-view">
         <div class="panel">
           <h2>Configuracion activa</h2>
-          <div id="config-output" class="config-grid"></div>
+          <form id="config-form" class="config-form"></form>
         </div>
       </section>
     </main>
   </div>
+  <div class="toast-stack" id="toast-stack" aria-live="polite"></div>
 
-  <script src="/dashboard/assets/app.js"></script>
+  <script src="/dashboard/assets/app.js?v=20260508-compact-config-images"></script>
 </body>
 </html>

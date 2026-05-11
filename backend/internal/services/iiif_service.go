@@ -1,6 +1,7 @@
 package services
 
 import (
+	"bytes"
 	"fmt"
 	"image"
 	"image/jpeg"
@@ -193,15 +194,7 @@ func (s *IIIFService) GetImageWithRegion(documentID string, page int, region, si
 	if err != nil {
 		return nil, "", err
 	}
-	imagePath := docImage.ImagePath
-
-	// Verificar si el archivo existe
-	if _, err := os.Stat(imagePath); os.IsNotExist(err) {
-		return nil, "", fmt.Errorf("image not found: %s", imagePath)
-	}
-
-	// Abrir imagen
-	img, err := imaging.Open(imagePath)
+	img, err := s.openImage(docImage)
 	if err != nil {
 		return nil, "", fmt.Errorf("error opening image: %w", err)
 	}
@@ -220,49 +213,31 @@ func (s *IIIFService) GetImageWithRegion(documentID string, page int, region, si
 	}
 
 	// Crear archivo temporal para la respuesta
-	tempFile, err := os.CreateTemp("", "iiif_*.jpg")
-	if err != nil {
-		return nil, "", err
-	}
-	defer os.Remove(tempFile.Name())
-	defer tempFile.Close()
+	var encoded bytes.Buffer
 
 	// Codificar imagen según formato
 	contentType := "image/jpeg"
 	switch format {
 	case "jpg", "jpeg":
-		if err := jpeg.Encode(tempFile, img, &jpeg.Options{Quality: 90}); err != nil {
+		if err := jpeg.Encode(&encoded, img, &jpeg.Options{Quality: 90}); err != nil {
 			return nil, "", err
 		}
 		contentType = "image/jpeg"
 	case "png":
 		// Para PNG necesitarías importar image/png
-		if err := jpeg.Encode(tempFile, img, &jpeg.Options{Quality: 90}); err != nil {
+		if err := jpeg.Encode(&encoded, img, &jpeg.Options{Quality: 90}); err != nil {
 			return nil, "", err
 		}
 		contentType = "image/jpeg" // Fallback a JPEG
 	default:
-		if err := jpeg.Encode(tempFile, img, &jpeg.Options{Quality: 90}); err != nil {
+		if err := jpeg.Encode(&encoded, img, &jpeg.Options{Quality: 90}); err != nil {
 			return nil, "", err
 		}
 		contentType = "image/jpeg"
 	}
 
 	// Leer archivo
-	tempFile.Seek(0, 0)
-	data := make([]byte, 0)
-	buffer := make([]byte, 1024)
-	for {
-		n, err := tempFile.Read(buffer)
-		if n > 0 {
-			data = append(data, buffer[:n]...)
-		}
-		if err != nil {
-			break
-		}
-	}
-
-	return data, contentType, nil
+	return encoded.Bytes(), contentType, nil
 }
 
 func (s *IIIFService) processRegion(img image.Image, region string) image.Image {
@@ -346,7 +321,7 @@ func (s *IIIFService) getImageDimensions(documentID string, page int) (int, int)
 		if image.Width > 0 && image.Height > 0 {
 			return image.Width, image.Height
 		}
-		img, err := imaging.Open(image.ImagePath)
+		img, err := s.openImage(image)
 		if err != nil {
 			return 0, 0
 		}
@@ -463,4 +438,18 @@ func imageDimensions(imagePath string) (int, int) {
 	}
 	bounds := img.Bounds()
 	return bounds.Dx(), bounds.Dy()
+}
+
+func (s *IIIFService) openImage(docImage *models.DocumentImage) (image.Image, error) {
+	asset, err := s.storage.GetDocumentImageData(docImage.ID)
+	if err == nil && len(asset.Data) > 0 {
+		return imaging.Decode(bytes.NewReader(asset.Data))
+	}
+	if docImage.ImagePath == "" {
+		return nil, fmt.Errorf("image blob not found")
+	}
+	if _, err := os.Stat(docImage.ImagePath); os.IsNotExist(err) {
+		return nil, fmt.Errorf("image not found: %s", docImage.ImagePath)
+	}
+	return imaging.Open(docImage.ImagePath)
 }

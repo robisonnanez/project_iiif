@@ -43,6 +43,10 @@ pdf:
     - "pdf"
   temp_path: "./data/temp"
 
+binary_storage:
+  mode: "local"
+  temp_path: "./data/temp"
+
 iiif:
   base_url: "https://tu-dominio.com"
   api_version: "3"
