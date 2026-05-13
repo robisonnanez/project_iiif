@@ -2,8 +2,10 @@ package handlers
 
 import (
 	"fmt"
-	"iiif-pdf-server/internal/config"
+	"html"
 	"net/http"
+
+	"iiif-pdf-server/internal/config"
 
 	"github.com/gin-gonic/gin"
 )
@@ -19,276 +21,261 @@ func NewWelcomeHandler(config *config.Config) *WelcomeHandler {
 }
 
 func (h *WelcomeHandler) Welcome(c *gin.Context) {
-	html := `
-<!DOCTYPE html>
+	loginButton := ""
+	if h.config.Frontend.Enabled {
+		loginButton = `<button class="button" id="login-open" type="button">Iniciar sesion</button>`
+	}
+
+	htmlBody := fmt.Sprintf(`<!DOCTYPE html>
 <html lang="es">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Servidor IIIF PDF - Bienvenida</title>
+    <title>Servidor IIIF PDF</title>
     <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
-        
+        * { box-sizing: border-box; margin: 0; padding: 0; }
         body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             min-height: 100vh;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            color: #333;
-        }
-        
-        .container {
-            background: white;
-            border-radius: 20px;
-            padding: 3rem;
-            box-shadow: 0 20px 40px rgba(0,0,0,0.1);
-            text-align: center;
-            max-width: 600px;
-            width: 90%;
-        }
-        
-        .logo {
-            width: 80px;
-            height: 80px;
-            background: linear-gradient(135deg, #667eea, #764ba2);
-            border-radius: 20px;
-            margin: 0 auto 2rem;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 2rem;
-            color: white;
-            font-weight: bold;
-        }
-        
-        h1 {
-            font-size: 2.5rem;
-            margin-bottom: 1rem;
-            background: linear-gradient(135deg, #667eea, #764ba2);
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-            background-clip: text;
-        }
-        
-        .subtitle {
-            font-size: 1.2rem;
-            color: #666;
-            margin-bottom: 2rem;
-        }
-        
-        .info-grid {
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
-            gap: 1.5rem;
-            margin: 2rem 0;
+            place-items: center;
+            background: #f4f7fb;
+            color: #1f2937;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+            padding: 24px;
         }
-        
-        .info-card {
-            background: #f8f9fa;
-            padding: 1.5rem;
-            border-radius: 12px;
-            border-left: 4px solid #667eea;
+        .container {
+            width: min(920px, 100%%);
+            background: #fff;
+            border: 1px solid #dbe3ef;
+            border-radius: 8px;
+            padding: 32px;
+            box-shadow: 0 16px 40px rgba(31, 41, 55, 0.08);
         }
-        
-        .info-card h3 {
-            color: #333;
-            margin-bottom: 0.5rem;
-            font-size: 1.1rem;
-        }
-        
-        .info-card p {
-            color: #666;
-            font-size: 0.9rem;
-        }
-        
-        .endpoints {
-            background: #f8f9fa;
-            border-radius: 12px;
-            padding: 1.5rem;
-            margin: 2rem 0;
-            text-align: left;
-        }
-        
-        .endpoints h3 {
-            color: #333;
-            margin-bottom: 1rem;
-            text-align: center;
-        }
-        
-        .endpoint {
+        .top {
             display: flex;
-            align-items: center;
-            margin: 0.5rem 0;
-            font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
-            font-size: 0.9rem;
+            justify-content: space-between;
+            gap: 24px;
+            align-items: flex-start;
+            border-bottom: 1px solid #e5edf7;
+            padding-bottom: 24px;
+            margin-bottom: 24px;
         }
-        
-        .method {
-            background: #667eea;
+        .logo {
+            width: 64px;
+            height: 64px;
+            border-radius: 8px;
+            display: grid;
+            place-items: center;
+            background: #1d4ed8;
             color: white;
-            padding: 0.2rem 0.5rem;
-            border-radius: 4px;
-            margin-right: 1rem;
-            min-width: 60px;
-            text-align: center;
-            font-size: 0.8rem;
+            font-weight: 800;
+            letter-spacing: 0;
+            flex: 0 0 auto;
         }
-        
-        .method.post { background: #28a745; }
-        .method.delete { background: #dc3545; }
-        .method.put { background: #ffc107; color: #333; }
-        
-        .url {
-            color: #495057;
-            flex: 1;
-        }
-        
-        .status {
+        h1 { font-size: 32px; line-height: 1.15; margin-bottom: 8px; }
+        .subtitle { color: #526173; line-height: 1.55; }
+        .button {
             display: inline-flex;
             align-items: center;
-            background: #d4edda;
-            color: #155724;
-            padding: 0.5rem 1rem;
-            border-radius: 20px;
-            font-size: 0.9rem;
-            margin: 1rem 0;
+            justify-content: center;
+            min-height: 42px;
+            padding: 0 16px;
+            border-radius: 6px;
+            color: white;
+            background: #1d4ed8;
+            text-decoration: none;
+            font-weight: 700;
+            white-space: nowrap;
+            border: 0;
+            cursor: pointer;
         }
-        
-        .status::before {
-            content: "●";
-            margin-right: 0.5rem;
-            color: #28a745;
+        .modal-backdrop {
+            position: fixed;
+            inset: 0;
+            display: none;
+            align-items: center;
+            justify-content: center;
+            background: rgba(15, 23, 42, 0.45);
+            padding: 20px;
         }
-        
-        .footer {
-            margin-top: 2rem;
-            padding-top: 1rem;
-            border-top: 1px solid #eee;
-            color: #666;
-            font-size: 0.9rem;
+        .modal-backdrop.open { display: flex; }
+        .modal {
+            width: min(420px, 100%%);
+            background: white;
+            border-radius: 8px;
+            border: 1px solid #dbe3ef;
+            padding: 22px;
+            box-shadow: 0 24px 70px rgba(15, 23, 42, 0.25);
         }
-        
-        .version {
-            background: #e9ecef;
-            padding: 0.2rem 0.5rem;
+        .modal h2 { margin: 0 0 12px; font-size: 22px; }
+        .modal label { display: grid; gap: 6px; margin: 12px 0; color: #526173; font-size: 14px; }
+        .modal input {
+            min-height: 40px;
+            border: 1px solid #cfd9e6;
+            border-radius: 6px;
+            padding: 0 10px;
+            font: inherit;
+        }
+        .modal-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 16px; }
+        .button.secondary { color: #1f2937; background: #eef3f8; }
+        .login-error { color: #b91c1c; min-height: 20px; font-size: 14px; }
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            gap: 16px;
+            margin-bottom: 24px;
+        }
+        .panel {
+            border: 1px solid #e5edf7;
+            border-radius: 8px;
+            padding: 16px;
+            background: #fbfdff;
+        }
+        .panel h2 {
+            font-size: 15px;
+            margin-bottom: 8px;
+            color: #111827;
+        }
+        .panel p { color: #526173; font-size: 14px; line-height: 1.5; overflow-wrap: anywhere; }
+        .endpoints {
+            border: 1px solid #e5edf7;
+            border-radius: 8px;
+            padding: 16px;
+        }
+        .endpoint {
+            display: flex;
+            gap: 12px;
+            align-items: center;
+            padding: 8px 0;
+            font-family: Consolas, "Liberation Mono", monospace;
+            font-size: 14px;
+            color: #374151;
+        }
+        .method {
+            min-width: 48px;
+            text-align: center;
             border-radius: 4px;
-            font-family: monospace;
+            padding: 3px 6px;
+            background: #e8f0ff;
+            color: #1d4ed8;
+            font-weight: 700;
         }
-        
-        @media (max-width: 768px) {
-            .container {
-                padding: 2rem;
-            }
-            
-            h1 {
-                font-size: 2rem;
-            }
-            
-            .info-grid {
-                grid-template-columns: 1fr;
-            }
+        .footer {
+            margin-top: 24px;
+            color: #6b7280;
+            font-size: 14px;
+        }
+        @media (max-width: 760px) {
+            .top { flex-direction: column; }
+            .grid { grid-template-columns: 1fr; }
+            h1 { font-size: 26px; }
         }
     </style>
 </head>
 <body>
-    <div class="container">
-        <div class="logo">IIIF</div>
-        
-        <h1>Bienvenidos al Proyecto IIIF</h1>
-        <p class="subtitle">Servidor de conversión PDF a IIIF en <strong>` + h.config.IIIF.BaseURL + `</strong></p>
-        
-        <div class="status">
-            Servidor activo y funcionando
-        </div>
-        
-        <div class="info-grid">
-            <div class="info-card">
-                <h3>🚀 Estado del Servidor</h3>
-                <p>Puerto: <strong>` + h.config.Server.Port + `</strong><br>
-                Modo: <strong>` + h.config.Server.Mode + `</strong></p>
+    <main class="container">
+        <section class="top">
+            <div style="display:flex; gap:18px;">
+                <div class="logo">IIIF</div>
+                <div>
+                    <h1>Bienvenidos al Proyecto IIIF</h1>
+                    <p class="subtitle">Servidor de conversion PDF a IIIF en <strong>%s</strong>.</p>
+                </div>
             </div>
-            
-            <div class="info-card">
-                <h3>📁 Almacenamiento</h3>
-                <p>Datos: <strong>` + h.config.Storage.DataPath + `</strong><br>
-                Imágenes: <strong>` + h.config.Storage.ImagesPath + `</strong></p>
+            %s
+        </section>
+        <section class="grid">
+            <article class="panel">
+                <h2>Servidor</h2>
+                <p>Puerto: <strong>%s</strong><br>Modo: <strong>%s</strong></p>
+            </article>
+            <article class="panel">
+                <h2>Almacenamiento</h2>
+                <p>Backend: <strong>%s</strong><br>Datos: <strong>%s</strong></p>
+            </article>
+            <article class="panel">
+                <h2>IIIF</h2>
+                <p>API: <strong>%s</strong><br>Resolucion max: <strong>%s</strong></p>
+            </article>
+        </section>
+        <section class="endpoints">
+            <div class="endpoint"><span class="method">GET</span><span>/iiif/3/{identifier}/info.json</span></div>
+            <div class="endpoint"><span class="method">GET</span><span>/iiif/3/{identifier}/full/max/0/default.jpg</span></div>
+            <div class="endpoint"><span class="method">GET</span><span>/api/properties</span></div>
+            <div class="endpoint"><span class="method">GET</span><span>/health</span></div>
+        </section>
+        <p class="footer">Compatible con IIIF Image API 3.0 y Presentation API 3.0.</p>
+    </main>
+    <div class="modal-backdrop" id="login-modal" aria-hidden="true">
+        <form class="modal" id="login-form">
+            <h2>Iniciar sesion</h2>
+            <p>Ingresa con el usuario y password configurados en config.yaml.</p>
+            <label>Usuario
+                <input id="login-username" name="username" autocomplete="username" required>
+            </label>
+            <label>Password
+                <input id="login-password" name="password" type="password" autocomplete="current-password" required>
+            </label>
+            <div class="login-error" id="login-error"></div>
+            <div class="modal-actions">
+                <button class="button secondary" id="login-cancel" type="button">Cancelar</button>
+                <button class="button" type="submit">Ingresar</button>
             </div>
-            
-            <div class="info-card">
-                <h3>🔧 Configuración IIIF</h3>
-                <p>Versión API: <strong>` + h.config.IIIF.APIVersion + `</strong><br>
-                Resolución máx: <strong>` + fmt.Sprintf("%dx%d", h.config.IIIF.MaxWidth, h.config.IIIF.MaxHeight) + `</strong></p>
-            </div>
-            
-            <!--
-            <div class="info-card">
-                <h3>📄 Archivos PDF</h3>
-                <p>Tamaño máx: <strong>` + fmt.Sprintf("%d MB", h.config.PDF.MaxFileSize/(1024*1024)) + `</strong><br>
-                Formatos: <strong>PDF</strong></p>
-            </div>
-            -->
-        </div>
-        
-        <div class="endpoints">
-            <h3>🌐 Endpoints Disponibles</h3>
-            
-            <!-- 
-            <div>
-                <div class="endpoint">
-                <span class="method post">POST</span>
-                <span class="url">/api/upload - Subir PDF</span>
-            </div>
-            
-            <div class="endpoint">
-                <span class="method">GET</span>
-                <span class="url">/api/documents - Listar documentos</span>
-            </div>
-            
-            <div class="endpoint">
-                <span class="method">GET</span>
-                <span class="url">/api/iiif/{id}/manifest - Manifiesto IIIF</span>
-            </div>
-            -->
-            <div class="endpoint">
-                <span class="method">GET</span>
-                <span class="url">/iiif/3/{identifier}/info.json - Info de imagen</span>
-            </div>
-            
-            <div class="endpoint">
-                <span class="method">GET</span>
-                <span class="url">/iiif/3/{identifier}/full/max/0/default.jpg - Imagen</span>
-            </div>
-            
-            <div class="endpoint">
-                <span class="method">GET</span>
-                <span class="url">/api/properties - Propiedades del servidor</span>
-            </div>
-        </div>
-        
-        <div class="footer">
-            <p>
-                <strong>Servidor IIIF PDF</strong> - 
-                <span class="version">v1.0.0</span><br>
-                Compatible con IIIF Image API 3.0 y Presentation API 3.0
-            </p>
-            <p style="margin-top: 1rem;">
-                📚 <a href="/api/iiif" style="color: #667eea;">Documentación API</a> | 
-                ⚙️ <a href="/api/properties" style="color: #667eea;">Configuración</a> |
-                📊 <a href="/api/documents" style="color: #667eea;">Estado</a>
-            </p>
-        </div>
+        </form>
     </div>
+    <script>
+        const openButton = document.getElementById("login-open");
+        const modal = document.getElementById("login-modal");
+        const form = document.getElementById("login-form");
+        const cancel = document.getElementById("login-cancel");
+        const error = document.getElementById("login-error");
+
+        function closeModal() {
+            modal?.classList.remove("open");
+            if (error) error.textContent = "";
+        }
+
+        openButton?.addEventListener("click", () => {
+            modal.classList.add("open");
+            document.getElementById("login-username")?.focus();
+        });
+        cancel?.addEventListener("click", closeModal);
+        modal?.addEventListener("click", (event) => {
+            if (event.target === modal) closeModal();
+        });
+        form?.addEventListener("submit", async (event) => {
+            event.preventDefault();
+            error.textContent = "";
+            const response = await fetch("/auth/login", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    username: document.getElementById("login-username").value,
+                    password: document.getElementById("login-password").value
+                })
+            });
+            if (response.ok) {
+                window.location.href = "/dashboard";
+                return;
+            }
+            const data = await response.json().catch(() => ({}));
+            error.textContent = data.error || "No se pudo iniciar sesion";
+        });
+    </script>
 </body>
-</html>
-`
+</html>`,
+		html.EscapeString(h.config.IIIF.BaseURL),
+		loginButton,
+		html.EscapeString(h.config.Server.Port),
+		html.EscapeString(h.config.Server.Mode),
+		html.EscapeString(h.config.Storage.Backend),
+		html.EscapeString(h.config.Storage.DataPath),
+		html.EscapeString(h.config.IIIF.APIVersion),
+		html.EscapeString(fmt.Sprintf("%dx%d", h.config.IIIF.MaxWidth, h.config.IIIF.MaxHeight)),
+	)
+
 	c.Header("Content-Type", "text/html; charset=utf-8")
-	c.String(http.StatusOK, html)
+	c.String(http.StatusOK, htmlBody)
 }
 
 func (h *WelcomeHandler) HealthCheck(c *gin.Context) {
@@ -298,6 +285,10 @@ func (h *WelcomeHandler) HealthCheck(c *gin.Context) {
 		"version": "1.0.0",
 		"port":    h.config.Server.Port,
 		"mode":    h.config.Server.Mode,
+		"frontend": gin.H{
+			"enabled":      h.config.Frontend.Enabled,
+			"require_auth": h.config.Frontend.RequireAuth,
+		},
 		"endpoints": map[string]string{
 			"upload":    "/api/upload",
 			"documents": "/api/documents",

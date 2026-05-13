@@ -3,16 +3,47 @@ package models
 import "time"
 
 type PDFDocument struct {
-	ID             string    `json:"id"`
-	Name           string    `json:"name"`
-	UploadDate     time.Time `json:"UploadDate"`
-	Status         string    `json:"status"` // processing, completed, error
-	TotalPages     int       `json:"totalPages"`
-	ConvertedPages int       `json:"convertedPages"`
-	ManifiestURL   string    `json:"manifestUrl,omitempty"`
-	ThumbnailURL   string    `json:"thumbnailUrl,omitempty"`
-	FilePath       string    `json:"-"`
-	ImagePaths     []string  `json:"-"`
+	ID                string    `json:"id"`
+	Name              string    `json:"name"`
+	ProjectKey        string    `json:"projectKey,omitempty"`
+	TenantKey         string    `json:"tenantKey,omitempty"`
+	MigratedFromLocal bool      `json:"migratedFromLocal"`
+	UploadDate        time.Time `json:"uploadDate"`
+	Status            string    `json:"status"` // processing, completed, error
+	TotalPages        int       `json:"totalPages"`
+	ConvertedPages    int       `json:"convertedPages"`
+	ManifestURL       string    `json:"manifestUrl,omitempty"`
+	ThumbnailURL      string    `json:"thumbnailUrl,omitempty"`
+	FilePath          string    `json:"-"`
+	ImagePaths        []string  `json:"-"`
+}
+
+type DocumentImage struct {
+	ID                string    `json:"id"`
+	DocumentID        string    `json:"documentId"`
+	ProjectKey        string    `json:"projectKey,omitempty"`
+	TenantKey         string    `json:"tenantKey,omitempty"`
+	MigratedFromLocal bool      `json:"migratedFromLocal"`
+	PageNumber        int       `json:"pageNumber"`
+	ImagePath         string    `json:"-"`
+	Width             int       `json:"width"`
+	Height            int       `json:"height"`
+	Format            string    `json:"format"`
+	MediaType         string    `json:"mediaType,omitempty"`
+	ByteSize          int64     `json:"byteSize,omitempty"`
+	CreatedAt         time.Time `json:"createdAt"`
+}
+
+type Scope struct {
+	ProjectKey string `json:"projectKey"`
+	TenantKey  string `json:"tenantKey,omitempty"`
+}
+
+type BinaryAsset struct {
+	ID        string `json:"id"`
+	Data      []byte `json:"-"`
+	MediaType string `json:"mediaType"`
+	ByteSize  int64  `json:"byteSize"`
 }
 
 type ConversionSettings struct {

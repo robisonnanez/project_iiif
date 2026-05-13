@@ -1,30 +1,64 @@
 package config
 
 import (
+	"fmt"
 	"os"
+	"path/filepath"
+	"strings"
+
+	"iiif-pdf-server/internal/models"
 
 	"gopkg.in/yaml.v2"
 )
 
 type Config struct {
+	SourcePath string `yaml:"-"`
+
+	StorageBackend string `yaml:"STORAGE_BACKEND"`
+	DBConnection   string `yaml:"DB_CONNECTION"`
+	DBHost         string `yaml:"DB_HOST"`
+	DBPort         string `yaml:"DB_PORT"`
+	DBDatabase     string `yaml:"DB_DATABASE"`
+	DBUsername     string `yaml:"DB_USERNAME"`
+	DBPassword     string `yaml:"DB_PASSWORD"`
+
 	Server struct {
 		Port string `yaml:"port"`
 		Mode string `yaml:"mode"`
 	} `yaml:"server"`
 
 	Storage struct {
+		Backend        string `yaml:"backend"`
 		DataPath       string `yaml:"data_path"`
+		PDFsPath       string `yaml:"pdfs_path"`
 		ImagesPath     string `yaml:"images_path"`
 		DocumentsPath  string `yaml:"documents_path"`
 		ThumbnailsPath string `yaml:"thumbnails_path"`
 		ManifestsPath  string `yaml:"manifests_path"`
 	} `yaml:"storage"`
 
+	Database struct {
+		MySQL struct {
+			Host      string `yaml:"host"`
+			Port      string `yaml:"port"`
+			User      string `yaml:"user"`
+			Password  string `yaml:"password"`
+			Database  string `yaml:"database"`
+			Charset   string `yaml:"charset"`
+			ParseTime bool   `yaml:"parse_time"`
+		} `yaml:"mysql"`
+	} `yaml:"database"`
+
 	PDF struct {
 		MaxFileSize    int64    `yaml:"max_file_size"`
 		AllowedFormats []string `yaml:"allowed_formats"`
 		TempPath       string   `yaml:"temp_path"`
 	} `yaml:"pdf"`
+
+	BinaryStorage struct {
+		Mode     string `yaml:"mode"`
+		TempPath string `yaml:"temp_path"`
+	} `yaml:"binary_storage"`
 
 	IIIF struct {
 		BaseURL      string `yaml:"base_url"`
@@ -52,12 +86,45 @@ type Config struct {
 		MaxConcurrentUploads int      `yaml:"max_concurrent_uploads"`
 	} `yaml:"security"`
 
+	Frontend struct {
+		Enabled     bool   `yaml:"enabled"`
+		Path        string `yaml:"path"`
+		RequireAuth bool   `yaml:"require_auth"`
+		Username    string `yaml:"username"`
+		Password    string `yaml:"password"`
+	} `yaml:"frontend"`
+
+	Projects struct {
+		Enabled             bool            `yaml:"enabled"`
+		DefaultProject      string          `yaml:"default_project"`
+		RequireProject      bool            `yaml:"require_project"`
+		AllowDynamicTenants bool            `yaml:"allow_dynamic_tenants"`
+		Items               []ProjectConfig `yaml:"items"`
+	} `yaml:"projects"`
+
 	Performance struct {
 		MaxWorkers      int    `yaml:"max_workers"`
 		QueueSize       int    `yaml:"queue_size"`
 		CleanupInterval int    `yaml:"cleanup_interval"`
 		MaxCacheSize    string `yaml:"max_cache_size"`
 	} `yaml:"performance"`
+
+	Migration struct {
+		Enabled           bool     `yaml:"enabled"`
+		AllowedLocalRoots []string `yaml:"allowed_local_roots"`
+		MaxLogLines       int      `yaml:"max_log_lines"`
+		SSH               struct {
+			ConnectTimeoutSec int      `yaml:"connect_timeout_sec"`
+			AllowedHosts      []string `yaml:"allowed_hosts"`
+		} `yaml:"ssh"`
+	} `yaml:"migration"`
+}
+
+type ProjectConfig struct {
+	Key         string   `yaml:"key" json:"key"`
+	Name        string   `yaml:"name" json:"name"`
+	Multitenant bool     `yaml:"multitenant" json:"multitenant"`
+	Tenants     []string `yaml:"tenants" json:"tenants"`
 }
 
 func Load(filename string) (*Config, error) {
@@ -72,11 +139,159 @@ func Load(filename string) (*Config, error) {
 		return nil, err
 	}
 
+	applyDefaults(&config)
+	config.SourcePath = resolvedPath(filename)
 	return &config, nil
 }
 
+func Save(filename string, config *Config) error {
+	applyDefaults(config)
+	data, err := yaml.Marshal(config)
+	if err != nil {
+		return err
+	}
+	tempFile, err := os.CreateTemp(filepath.Dir(filename), ".config-*.yaml")
+	if err != nil {
+		return err
+	}
+	tempName := tempFile.Name()
+	if _, err := tempFile.Write(data); err != nil {
+		tempFile.Close()
+		os.Remove(tempName)
+		return err
+	}
+	if err := tempFile.Chmod(0600); err != nil {
+		tempFile.Close()
+		os.Remove(tempName)
+		return err
+	}
+	if err := tempFile.Close(); err != nil {
+		os.Remove(tempName)
+		return err
+	}
+	return os.Rename(tempName, filename)
+}
+
+func resolvedPath(filename string) string {
+	absolute, err := filepath.Abs(filename)
+	if err != nil {
+		absolute = filename
+	}
+	resolved, err := filepath.EvalSymlinks(absolute)
+	if err != nil {
+		return absolute
+	}
+	return resolved
+}
+
+func (config *Config) ApplyDefaults() {
+	applyDefaults(config)
+}
+
+func applyDefaults(config *Config) {
+	defaults := Default()
+	if config.StorageBackend != "" {
+		config.Storage.Backend = config.StorageBackend
+	}
+	if config.DBConnection != "" {
+		config.Storage.Backend = config.DBConnection
+	}
+	if config.DBHost != "" {
+		config.Database.MySQL.Host = config.DBHost
+	}
+	if config.DBPort != "" {
+		config.Database.MySQL.Port = config.DBPort
+	}
+	if config.DBUsername != "" {
+		config.Database.MySQL.User = config.DBUsername
+	}
+	if config.DBPassword != "" {
+		config.Database.MySQL.Password = config.DBPassword
+	}
+	if config.DBDatabase != "" {
+		config.Database.MySQL.Database = config.DBDatabase
+	}
+	if config.Storage.Backend == "" {
+		config.Storage.Backend = defaults.Storage.Backend
+	}
+	if config.Storage.DataPath == "" {
+		config.Storage.DataPath = defaults.Storage.DataPath
+	}
+	if config.Storage.PDFsPath == "" {
+		config.Storage.PDFsPath = defaults.Storage.PDFsPath
+	}
+	if config.Storage.ImagesPath == "" {
+		config.Storage.ImagesPath = defaults.Storage.ImagesPath
+	}
+	if config.Storage.DocumentsPath == "" {
+		config.Storage.DocumentsPath = defaults.Storage.DocumentsPath
+	}
+	if config.Storage.ThumbnailsPath == "" {
+		config.Storage.ThumbnailsPath = defaults.Storage.ThumbnailsPath
+	}
+	if config.Storage.ManifestsPath == "" {
+		config.Storage.ManifestsPath = defaults.Storage.ManifestsPath
+	}
+	if config.Database.MySQL.Host == "" {
+		config.Database.MySQL.Host = defaults.Database.MySQL.Host
+	}
+	if config.Database.MySQL.Port == "" {
+		config.Database.MySQL.Port = defaults.Database.MySQL.Port
+	}
+	if config.Database.MySQL.User == "" {
+		config.Database.MySQL.User = defaults.Database.MySQL.User
+	}
+	if config.Database.MySQL.Database == "" {
+		config.Database.MySQL.Database = defaults.Database.MySQL.Database
+	}
+	if config.Database.MySQL.Charset == "" {
+		config.Database.MySQL.Charset = defaults.Database.MySQL.Charset
+	}
+	if config.BinaryStorage.Mode == "" {
+		if config.Storage.Backend == "local" {
+			config.BinaryStorage.Mode = "local"
+		} else {
+			config.BinaryStorage.Mode = defaults.BinaryStorage.Mode
+		}
+	}
+	if config.BinaryStorage.TempPath == "" {
+		config.BinaryStorage.TempPath = defaults.BinaryStorage.TempPath
+	}
+	if config.Frontend.Path == "" {
+		config.Frontend.Path = defaults.Frontend.Path
+	}
+	if config.Frontend.Username == "" {
+		config.Frontend.Username = defaults.Frontend.Username
+	}
+	if config.Frontend.Password == "" {
+		config.Frontend.Password = defaults.Frontend.Password
+	}
+	if config.Projects.DefaultProject == "" {
+		config.Projects.DefaultProject = defaults.Projects.DefaultProject
+	}
+	if len(config.Projects.Items) == 0 {
+		config.Projects.Items = defaults.Projects.Items
+	}
+	if len(config.Migration.AllowedLocalRoots) == 0 {
+		config.Migration.AllowedLocalRoots = defaults.Migration.AllowedLocalRoots
+	}
+	if config.Migration.MaxLogLines <= 0 {
+		config.Migration.MaxLogLines = defaults.Migration.MaxLogLines
+	}
+	if config.Migration.SSH.ConnectTimeoutSec <= 0 {
+		config.Migration.SSH.ConnectTimeoutSec = defaults.Migration.SSH.ConnectTimeoutSec
+	}
+	config.StorageBackend = config.Storage.Backend
+	config.DBConnection = config.Storage.Backend
+	config.DBHost = config.Database.MySQL.Host
+	config.DBPort = config.Database.MySQL.Port
+	config.DBUsername = config.Database.MySQL.User
+	config.DBPassword = config.Database.MySQL.Password
+	config.DBDatabase = config.Database.MySQL.Database
+}
+
 func Default() *Config {
-	return &Config{
+	cfg := &Config{
 		Server: struct {
 			Port string `yaml:"port"`
 			Mode string `yaml:"mode"`
@@ -85,17 +300,50 @@ func Default() *Config {
 			Mode: "debug",
 		},
 		Storage: struct {
+			Backend        string `yaml:"backend"`
 			DataPath       string `yaml:"data_path"`
+			PDFsPath       string `yaml:"pdfs_path"`
 			ImagesPath     string `yaml:"images_path"`
 			DocumentsPath  string `yaml:"documents_path"`
 			ThumbnailsPath string `yaml:"thumbnails_path"`
 			ManifestsPath  string `yaml:"manifests_path"`
 		}{
+			Backend:        "local",
 			DataPath:       "./data",
+			PDFsPath:       "./data/pdfs",
 			ImagesPath:     "./data/images",
 			DocumentsPath:  "./data/documents",
 			ThumbnailsPath: "./data/thumbnails",
 			ManifestsPath:  "./data/manifests",
+		},
+		Database: struct {
+			MySQL struct {
+				Host      string `yaml:"host"`
+				Port      string `yaml:"port"`
+				User      string `yaml:"user"`
+				Password  string `yaml:"password"`
+				Database  string `yaml:"database"`
+				Charset   string `yaml:"charset"`
+				ParseTime bool   `yaml:"parse_time"`
+			} `yaml:"mysql"`
+		}{
+			MySQL: struct {
+				Host      string `yaml:"host"`
+				Port      string `yaml:"port"`
+				User      string `yaml:"user"`
+				Password  string `yaml:"password"`
+				Database  string `yaml:"database"`
+				Charset   string `yaml:"charset"`
+				ParseTime bool   `yaml:"parse_time"`
+			}{
+				Host:      "127.0.0.1",
+				Port:      "3306",
+				User:      "project_iiif",
+				Password:  "",
+				Database:  "project_iiif",
+				Charset:   "utf8mb4",
+				ParseTime: true,
+			},
 		},
 		PDF: struct {
 			MaxFileSize    int64    `yaml:"max_file_size"`
@@ -105,6 +353,13 @@ func Default() *Config {
 			MaxFileSize:    100 * 1024 * 1024, // 100MB
 			AllowedFormats: []string{"pdf"},
 			TempPath:       "./data/temp",
+		},
+		BinaryStorage: struct {
+			Mode     string `yaml:"mode"`
+			TempPath string `yaml:"temp_path"`
+		}{
+			Mode:     "database",
+			TempPath: "./data/temp",
 		},
 		IIIF: struct {
 			BaseURL      string `yaml:"base_url"`
@@ -149,6 +404,34 @@ func Default() *Config {
 			CorsOrigins:          []string{"http://localhost:5173", "http://localhost:3000"},
 			MaxConcurrentUploads: 5,
 		},
+		Frontend: struct {
+			Enabled     bool   `yaml:"enabled"`
+			Path        string `yaml:"path"`
+			RequireAuth bool   `yaml:"require_auth"`
+			Username    string `yaml:"username"`
+			Password    string `yaml:"password"`
+		}{
+			Enabled:     false,
+			Path:        "./frontend",
+			RequireAuth: true,
+			Username:    "admin",
+			Password:    "CAMBIAR_PASSWORD",
+		},
+		Projects: struct {
+			Enabled             bool            `yaml:"enabled"`
+			DefaultProject      string          `yaml:"default_project"`
+			RequireProject      bool            `yaml:"require_project"`
+			AllowDynamicTenants bool            `yaml:"allow_dynamic_tenants"`
+			Items               []ProjectConfig `yaml:"items"`
+		}{
+			Enabled:             false,
+			DefaultProject:      "default",
+			RequireProject:      false,
+			AllowDynamicTenants: false,
+			Items: []ProjectConfig{
+				{Key: "default", Name: "Proyecto por defecto", Multitenant: false, Tenants: []string{}},
+			},
+		},
 		Performance: struct {
 			MaxWorkers      int    `yaml:"max_workers"`
 			QueueSize       int    `yaml:"queue_size"`
@@ -160,5 +443,84 @@ func Default() *Config {
 			CleanupInterval: 3600,
 			MaxCacheSize:    "1GB",
 		},
+		Migration: struct {
+			Enabled           bool     `yaml:"enabled"`
+			AllowedLocalRoots []string `yaml:"allowed_local_roots"`
+			MaxLogLines       int      `yaml:"max_log_lines"`
+			SSH               struct {
+				ConnectTimeoutSec int      `yaml:"connect_timeout_sec"`
+				AllowedHosts      []string `yaml:"allowed_hosts"`
+			} `yaml:"ssh"`
+		}{
+			Enabled:           true,
+			AllowedLocalRoots: []string{"./data", "/var/lib/project_iiif"},
+			MaxLogLines:       1000,
+			SSH: struct {
+				ConnectTimeoutSec int      `yaml:"connect_timeout_sec"`
+				AllowedHosts      []string `yaml:"allowed_hosts"`
+			}{
+				ConnectTimeoutSec: 15,
+				AllowedHosts:      []string{},
+			},
+		},
 	}
+	cfg.StorageBackend = cfg.Storage.Backend
+	cfg.DBConnection = cfg.Storage.Backend
+	cfg.DBHost = cfg.Database.MySQL.Host
+	cfg.DBPort = cfg.Database.MySQL.Port
+	cfg.DBUsername = cfg.Database.MySQL.User
+	cfg.DBPassword = cfg.Database.MySQL.Password
+	cfg.DBDatabase = cfg.Database.MySQL.Database
+	return cfg
+}
+
+func (config *Config) ResolveScope(project, tenant string) (*models.Scope, error) {
+	project = strings.TrimSpace(project)
+	tenant = strings.TrimSpace(tenant)
+	if project == "" {
+		project = config.Projects.DefaultProject
+	}
+	if project == "" {
+		project = "default"
+	}
+
+	if !config.Projects.Enabled {
+		return &models.Scope{ProjectKey: project}, nil
+	}
+	if config.Projects.RequireProject && project == "" {
+		return nil, fmt.Errorf("project es obligatorio")
+	}
+
+	item, ok := config.ProjectByKey(project)
+	if !ok {
+		return nil, fmt.Errorf("project no configurado: %s", project)
+	}
+	if !item.Multitenant {
+		return &models.Scope{ProjectKey: project}, nil
+	}
+	if tenant == "" {
+		return nil, fmt.Errorf("tenant es obligatorio para el proyecto %s", project)
+	}
+	if !config.Projects.AllowDynamicTenants && !hasTenant(item, tenant) {
+		return nil, fmt.Errorf("tenant no configurado para %s: %s", project, tenant)
+	}
+	return &models.Scope{ProjectKey: project, TenantKey: tenant}, nil
+}
+
+func (config *Config) ProjectByKey(key string) (ProjectConfig, bool) {
+	for _, item := range config.Projects.Items {
+		if strings.EqualFold(item.Key, key) {
+			return item, true
+		}
+	}
+	return ProjectConfig{}, false
+}
+
+func hasTenant(project ProjectConfig, tenant string) bool {
+	for _, item := range project.Tenants {
+		if strings.EqualFold(item, tenant) {
+			return true
+		}
+	}
+	return false
 }

@@ -1,0 +1,283 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Project IIIF Dashboard</title>
+  <link rel="stylesheet" href="/dashboard/assets/styles.css?v=20260511-tailwind-migrator">
+</head>
+<body>
+  <div class="app">
+    <aside class="sidebar">
+      <div class="brand">
+        <span class="brand-mark">IIIF</span>
+        <div>
+          <strong>Project IIIF</strong>
+          <small>Dashboard</small>
+        </div>
+      </div>
+      <nav class="nav" aria-label="Principal">
+        <button class="nav-item active" data-view="summary">Inicio</button>
+        <button class="nav-item" data-view="upload">Subir PDF</button>
+        <button class="nav-item" data-view="documents">Documentos</button>
+        <button class="nav-item" data-view="images">Imagenes</button>
+        <button class="nav-item" data-view="config">Configuracion</button>
+        <button class="nav-item" data-view="migration">Migracion</button>
+      </nav>
+      <button class="logout-button" id="logout-button" type="button">Cerrar sesion</button>
+    </aside>
+
+    <main class="content">
+      <header class="header">
+        <div>
+          <h1 id="view-title">Inicio</h1>
+          <p id="view-subtitle">Estado general del servidor IIIF.</p>
+        </div>
+        <button class="secondary" id="refresh-button" type="button">Actualizar</button>
+      </header>
+
+      <section class="view active" id="summary-view">
+        <div class="metrics">
+          <article class="metric">
+            <span>Documentos</span>
+            <strong id="documents-count">0</strong>
+          </article>
+          <article class="metric">
+            <span>Completados</span>
+            <strong id="completed-count">0</strong>
+          </article>
+          <article class="metric">
+            <span>Backend</span>
+            <strong id="storage-backend">-</strong>
+          </article>
+        </div>
+        <div class="panel">
+          <h2>Ultimos documentos</h2>
+          <div id="recent-documents" class="empty">Sin documentos cargados.</div>
+        </div>
+      </section>
+
+      <section class="view" id="upload-view">
+        <div class="panel">
+          <h2>Subir PDF</h2>
+          <form id="upload-form" class="upload-form">
+            <label class="field">
+              <span>Proyecto</span>
+              <select id="upload-project" name="project"></select>
+            </label>
+            <label class="field" id="upload-tenant-field" hidden>
+              <span>Tenant</span>
+              <select id="upload-tenant" name="tenant"></select>
+            </label>
+            <label class="file-picker">
+              <span>Seleccionar PDF</span>
+              <input id="pdf-file" type="file" name="pdf" accept="application/pdf,.pdf" required>
+            </label>
+            <button class="primary" type="submit">Subir y convertir</button>
+          </form>
+          <pre id="upload-result" class="result" hidden></pre>
+        </div>
+      </section>
+
+      <section class="view" id="documents-view">
+        <div class="panel">
+          <h2>Documentos convertidos</h2>
+          <div class="toolbar-row">
+            <label class="field">
+              <span>Proyecto</span>
+              <select id="documents-project"></select>
+            </label>
+            <label class="field" id="documents-tenant-field" hidden>
+              <span>Tenant</span>
+              <select id="documents-tenant"></select>
+            </label>
+            <button class="secondary" id="filter-documents-button" type="button">Filtrar</button>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>ID</th>
+                  <th>Nombre</th>
+                  <th>Proyecto</th>
+                  <th>Tenant</th>
+                  <th>Migrado</th>
+                  <th>Estado</th>
+                  <th>Paginas</th>
+                  <th>Manifest</th>
+                </tr>
+              </thead>
+              <tbody id="documents-table"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <section class="view" id="images-view">
+        <div class="panel">
+          <h2>Imagenes IIIF</h2>
+          <div class="toolbar-row">
+            <label class="field">
+              <span>Proyecto</span>
+              <select id="images-project"></select>
+            </label>
+            <label class="field" id="images-tenant-field" hidden>
+              <span>Tenant</span>
+              <select id="images-tenant"></select>
+            </label>
+            <label class="field">
+              <span>Documento</span>
+              <select id="images-document"></select>
+            </label>
+            <button class="secondary" id="load-images-button" type="button">Cargar imagenes</button>
+          </div>
+          <div id="images-gallery" class="image-gallery empty">Selecciona un documento completado.</div>
+        </div>
+      </section>
+
+      <section class="view" id="config-view">
+        <div class="panel">
+          <h2>Configuracion activa</h2>
+          <form id="config-form" class="config-form"></form>
+        </div>
+      </section>
+
+      <section class="view" id="migration-view">
+        <div class="panel">
+          <h2>Migracion local a MySQL BLOB</h2>
+          <p>Ejecuta la migracion one-shot de metadatos y binarios desde almacenamiento local hacia MySQL.</p>
+          <div class="toolbar-row">
+            <button class="primary" id="start-migration-button" type="button">Iniciar migracion</button>
+            <button class="secondary" id="refresh-migration-button" type="button">Actualizar estado</button>
+            <button class="secondary" id="open-migration-progress-button" type="button">Ver progreso</button>
+            <span id="migration-status-badge" class="status">sin ejecutar</span>
+          </div>
+          <div class="panel">
+            <h3>Fuente de datos</h3>
+            <div class="toolbar-row">
+              <label class="field">
+                <span>Tipo de origen</span>
+                <select id="migration-source-type">
+                  <option value="local">Local</option>
+                  <option value="ssh">Servidor remoto (SSH)</option>
+                </select>
+              </label>
+            </div>
+            <div id="migration-local-source">
+              <div class="toolbar-row">
+                <label class="field" style="min-width: 360px;">
+                  <span>Ruta local</span>
+                  <input id="migration-local-path" type="text" placeholder="/var/lib/project_iiif">
+                </label>
+                <button class="secondary" id="browse-migration-local-button" type="button">Explorar directorios</button>
+              </div>
+              <div class="table-wrap">
+                <table>
+                  <thead>
+                    <tr><th>Directorio</th><th>Ruta</th><th>Accion</th></tr>
+                  </thead>
+                  <tbody id="migration-local-browser"></tbody>
+                </table>
+              </div>
+            </div>
+            <div id="migration-ssh-source" hidden>
+              <div class="toolbar-row">
+                <label class="field">
+                  <span>Host</span>
+                  <input id="migration-ssh-host" type="text" placeholder="172.21.227.83">
+                </label>
+                <label class="field">
+                  <span>Puerto</span>
+                  <input id="migration-ssh-port" type="number" value="22">
+                </label>
+                <label class="field">
+                  <span>Usuario</span>
+                  <input id="migration-ssh-user" type="text" placeholder="robison">
+                </label>
+                <label class="field" style="min-width: 320px;">
+                  <span>Ruta base remota</span>
+                  <input id="migration-ssh-path" type="text" placeholder="/var/lib/project_iiif">
+                </label>
+              </div>
+              <label class="field">
+                <span>Llave privada SSH</span>
+                <textarea id="migration-ssh-key" rows="8" placeholder="-----BEGIN OPENSSH PRIVATE KEY-----"></textarea>
+              </label>
+            </div>
+          </div>
+          <div class="panel">
+            <h3>Estado</h3>
+            <pre id="migration-summary" class="result">Sin ejecuciones todavia.</pre>
+          </div>
+          <div class="panel">
+            <h3>Logs</h3>
+            <pre id="migration-logs" class="result">Sin logs.</pre>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+  <div class="toast-stack" id="toast-stack" aria-live="polite"></div>
+  <div class="modal-backdrop" id="migration-scope-modal" hidden>
+    <div class="modal">
+      <h3>Contexto de migracion</h3>
+      <p>Selecciona proyecto y tenant antes de iniciar la migracion.</p>
+      <div class="modal-fields">
+        <label class="field">
+          <span>Proyecto</span>
+          <select id="migration-project"></select>
+        </label>
+        <label class="field" id="migration-tenant-field" hidden>
+          <span>Tenant</span>
+          <select id="migration-tenant"></select>
+        </label>
+        <label class="field">
+          <span>Ruta origen</span>
+          <input id="migration-source-preview" type="text" readonly>
+        </label>
+      </div>
+      <div class="modal-actions">
+        <button class="secondary" type="button" id="migration-cancel-button">Cancelar</button>
+        <button class="primary" type="button" id="migration-confirm-button">Iniciar migracion</button>
+      </div>
+    </div>
+  </div>
+  <div class="modal-backdrop" id="migration-progress-modal" hidden>
+    <div class="modal modal-wide">
+      <h3>Progreso de migracion</h3>
+      <p id="migration-progress-label">Preparando...</p>
+      <div class="progress-track">
+        <div class="progress-fill" id="migration-progress-fill" style="width: 0%;"></div>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>PDF</th><th>Imagenes</th><th>Estado</th><th>Mensaje</th></tr>
+          </thead>
+          <tbody id="migration-progress-table"></tbody>
+        </table>
+      </div>
+      <div class="modal-actions">
+        <button class="secondary" type="button" id="migration-progress-close">Cerrar</button>
+      </div>
+    </div>
+  </div>
+  <div class="modal-backdrop" id="restart-service-modal" hidden>
+    <div class="modal">
+      <h3>Reiniciar servicio</h3>
+      <p>La configuracion se guardo. Ingresa la contraseña para reiniciar <code>project-iiif</code>.</p>
+      <label class="field">
+        <span>Contraseña sudo</span>
+        <input id="restart-service-password" type="password" autocomplete="current-password" placeholder="********">
+      </label>
+      <div id="restart-service-status" class="muted"></div>
+      <div class="modal-actions">
+        <button class="secondary" type="button" id="restart-service-later">Mas tarde</button>
+        <button class="primary" type="button" id="restart-service-now">Reiniciar ahora</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="/dashboard/assets/app.js?v=20260511-tailwind-migrator"></script>
+</body>
+</html>

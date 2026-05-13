@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"log"
 	"os"
 	"regexp"
@@ -27,10 +28,13 @@ func main() {
 	createDirectories(cfg)
 
 	// Inicializar servicios
-	storage := storage.NewFileStorage(cfg.Storage.DataPath)
-	pdfService := services.NewPDFService(cfg, storage)
-	iiifService := services.NewIIIFService(cfg, storage)
-	documentService := services.NewDocumentService(storage)
+	store, err := newStorage(cfg)
+	if err != nil {
+		log.Fatalf("Error inicializando almacenamiento: %v", err)
+	}
+	pdfService := services.NewPDFService(cfg, store)
+	iiifService := services.NewIIIFService(cfg, store)
+	documentService := services.NewDocumentService(store)
 
 	// Configurar router
 	if cfg.Server.Mode == "production" {
@@ -57,10 +61,48 @@ func main() {
 	// Inicializar handlers
 	apiHandler := handlers.NewAPIHandler(pdfService, iiifService, documentService, cfg)
 	welcomeHandler := handlers.NewWelcomeHandler(cfg)
+	frontendHandler := handlers.NewFrontendHandler(cfg)
+	adminHandler := handlers.NewAdminHandler(cfg, documentService)
+	authHandler := handlers.NewAuthHandler(cfg)
 
 	// Ruta de bienvenida
 	router.GET("/", welcomeHandler.Welcome)
 	router.GET("/health", welcomeHandler.HealthCheck)
+	router.POST("/auth/login", authHandler.Login)
+	router.POST("/auth/logout", authHandler.Logout)
+	router.GET("/auth/me", authHandler.Me)
+
+	if cfg.Frontend.Enabled {
+		dashboard := router.Group("/dashboard")
+		dashboard.Use(authHandler.RequireSession())
+		{
+			dashboard.GET("", frontendHandler.Dashboard)
+			dashboard.GET("/", frontendHandler.Dashboard)
+			dashboard.GET("/inicio", frontendHandler.Dashboard)
+			dashboard.GET("/subir-pdf", frontendHandler.Dashboard)
+			dashboard.GET("/documentos", frontendHandler.Dashboard)
+			dashboard.GET("/imagenes", frontendHandler.Dashboard)
+			dashboard.GET("/configuracion", frontendHandler.Dashboard)
+			dashboard.GET("/migracion", frontendHandler.Dashboard)
+			dashboard.Static("/assets", cfg.Frontend.Path+"/assets")
+		}
+
+		admin := router.Group("/admin/api")
+		admin.Use(authHandler.RequireSession())
+		{
+			admin.GET("/config", adminHandler.GetConfig)
+			admin.PUT("/config", adminHandler.UpdateConfig)
+			admin.POST("/service/restart", adminHandler.RestartService)
+			admin.GET("/projects", adminHandler.GetProjects)
+			admin.GET("/documents/:id/images", adminHandler.GetDocumentImages)
+			admin.GET("/migrations/sources/local/browse", adminHandler.BrowseLocalMigrationSource)
+			admin.POST("/migrations/local-to-mysql/start", adminHandler.StartLocalToMySQLMigration)
+			admin.GET("/migrations/local-to-mysql/status", adminHandler.GetLocalToMySQLMigrationStatus)
+		}
+	} else {
+		router.GET("/dashboard", frontendHandler.Disabled)
+		router.GET("/dashboard/*path", frontendHandler.Disabled)
+	}
 
 	// Rutas API de gestión
 	api := router.Group("/api")
@@ -112,17 +154,32 @@ func main() {
 func createDirectories(cfg *config.Config) {
 	dirs := []string{
 		cfg.Storage.DataPath,
+		cfg.Storage.PDFsPath,
 		cfg.Storage.DocumentsPath,
 		cfg.Storage.ImagesPath,
 		cfg.Storage.ThumbnailsPath,
 		cfg.Storage.ManifestsPath,
 		cfg.PDF.TempPath,
+		cfg.BinaryStorage.TempPath,
 	}
 
 	for _, dir := range dirs {
 		if err := os.MkdirAll(dir, 0755); err != nil {
 			log.Fatalf("Error creando directorio %s: %v", dir, err)
 		}
+	}
+}
+
+func newStorage(cfg *config.Config) (storage.Storage, error) {
+	switch strings.ToLower(cfg.Storage.Backend) {
+	case "", "local":
+		return storage.NewFileStorageFromConfig(cfg), nil
+	case "mysql":
+		return storage.NewMySQLStorage(cfg)
+	case "postgres", "postgresql", "mongo", "mongodb":
+		return nil, fmt.Errorf("storage backend %s reconocido pero todavia no implementado", cfg.Storage.Backend)
+	default:
+		return nil, fmt.Errorf("storage backend no soportado: %s", cfg.Storage.Backend)
 	}
 }
 

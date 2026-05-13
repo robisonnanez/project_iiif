@@ -1,61 +1,117 @@
 # =============================================================================
-# CONFIGURACIÓN DEL SERVIDOR IIIF PDF
+# CONFIGURACION DEL SERVIDOR IIIF PDF
 # =============================================================================
 
-# Configuración del servidor HTTP
+# Backend principal de almacenamiento: local o mysql.
+# Si STORAGE_BACKEND/DB_CONNECTION es mysql, la metadata va a MySQL y los PDFs
+# e imagenes quedan en las rutas configuradas abajo.
+STORAGE_BACKEND: "local"
+DB_CONNECTION: "local"
+DB_HOST: "127.0.0.1"
+DB_PORT: "3306"
+DB_DATABASE: "DB_DATABASE"
+DB_USERNAME: "DB_USERNAME"
+DB_PASSWORD: "DB_PASSWORD"
+
 server:
-  port: "8080"                    # Puerto donde escucha el servidor
-  mode: "debug"                   # Modo: debug, release, test
+  port: "8080"
+  mode: "debug"
 
-# Configuración de almacenamiento
 storage:
-  data_path: "./data"             # Directorio base para datos
-  images_path: "./data/images"    # Directorio donde se almacenan las imágenes convertidas
-  documents_path: "./data/documents"  # Directorio para metadatos de documentos
-  thumbnails_path: "./data/thumbnails"  # Directorio para miniaturas
-  manifests_path: "./data/manifests"    # Directorio para manifiestos IIIF
+  backend: "local"
+  data_path: "./data"
+  pdfs_path: "./data/pdfs"
+  images_path: "./data/images"
+  documents_path: "./data/documents"
+  thumbnails_path: "./data/thumbnails"
+  manifests_path: "./data/manifests"
 
-# Configuración de procesamiento de PDFs
+# Tambien puedes usar las claves DB_* de arriba; si estan presentes, tienen prioridad.
+database:
+  mysql:
+    host: "127.0.0.1"
+    port: "3306"
+    user: "project_iiif"
+    password: "CAMBIAR_PASSWORD"
+    database: "project_iiif"
+    charset: "utf8mb4"
+    parse_time: true
+
 pdf:
-  max_file_size: 104857600        # Tamaño máximo de archivo en bytes (100MB)
-  allowed_formats:                # Formatos de archivo permitidos
+  max_file_size: 104857600
+  allowed_formats:
     - "pdf"
-  temp_path: "./data/temp"        # Directorio temporal para procesamiento
+  temp_path: "./data/temp"
 
-# Configuración IIIF
+binary_storage:
+  mode: "local"
+  temp_path: "./data/temp"
+
 iiif:
-  base_url: "https://tu-dominio.com"    # URL base del servidor
-  api_version: "3"                      # Versión de la API IIIF (2 o 3)
-  max_width: 2048                       # Ancho máximo de imagen
-  max_height: 2048                      # Alto máximo de imagen
-  cache_enabled: true                   # Habilitar caché de imágenes
-  cache_ttl: 3600                       # Tiempo de vida del caché en segundos
-  tile_size: 512                        # Tamaño de tiles para zoom
-  scale_factors: [1, 2, 4, 8]          # Factores de escala disponibles
+  base_url: "https://tu-dominio.com"
+  api_version: "3"
+  max_width: 2048
+  max_height: 2048
+  cache_enabled: true
+  cache_ttl: 3600
+  tile_size: 512
+  scale_factors: [1, 2, 4, 8]
 
-# Configuración de conversión de imágenes
 conversion:
-  default_format: "jpg"           # Formato por defecto: jpg, png, webp
-  default_quality: 85             # Calidad por defecto (1-100)
-  enable_ocr: false               # Habilitar reconocimiento de texto (OCR)
-  dpi: 150                        # DPI para conversión de PDF
-  background_color: "white"       # Color de fondo para transparencias
+  default_format: "jpg"
+  default_quality: 85
+  enable_ocr: false
+  dpi: 150
+  background_color: "white"
 
-# Configuración de seguridad
 security:
-  enable_auth: false              # Habilitar autenticación
-  log_level: "info"               # Nivel de log: debug, info, warn, error
-  cors_origins:                   # Orígenes permitidos para CORS
+  enable_auth: false
+  log_level: "info"
+  cors_origins:
     - "https://tu-dominio.com"
     - "https://www.tu-dominio.com"
     - "https://*.tu-dominio.com"
     - "http://localhost:3000"
     - "http://localhost:5173"
-  max_concurrent_uploads: 5       # Máximo de subidas concurrentes
+  max_concurrent_uploads: 5
 
-# Configuración de rendimiento
+frontend:
+  enabled: false
+  path: "./frontend"
+  require_auth: true
+  username: "admin"
+  password: "CAMBIAR_PASSWORD"
+
+projects:
+  enabled: true
+  default_project: "default"
+  require_project: false
+  allow_dynamic_tenants: false
+  items:
+    - key: "default"
+      name: "Proyecto por defecto"
+      multitenant: false
+      tenants: []
+    - key: "metavisor"
+      name: "Metavisor"
+      multitenant: true
+      tenants:
+        - "sunat"
+        - "demo"
+        - "uniguajira"
+
 performance:
-  max_workers: 4                  # Número máximo de workers para procesamiento
-  queue_size: 100                 # Tamaño de la cola de procesamiento
-  cleanup_interval: 3600          # Intervalo de limpieza en segundos
-  max_cache_size: "1GB"           # Tamaño máximo del caché
+  max_workers: 4
+  queue_size: 100
+  cleanup_interval: 3600
+  max_cache_size: "1GB"
+
+migration:
+  enabled: true
+  allowed_local_roots:
+    - "./data"
+    - "/var/lib/project_iiif"
+  max_log_lines: 1000
+  ssh:
+    connect_timeout_sec: 15
+    allowed_hosts: []

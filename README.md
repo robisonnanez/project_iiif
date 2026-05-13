@@ -11,6 +11,11 @@ Servidor Go que convierte archivos PDF a imágenes y los sirve usando el protoco
 - ✅ Sistema de caché configurable
 - ✅ Configuración flexible via YAML
 - ✅ API REST para gestión de documentos
+- ✅ Dashboard web protegido por sesión con login/logout
+- ✅ Galería de imágenes IIIF por documento
+- ✅ Configuración editable desde el dashboard con secretos enmascarados
+- ✅ Almacenamiento MySQL BLOB para PDFs e imágenes convertidas
+- ✅ Organización opcional por proyecto y tenant
 
 ## Instalación
 
@@ -56,8 +61,117 @@ Edita `config.yaml` para personalizar:
 - Límites de archivos
 - Configuración IIIF
 - Parámetros de conversión
+- Frontend administrativo
+- Conexión MySQL y modo de almacenamiento binario
+- Proyectos consumidores y tenants opcionales
+
+Para MySQL BLOB usa:
+
+```yaml
+STORAGE_BACKEND: "mysql"
+DB_CONNECTION: "mysql"
+DB_HOST: "127.0.0.1"
+DB_PORT: "3306"
+DB_DATABASE: "project_iiif"
+DB_USERNAME: "project_iiif"
+DB_PASSWORD: "CAMBIAR_PASSWORD"
+
+binary_storage:
+  mode: "database"
+  temp_path: "/var/lib/project_iiif/temp"
+```
+
+Cuando `DB_CONNECTION`/`STORAGE_BACKEND` sea `mysql`, los PDFs e imágenes se guardan como BLOB en la base de datos. El disco local solo se usa para temporales durante la conversión.
+
+### Proyectos y multitenant
+
+```yaml
+projects:
+  enabled: true
+  default_project: "default"
+  require_project: false
+  allow_dynamic_tenants: false
+  items:
+    - key: "default"
+      name: "Proyecto por defecto"
+      multitenant: false
+      tenants: []
+    - key: "metavisor"
+      name: "Metavisor"
+      multitenant: true
+      tenants:
+        - "sunat"
+        - "demo"
+        - "uniguajira"
+```
+
+`POST /api/upload` acepta `project` y `tenant` por form-data o por headers `X-IIIF-Project` y `X-IIIF-Tenant`. Si el proyecto no es multitenant, `tenant` se ignora. Si es multitenant, `tenant` es obligatorio.
+
+## Dashboard
+
+Activa el frontend en `config.yaml`:
+
+```yaml
+frontend:
+  enabled: true
+  path: "./frontend"
+  require_auth: true
+  username: "admin"
+  password: "CAMBIAR_PASSWORD"
+```
+
+- `/` sigue siendo público.
+- `/dashboard` requiere sesión cuando `require_auth=true`.
+- El botón **Cerrar sesión** llama `POST /auth/logout`.
+- La vista **Imágenes** muestra las páginas convertidas y sus URLs IIIF, por ejemplo:
+
+```text
+http://localhost:8080/iiif/3/{image_id}/full/max/0/default.jpg
+```
+
+- La vista **Configuración** permite editar campos permitidos del `config.yaml`. Los passwords se muestran como `********`; si se dejan así, se conserva el valor real.
+- Después de guardar configuración, reinicia el servicio para aplicar cambios sensibles como puerto, storage o credenciales.
+- La vista **Migración** permite elegir fuente `local` o `SSH`, explorar directorios locales permitidos y ejecutar la migración con logs en vivo.
+
+### Build de estilos (Tailwind CLI)
+
+El frontend incluye toolchain local de Tailwind CLI en `backend/frontend`.
+
+```bash
+cd backend/frontend
+npm install
+npm run build:css
+```
+
+Para desarrollo:
+
+```bash
+npm run watch:css
+```
+
+El CSS compilado se publica en `backend/frontend/assets/styles.css`.
+
+## Migracion local a MySQL BLOB
+
+Si tienes documentos e imagenes historicas en filesystem local y quieres pasarlas a MySQL BLOB:
+
+```bash
+cd backend
+go run ./cmd/migrate-local-to-mysql
+```
+
+Comportamiento del migrador:
+- Importa metadata de documentos e imagenes.
+- Carga `pdf_blob` y `image_blob` desde archivos locales.
+- Es idempotente: si el blob ya existe, lo omite.
+- No borra ni mueve archivos locales al finalizar.
 
 ## API Endpoints
+
+### Autenticación dashboard
+- `POST /auth/login` - Crear sesión
+- `POST /auth/logout` - Cerrar sesión
+- `GET /auth/me` - Consultar sesión activa
 
 ### Gestión de documentos
 - `POST /api/upload` - Subir PDF
@@ -65,11 +179,20 @@ Edita `config.yaml` para personalizar:
 - `GET /api/documents/:id` - Obtener documento
 - `DELETE /api/documents/:id` - Eliminar documento
 
+### Administración
+- `GET /admin/api/config` - Configuración saneada
+- `PUT /admin/api/config` - Guardar configuración permitida
+- `GET /admin/api/projects` - Listar proyectos y tenants configurados
+- `GET /admin/api/documents/:id/images` - Listar imágenes IIIF de un documento
+- `GET /admin/api/migrations/sources/local/browse` - Explorar directorios locales permitidos
+- `POST /admin/api/migrations/local-to-mysql/start` - Iniciar migración local/SSH -> MySQL BLOB
+- `GET /admin/api/migrations/local-to-mysql/status` - Estado y logs de migración
+
 ### IIIF
 - `GET /api/iiif/:id/manifest` - Manifiesto IIIF
-- `GET /api/iiif/:id/:page/info.json` - Info de imagen
-- `GET /api/iiif/:id/:page/:size/:rotation/:quality.:format` - Imagen IIIF
-- `GET /api/iiif/:id/:page/default.jpg` - Imagen por defecto
+- `GET /iiif/3/:identifier/info.json` - Info de imagen
+- `GET /iiif/3/:identifier/:region/:size/:rotation/:quality.:format` - Imagen IIIF
+- `GET /iiif/3/:identifier/default.jpg` - Imagen por defecto
 
 ### Configuración
 - `GET /api/properties` - Obtener propiedades
