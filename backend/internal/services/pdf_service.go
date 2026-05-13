@@ -59,14 +59,15 @@ func (s *PDFService) ProcessPDF(sourcePath string, filename string, settings mod
 	}
 
 	doc := &models.PDFDocument{
-		ID:             documentID,
-		Name:           filename,
-		ProjectKey:     scope.ProjectKey,
-		TenantKey:      scope.TenantKey,
-		UploadDate:     time.Now(),
-		Status:         "processing",
-		FilePath:       pdfPath,
-		ConvertedPages: 0,
+		ID:                documentID,
+		Name:              filename,
+		ProjectKey:        scope.ProjectKey,
+		TenantKey:         scope.TenantKey,
+		MigratedFromLocal: false,
+		UploadDate:        time.Now(),
+		Status:            "processing",
+		FilePath:          pdfPath,
+		ConvertedPages:    0,
 	}
 
 	if err := s.storage.SaveDocument(doc); err != nil {
@@ -148,18 +149,19 @@ func (s *PDFService) convertPDFToImages(doc *models.PDFDocument, sourcePath stri
 
 		bounds := pageImage.Bounds()
 		image := &models.DocumentImage{
-			ID:         uuid.New().String(),
-			DocumentID: doc.ID,
-			ProjectKey: doc.ProjectKey,
-			TenantKey:  doc.TenantKey,
-			PageNumber: i + 1,
-			ImagePath:  imagePath,
-			Width:      bounds.Dx(),
-			Height:     bounds.Dy(),
-			Format:     settings.Format,
-			MediaType:  mediaType,
-			ByteSize:   int64(len(imageData)),
-			CreatedAt:  time.Now(),
+			ID:                uuid.New().String(),
+			DocumentID:        doc.ID,
+			ProjectKey:        doc.ProjectKey,
+			TenantKey:         doc.TenantKey,
+			MigratedFromLocal: false,
+			PageNumber:        i + 1,
+			ImagePath:         imagePath,
+			Width:             bounds.Dx(),
+			Height:            bounds.Dy(),
+			Format:            settings.Format,
+			MediaType:         mediaType,
+			ByteSize:          int64(len(imageData)),
+			CreatedAt:         time.Now(),
 		}
 		if err := s.storage.SaveDocumentImage(image); err != nil {
 			continue

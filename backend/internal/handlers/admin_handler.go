@@ -1,11 +1,17 @@
 package handlers
 
 import (
+	"bytes"
+	"context"
+	"log"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
+	"time"
 
 	"iiif-pdf-server/internal/config"
 	"iiif-pdf-server/internal/services"
@@ -17,6 +23,8 @@ type AdminHandler struct {
 	config          *config.Config
 	documentService *services.DocumentService
 	migrationRunner *migrationRunner
+	restartMu       sync.Mutex
+	lastRestartByIP map[string]time.Time
 }
 
 func NewAdminHandler(config *config.Config, documentService *services.DocumentService) *AdminHandler {
@@ -24,6 +32,7 @@ func NewAdminHandler(config *config.Config, documentService *services.DocumentSe
 		config:          config,
 		documentService: documentService,
 		migrationRunner: newMigrationRunner(config.Migration.MaxLogLines),
+		lastRestartByIP: map[string]time.Time{},
 	}
 }
 
@@ -38,6 +47,63 @@ func (h *AdminHandler) GetProjects(c *gin.Context) {
 		"require_project":       h.config.Projects.RequireProject,
 		"allow_dynamic_tenants": h.config.Projects.AllowDynamicTenants,
 		"items":                 h.config.Projects.Items,
+	})
+}
+
+func (h *AdminHandler) RestartService(c *gin.Context) {
+	// Reinicia el servicio systemd project-iiif con password enviada desde modal de confirmacion.
+	var payload struct {
+		Password string `json:"password"`
+	}
+	if err := c.ShouldBindJSON(&payload); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"ok": false, "error": "payload invalido"})
+		return
+	}
+	if strings.TrimSpace(payload.Password) == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"ok": false, "error": "password obligatoria"})
+		return
+	}
+
+	clientIP := strings.TrimSpace(c.ClientIP())
+	h.restartMu.Lock()
+	if last, ok := h.lastRestartByIP[clientIP]; ok && time.Since(last) < 10*time.Second {
+		h.restartMu.Unlock()
+		c.JSON(http.StatusTooManyRequests, gin.H{"ok": false, "error": "espera unos segundos antes de reintentar"})
+		return
+	}
+	h.lastRestartByIP[clientIP] = time.Now()
+	h.restartMu.Unlock()
+
+	log.Printf("INFO restart request received for service project-iiif from ip=%s", clientIP)
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 20*time.Second)
+	defer cancel()
+
+	if err := runSudoSystemctl(ctx, payload.Password, "restart", "project-iiif"); err != nil {
+		log.Printf("ERROR service restart failed: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"ok":      false,
+			"error":   "no se pudo reiniciar el servicio",
+			"details": sanitizeCommandError(err.Error()),
+		})
+		return
+	}
+
+	active, err := isServiceActive(ctx, payload.Password, "project-iiif")
+	if err != nil {
+		log.Printf("WARN service restarted but status check failed: %v", err)
+		c.JSON(http.StatusOK, gin.H{
+			"ok":      true,
+			"message": "servicio reiniciado, pero no se pudo validar estado",
+			"active":  false,
+		})
+		return
+	}
+
+	log.Printf("INFO service project-iiif restarted successfully active=%t", active)
+	c.JSON(http.StatusOK, gin.H{
+		"ok":      true,
+		"message": "servicio reiniciado correctamente",
+		"active":  active,
 	})
 }
 
@@ -74,6 +140,45 @@ func (h *AdminHandler) UpdateConfig(c *gin.Context) {
 	})
 }
 
+func runSudoSystemctl(ctx context.Context, password, action, service string) error {
+	cmd := exec.CommandContext(ctx, "sudo", "-S", "systemctl", action, service)
+	cmd.Stdin = strings.NewReader(password + "\n")
+	var out bytes.Buffer
+	var stderr bytes.Buffer
+	cmd.Stdout = &out
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		return &configError{message: strings.TrimSpace(stderr.String() + " " + out.String() + " " + err.Error())}
+	}
+	return nil
+}
+
+func isServiceActive(ctx context.Context, password, service string) (bool, error) {
+	cmd := exec.CommandContext(ctx, "sudo", "-S", "systemctl", "is-active", service)
+	cmd.Stdin = strings.NewReader(password + "\n")
+	var out bytes.Buffer
+	var stderr bytes.Buffer
+	cmd.Stdout = &out
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		return false, &configError{message: strings.TrimSpace(stderr.String() + " " + out.String() + " " + err.Error())}
+	}
+	return strings.TrimSpace(out.String()) == "active", nil
+}
+
+func sanitizeCommandError(message string) string {
+	clean := strings.ReplaceAll(message, "\n", " ")
+	clean = strings.ReplaceAll(clean, "\r", " ")
+	clean = strings.TrimSpace(clean)
+	if clean == "" {
+		return "error de ejecucion"
+	}
+	if len(clean) > 220 {
+		return clean[:220] + "..."
+	}
+	return clean
+}
+
 func (h *AdminHandler) GetDocumentImages(c *gin.Context) {
 	// Expone identificadores IIIF seguros para la galeria sin revelar rutas internas ni BLOBs.
 	documentID := c.Param("id")
@@ -95,18 +200,19 @@ func (h *AdminHandler) GetDocumentImages(c *gin.Context) {
 		identifier := image.ID
 		servicePath := "/iiif/" + h.config.IIIF.APIVersion + "/" + identifier
 		items = append(items, gin.H{
-			"image_id":    identifier,
-			"document_id": image.DocumentID,
-			"project_key": image.ProjectKey,
-			"tenant_key":  image.TenantKey,
-			"page_number": image.PageNumber,
-			"width":       image.Width,
-			"height":      image.Height,
-			"format":      image.Format,
-			"media_type":  image.MediaType,
-			"byte_size":   image.ByteSize,
-			"iiif_url":    base + servicePath + "/full/max/0/default.jpg",
-			"info_url":    base + servicePath + "/info.json",
+			"image_id":            identifier,
+			"document_id":         image.DocumentID,
+			"project_key":         image.ProjectKey,
+			"tenant_key":          image.TenantKey,
+			"page_number":         image.PageNumber,
+			"width":               image.Width,
+			"height":              image.Height,
+			"format":              image.Format,
+			"media_type":          image.MediaType,
+			"byte_size":           image.ByteSize,
+			"migrated_from_local": image.MigratedFromLocal,
+			"iiif_url":            base + servicePath + "/full/max/0/default.jpg",
+			"info_url":            base + servicePath + "/info.json",
 		})
 	}
 
@@ -212,27 +318,54 @@ func validateMigrationRequest(req migrationStartRequest, cfg *config.Config) err
 		if strings.TrimSpace(req.Source.Local.Path) == "" {
 			return &configError{"source.local.path es obligatorio"}
 		}
-		return nil
-	}
-	if strings.TrimSpace(req.Source.SSH.Host) == "" || strings.TrimSpace(req.Source.SSH.User) == "" {
-		return &configError{"source.ssh.host y source.ssh.user son obligatorios"}
-	}
-	if strings.TrimSpace(req.Source.SSH.Path) == "" {
-		return &configError{"source.ssh.path es obligatorio"}
-	}
-	if strings.TrimSpace(req.Source.SSH.PrivateKey) == "" {
-		return &configError{"source.ssh.private_key es obligatoria"}
-	}
-	if len(cfg.Migration.SSH.AllowedHosts) > 0 {
-		allowed := false
-		for _, host := range cfg.Migration.SSH.AllowedHosts {
-			if strings.EqualFold(strings.TrimSpace(host), strings.TrimSpace(req.Source.SSH.Host)) {
-				allowed = true
-				break
+	} else {
+		if strings.TrimSpace(req.Source.SSH.Host) == "" || strings.TrimSpace(req.Source.SSH.User) == "" {
+			return &configError{"source.ssh.host y source.ssh.user son obligatorios"}
+		}
+		if strings.TrimSpace(req.Source.SSH.Path) == "" {
+			return &configError{"source.ssh.path es obligatorio"}
+		}
+		if strings.TrimSpace(req.Source.SSH.PrivateKey) == "" {
+			return &configError{"source.ssh.private_key es obligatoria"}
+		}
+		if len(cfg.Migration.SSH.AllowedHosts) > 0 {
+			allowed := false
+			for _, host := range cfg.Migration.SSH.AllowedHosts {
+				if strings.EqualFold(strings.TrimSpace(host), strings.TrimSpace(req.Source.SSH.Host)) {
+					allowed = true
+					break
+				}
+			}
+			if !allowed {
+				return &configError{"host SSH no permitido por migration.ssh.allowed_hosts"}
 			}
 		}
-		if !allowed {
-			return &configError{"host SSH no permitido por migration.ssh.allowed_hosts"}
+	}
+
+	project := strings.TrimSpace(req.Scope.ProjectKey)
+	tenant := strings.TrimSpace(req.Scope.TenantKey)
+	if project == "" {
+		return &configError{"scope.project_key es obligatorio"}
+	}
+	item, ok := cfg.ProjectByKey(project)
+	if !ok {
+		return &configError{"scope.project_key no existe en projects.items"}
+	}
+	if item.Multitenant {
+		if tenant == "" {
+			return &configError{"scope.tenant_key es obligatorio para proyecto multitenant"}
+		}
+		if !cfg.Projects.AllowDynamicTenants {
+			found := false
+			for _, t := range item.Tenants {
+				if strings.EqualFold(strings.TrimSpace(t), tenant) {
+					found = true
+					break
+				}
+			}
+			if !found {
+				return &configError{"scope.tenant_key no permitido para el proyecto"}
+			}
 		}
 	}
 	return nil

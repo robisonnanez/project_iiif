@@ -27,17 +27,34 @@ type migrationStartRequest struct {
 			PrivateKey string `json:"private_key"`
 		} `json:"ssh"`
 	} `json:"source"`
+	Scope struct {
+		ProjectKey string `json:"project_key"`
+		TenantKey  string `json:"tenant_key"`
+	} `json:"scope"`
 }
 
 type migrationStatus struct {
-	Running    bool      `json:"running"`
-	StartedAt  time.Time `json:"started_at,omitempty"`
-	FinishedAt time.Time `json:"finished_at,omitempty"`
-	ExitCode   int       `json:"exit_code"`
-	Message    string    `json:"message,omitempty"`
-	Logs       []string  `json:"logs"`
-	JobID      string    `json:"job_id,omitempty"`
-	Source     string    `json:"source,omitempty"`
+	Running         bool                `json:"running"`
+	StartedAt       time.Time           `json:"started_at,omitempty"`
+	FinishedAt      time.Time           `json:"finished_at,omitempty"`
+	ExitCode        int                 `json:"exit_code"`
+	Message         string              `json:"message,omitempty"`
+	Logs            []string            `json:"logs"`
+	JobID           string              `json:"job_id,omitempty"`
+	Source          string              `json:"source,omitempty"`
+	Metrics         map[string]int      `json:"metrics,omitempty"`
+	ProgressPercent int                 `json:"progress_percent,omitempty"`
+	CurrentDocument string              `json:"current_document,omitempty"`
+	Items           []migrationDocState `json:"items,omitempty"`
+}
+
+type migrationDocState struct {
+	DocumentID  string `json:"document_id"`
+	PDFName     string `json:"pdf_name"`
+	ImagesDone  int    `json:"images_done"`
+	ImagesTotal int    `json:"images_total"`
+	Status      string `json:"status"`
+	Message     string `json:"message,omitempty"`
 }
 
 type migrationRunner struct {
@@ -55,6 +72,8 @@ func newMigrationRunner(maxLogLines int) *migrationRunner {
 		status: migrationStatus{
 			ExitCode: -1,
 			Logs:     []string{},
+			Metrics:  map[string]int{},
+			Items:    []migrationDocState{},
 		},
 	}
 }
@@ -75,6 +94,10 @@ func (r *migrationRunner) Start(req migrationStartRequest) error {
 	r.status.Logs = []string{fmt.Sprintf("INFO inicio de migracion %s", sourceSummary)}
 	r.status.JobID = jobID
 	r.status.Source = sourceSummary
+	r.status.Metrics = map[string]int{}
+	r.status.ProgressPercent = 0
+	r.status.CurrentDocument = ""
+	r.status.Items = []migrationDocState{}
 	r.mu.Unlock()
 
 	go r.run(req)
@@ -87,6 +110,7 @@ func (r *migrationRunner) Status() migrationStatus {
 	copyLogs := append([]string(nil), r.status.Logs...)
 	s := r.status
 	s.Logs = copyLogs
+	s.Items = append([]migrationDocState(nil), r.status.Items...)
 	return s
 }
 
@@ -113,6 +137,12 @@ func (r *migrationRunner) run(req migrationStartRequest) {
 		env = append(env, "MIGRATION_SOURCE_SSH_USER="+req.Source.SSH.User)
 		env = append(env, "MIGRATION_SOURCE_SSH_PATH="+req.Source.SSH.Path)
 		env = append(env, "MIGRATION_SOURCE_SSH_PRIVATE_KEY="+req.Source.SSH.PrivateKey)
+	}
+	if strings.TrimSpace(req.Scope.ProjectKey) != "" {
+		env = append(env, "MIGRATION_SCOPE_PROJECT="+req.Scope.ProjectKey)
+	}
+	if strings.TrimSpace(req.Scope.TenantKey) != "" {
+		env = append(env, "MIGRATION_SCOPE_TENANT="+req.Scope.TenantKey)
 	}
 	cmd.Env = env
 	stdout, _ := cmd.StdoutPipe()
@@ -153,6 +183,9 @@ func (r *migrationRunner) run(req migrationStartRequest) {
 	r.status.FinishedAt = time.Now()
 	r.status.ExitCode = exitCode
 	r.status.Message = message
+	if r.status.ExitCode == 0 {
+		r.status.ProgressPercent = 100
+	}
 	r.mu.Unlock()
 }
 
@@ -181,6 +214,71 @@ func (r *migrationRunner) appendLog(line string) {
 		r.status.Logs = r.status.Logs[len(r.status.Logs)-r.maxLogLines:]
 	}
 	r.status.Logs = append(r.status.Logs, line)
+	if strings.HasPrefix(line, "PROGRESS_DOC ") {
+		r.updateDocProgress(strings.TrimPrefix(line, "PROGRESS_DOC "))
+	}
+	if strings.HasPrefix(line, "METRIC ") {
+		payload := strings.TrimPrefix(line, "METRIC ")
+		parts := strings.SplitN(payload, "=", 2)
+		if len(parts) == 2 {
+			key := strings.TrimSpace(parts[0])
+			value := strings.TrimSpace(parts[1])
+			if v, err := strconv.Atoi(value); err == nil {
+				r.status.Metrics[key] = v
+			}
+		}
+	}
+	r.recomputeProgress()
+}
+
+func (r *migrationRunner) updateDocProgress(payload string) {
+	parts := strings.SplitN(payload, "|", 6)
+	if len(parts) < 5 {
+		return
+	}
+	documentID := strings.TrimSpace(parts[0])
+	pdfName := strings.TrimSpace(parts[1])
+	imagesDone, _ := strconv.Atoi(strings.TrimSpace(parts[2]))
+	imagesTotal, _ := strconv.Atoi(strings.TrimSpace(parts[3]))
+	status := strings.TrimSpace(parts[4])
+	message := ""
+	if len(parts) == 6 {
+		message = strings.TrimSpace(parts[5])
+	}
+	r.status.CurrentDocument = pdfName
+	for i := range r.status.Items {
+		if r.status.Items[i].DocumentID == documentID {
+			r.status.Items[i].PDFName = pdfName
+			r.status.Items[i].ImagesDone = imagesDone
+			r.status.Items[i].ImagesTotal = imagesTotal
+			r.status.Items[i].Status = status
+			r.status.Items[i].Message = message
+			return
+		}
+	}
+	r.status.Items = append(r.status.Items, migrationDocState{
+		DocumentID:  documentID,
+		PDFName:     pdfName,
+		ImagesDone:  imagesDone,
+		ImagesTotal: imagesTotal,
+		Status:      status,
+		Message:     message,
+	})
+}
+
+func (r *migrationRunner) recomputeProgress() {
+	totalDocs := r.status.Metrics["docs_total"]
+	currentDoc := r.status.Metrics["current_doc"]
+	if totalDocs > 0 {
+		percent := int(float64(currentDoc) / float64(totalDocs) * 100)
+		if percent < 0 {
+			percent = 0
+		}
+		if percent > 100 {
+			percent = 100
+		}
+		r.status.ProgressPercent = percent
+	}
 }
 
 func (r *migrationRunner) finishWithError(message string, exitCode int) {
@@ -190,5 +288,6 @@ func (r *migrationRunner) finishWithError(message string, exitCode int) {
 	r.status.FinishedAt = time.Now()
 	r.status.ExitCode = exitCode
 	r.status.Message = message
+	r.status.ProgressPercent = 0
 	r.status.Logs = append(r.status.Logs, "ERROR "+message)
 }

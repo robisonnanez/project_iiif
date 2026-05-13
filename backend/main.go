@@ -92,6 +92,7 @@ func main() {
 		{
 			admin.GET("/config", adminHandler.GetConfig)
 			admin.PUT("/config", adminHandler.UpdateConfig)
+			admin.POST("/service/restart", adminHandler.RestartService)
 			admin.GET("/projects", adminHandler.GetProjects)
 			admin.GET("/documents/:id/images", adminHandler.GetDocumentImages)
 			admin.GET("/migrations/sources/local/browse", adminHandler.BrowseLocalMigrationSource)

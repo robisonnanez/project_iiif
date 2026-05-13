@@ -101,6 +101,7 @@
                   <th>Nombre</th>
                   <th>Proyecto</th>
                   <th>Tenant</th>
+                  <th>Migrado</th>
                   <th>Estado</th>
                   <th>Paginas</th>
                   <th>Manifest</th>
@@ -148,6 +149,7 @@
           <div class="toolbar-row">
             <button class="primary" id="start-migration-button" type="button">Iniciar migracion</button>
             <button class="secondary" id="refresh-migration-button" type="button">Actualizar estado</button>
+            <button class="secondary" id="open-migration-progress-button" type="button">Ver progreso</button>
             <span id="migration-status-badge" class="status">sin ejecutar</span>
           </div>
           <div class="panel">
@@ -216,6 +218,65 @@
     </main>
   </div>
   <div class="toast-stack" id="toast-stack" aria-live="polite"></div>
+  <div class="modal-backdrop" id="migration-scope-modal" hidden>
+    <div class="modal">
+      <h3>Contexto de migracion</h3>
+      <p>Selecciona proyecto y tenant antes de iniciar la migracion.</p>
+      <div class="modal-fields">
+        <label class="field">
+          <span>Proyecto</span>
+          <select id="migration-project"></select>
+        </label>
+        <label class="field" id="migration-tenant-field" hidden>
+          <span>Tenant</span>
+          <select id="migration-tenant"></select>
+        </label>
+        <label class="field">
+          <span>Ruta origen</span>
+          <input id="migration-source-preview" type="text" readonly>
+        </label>
+      </div>
+      <div class="modal-actions">
+        <button class="secondary" type="button" id="migration-cancel-button">Cancelar</button>
+        <button class="primary" type="button" id="migration-confirm-button">Iniciar migracion</button>
+      </div>
+    </div>
+  </div>
+  <div class="modal-backdrop" id="migration-progress-modal" hidden>
+    <div class="modal modal-wide">
+      <h3>Progreso de migracion</h3>
+      <p id="migration-progress-label">Preparando...</p>
+      <div class="progress-track">
+        <div class="progress-fill" id="migration-progress-fill" style="width: 0%;"></div>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>PDF</th><th>Imagenes</th><th>Estado</th><th>Mensaje</th></tr>
+          </thead>
+          <tbody id="migration-progress-table"></tbody>
+        </table>
+      </div>
+      <div class="modal-actions">
+        <button class="secondary" type="button" id="migration-progress-close">Cerrar</button>
+      </div>
+    </div>
+  </div>
+  <div class="modal-backdrop" id="restart-service-modal" hidden>
+    <div class="modal">
+      <h3>Reiniciar servicio</h3>
+      <p>La configuracion se guardo. Ingresa la contraseña para reiniciar <code>project-iiif</code>.</p>
+      <label class="field">
+        <span>Contraseña sudo</span>
+        <input id="restart-service-password" type="password" autocomplete="current-password" placeholder="********">
+      </label>
+      <div id="restart-service-status" class="muted"></div>
+      <div class="modal-actions">
+        <button class="secondary" type="button" id="restart-service-later">Mas tarde</button>
+        <button class="primary" type="button" id="restart-service-now">Reiniciar ahora</button>
+      </div>
+    </div>
+  </div>
 
   <script src="/dashboard/assets/app.js?v=20260511-tailwind-migrator"></script>
 </body>

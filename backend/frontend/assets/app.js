@@ -70,8 +70,18 @@ document.addEventListener("DOMContentLoaded", () => {
   $("#images-document").addEventListener("change", resetImages);
   $("#start-migration-button").addEventListener("click", startMigration);
   $("#refresh-migration-button").addEventListener("click", loadMigrationStatus);
+  $("#open-migration-progress-button").addEventListener("click", async () => {
+    openMigrationProgressModal();
+    await loadMigrationStatus();
+  });
   $("#migration-source-type").addEventListener("change", updateMigrationSourceMode);
   $("#browse-migration-local-button").addEventListener("click", browseMigrationLocalDirs);
+  $("#migration-cancel-button").addEventListener("click", closeMigrationModal);
+  $("#migration-confirm-button").addEventListener("click", submitMigrationFromModal);
+  $("#migration-project").addEventListener("change", () => updateTenantSelect("migration"));
+  $("#migration-progress-close").addEventListener("click", closeMigrationProgressModal);
+  $("#restart-service-later").addEventListener("click", closeRestartServiceModal);
+  $("#restart-service-now").addEventListener("click", restartServiceNow);
   window.addEventListener("popstate", () => showView(viewFromLocation(), false));
 
   loadProjects();
@@ -122,9 +132,20 @@ function refreshCurrentView() {
 }
 
 async function startMigration() {
-  // Lanza la migracion local->mysql en backend y activa seguimiento de estado.
-  const payload = collectMigrationPayload();
-  if (!payload) return;
+  // Abre modal para confirmar proyecto/tenant antes de iniciar la migracion.
+  const payload = collectMigrationPayload(false);
+  if (!payload) {
+    return;
+  }
+  openMigrationModal(payload);
+}
+
+async function submitMigrationFromModal() {
+  const payload = collectMigrationPayload(true);
+  if (!payload) {
+    return;
+  }
+  closeMigrationModal();
   try {
     const response = await fetch("/admin/api/migrations/local-to-mysql/start", {
       method: "POST",
@@ -134,6 +155,7 @@ async function startMigration() {
     const data = await response.json();
     if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);
     showToast(data.message || "Migracion iniciada.");
+    openMigrationProgressModal();
     await loadMigrationStatus();
   } catch (error) {
     showToast(`No se pudo iniciar migracion: ${error.message}`, "error");
@@ -167,6 +189,7 @@ async function loadMigrationStatus() {
 
     const logLines = Array.isArray(data.logs) && data.logs.length ? data.logs : ["Sin logs."];
     logs.textContent = logLines.join("\n");
+    renderMigrationProgress(data);
 
     toggleMigrationPolling(running);
     $("#start-migration-button").disabled = running;
@@ -174,6 +197,56 @@ async function loadMigrationStatus() {
     summary.textContent = `No se pudo consultar estado: ${error.message}`;
     toggleMigrationPolling(false);
   }
+}
+
+function openMigrationProgressModal() {
+  const modal = $("#migration-progress-modal");
+  if (modal) modal.hidden = false;
+}
+
+function closeMigrationProgressModal() {
+  const modal = $("#migration-progress-modal");
+  if (modal) modal.hidden = true;
+}
+
+function renderMigrationProgress(data) {
+  const fill = $("#migration-progress-fill");
+  const label = $("#migration-progress-label");
+  const table = $("#migration-progress-table");
+  if (!fill || !label || !table) return;
+  const percent = Number(data.progress_percent || 0);
+  fill.style.width = `${Math.max(0, Math.min(100, percent))}%`;
+  label.textContent = `${percent}% completado${data.current_document ? ` - ${data.current_document}` : ""}`;
+
+  const items = Array.isArray(data.items) ? [...data.items] : [];
+  items.sort((a, b) => migrationStatusRank(a.status) - migrationStatusRank(b.status));
+  if (!items.length) {
+    table.innerHTML = `<tr><td colspan="4">Sin detalle por documento aun.</td></tr>`;
+    return;
+  }
+  table.innerHTML = items.map((item) => `
+    <tr>
+      <td>${escapeHTML(item.pdf_name || item.document_id || "-")}</td>
+      <td>${Number(item.images_done || 0)} / ${Number(item.images_total || 0)}</td>
+      <td>${migrationStatusBadge(item.status)}</td>
+      <td>${escapeHTML(item.message || "-")}</td>
+    </tr>
+  `).join("");
+}
+
+function migrationStatusBadge(status) {
+  const value = String(status || "pending").toLowerCase();
+  if (value === "ok") return '<span class="status completed">OK</span>';
+  if (value === "error") return '<span class="status error">error</span>';
+  return '<span class="status">ejecutando</span>';
+}
+
+function migrationStatusRank(status) {
+  const value = String(status || "").toLowerCase();
+  if (value === "running") return 0;
+  if (value === "error") return 1;
+  if (value === "ok") return 2;
+  return 3;
 }
 
 function toggleMigrationPolling(shouldRun) {
@@ -196,20 +269,23 @@ function updateMigrationSourceMode() {
   if (sshBox) sshBox.hidden = sourceType !== "ssh";
 }
 
-function collectMigrationPayload() {
+function collectMigrationPayload(includeScope) {
   const sourceType = $("#migration-source-type")?.value || "local";
+  const scope = includeScope ? collectMigrationScope() : null;
   if (sourceType === "local") {
     const path = ($("#migration-local-path")?.value || "").trim();
     if (!path) {
       showToast("La ruta local es obligatoria.", "error");
       return null;
     }
-    return {
+    const payload = {
       source: {
         type: "local",
         local: { path },
       },
     };
+    if (scope) payload.scope = scope;
+    return payload;
   }
 
   const host = ($("#migration-ssh-host")?.value || "").trim();
@@ -221,7 +297,7 @@ function collectMigrationPayload() {
     showToast("Para SSH: host, usuario, ruta y llave privada son obligatorios.", "error");
     return null;
   }
-  return {
+  const payload = {
     source: {
       type: "ssh",
       ssh: {
@@ -233,6 +309,46 @@ function collectMigrationPayload() {
       },
     },
   };
+  if (scope) payload.scope = scope;
+  return payload;
+}
+
+function collectMigrationScope() {
+  const projectKey = ($("#migration-project")?.value || "").trim();
+  const tenantField = $("#migration-tenant-field");
+  const tenantKey = tenantField && !tenantField.hidden ? ($("#migration-tenant")?.value || "").trim() : "";
+  if (!projectKey) {
+    showToast("Selecciona un proyecto para la migracion.", "error");
+    return null;
+  }
+  const project = projectItems().find((item) => item.key === projectKey);
+  if (project?.multitenant && !tenantKey) {
+    showToast("Selecciona un tenant para el proyecto multitenant.", "error");
+    return null;
+  }
+  return { project_key: projectKey, tenant_key: tenantKey };
+}
+
+function openMigrationModal(payload) {
+  const modal = $("#migration-scope-modal");
+  if (!modal) return;
+  const projectSelect = $("#migration-project");
+  const defaultProject = state.projects.default_project || "default";
+  projectSelect.innerHTML = projectItems().map((project) => `
+    <option value="${escapeHTML(project.key)}">${escapeHTML(project.name || project.key)}</option>
+  `).join("");
+  projectSelect.value = defaultProject;
+  updateTenantSelect("migration");
+  const sourcePath = payload?.source?.type === "ssh"
+    ? `${payload.source.ssh.user}@${payload.source.ssh.host}:${payload.source.ssh.path}`
+    : payload?.source?.local?.path || "";
+  $("#migration-source-preview").value = sourcePath;
+  modal.hidden = false;
+}
+
+function closeMigrationModal() {
+  const modal = $("#migration-scope-modal");
+  if (modal) modal.hidden = true;
 }
 
 async function browseMigrationLocalDirs() {
@@ -301,7 +417,7 @@ async function loadDocuments(applyFilters = true) {
     state.filteredDocuments = await response.json();
     renderDocuments();
   } catch (error) {
-    $("#documents-table").innerHTML = `<tr><td colspan="7">No se pudieron cargar documentos: ${escapeHTML(error.message)}</td></tr>`;
+    $("#documents-table").innerHTML = `<tr><td colspan="8">No se pudieron cargar documentos: ${escapeHTML(error.message)}</td></tr>`;
   }
 }
 
@@ -439,7 +555,7 @@ function renderSummary() {
 function renderDocuments() {
   const docs = Array.isArray(state.filteredDocuments) ? state.filteredDocuments : [];
   if (!docs.length) {
-    $("#documents-table").innerHTML = `<tr><td colspan="7">Sin documentos cargados.</td></tr>`;
+    $("#documents-table").innerHTML = `<tr><td colspan="8">Sin documentos cargados.</td></tr>`;
     return;
   }
 
@@ -449,6 +565,7 @@ function renderDocuments() {
       <td>${escapeHTML(doc.name || "")}</td>
       <td>${escapeHTML(doc.projectKey || "default")}</td>
       <td>${escapeHTML(doc.tenantKey || "-")}</td>
+      <td>${migratedBadge(Boolean(doc.migratedFromLocal))}</td>
       <td>${statusBadge(doc.status)}</td>
       <td>${Number(doc.convertedPages || 0)} / ${Number(doc.totalPages || 0)}</td>
       <td>${doc.manifestUrl ? `<a href="${escapeHTML(doc.manifestUrl)}" target="_blank" rel="noreferrer">Ver</a>` : "-"}</td>
@@ -541,6 +658,7 @@ function renderImages() {
           <th>Pagina</th>
           <th>ID imagen</th>
           <th>Proyecto / Tenant</th>
+          <th>Migrada</th>
           <th>Dimensiones</th>
           <th>URL IIIF</th>
           <th>Accion</th>
@@ -557,6 +675,7 @@ function renderImages() {
             <td>${Number(image.page_number || 0)}</td>
             <td><code>${escapeHTML(image.image_id || "")}</code></td>
             <td>${escapeHTML(image.project_key || "default")} ${image.tenant_key ? `/ ${escapeHTML(image.tenant_key)}` : ""}</td>
+            <td>${migratedBadge(Boolean(image.migrated_from_local))}</td>
             <td>${Number(image.width || 0)} x ${Number(image.height || 0)} px</td>
             <td><a class="iiif-url" href="${escapeHTML(image.iiif_url)}" target="_blank" rel="noreferrer">${escapeHTML(image.iiif_url)}</a></td>
             <td><a class="table-action" href="${escapeHTML(image.iiif_url)}" target="_blank" rel="noreferrer">Abrir</a></td>
@@ -686,8 +805,71 @@ async function saveConfig(event) {
     state.config = data.config;
     renderConfigForm();
     showToast(data.message || "Configuracion guardada.");
+    if (data.requires_restart) {
+      openRestartServiceModal();
+    }
   } catch (error) {
     showToast(`No se pudo guardar: ${error.message}`, "error");
+  }
+}
+
+function openRestartServiceModal() {
+  const modal = $("#restart-service-modal");
+  const status = $("#restart-service-status");
+  const password = $("#restart-service-password");
+  if (status) status.textContent = "";
+  if (password) password.value = "";
+  if (modal) modal.hidden = false;
+}
+
+function closeRestartServiceModal() {
+  const modal = $("#restart-service-modal");
+  const status = $("#restart-service-status");
+  const password = $("#restart-service-password");
+  if (password) password.value = "";
+  if (status) status.textContent = "";
+  if (modal) modal.hidden = true;
+  showToast("Configuracion guardada. Reinicia el servicio luego para aplicar cambios.", "success");
+}
+
+async function restartServiceNow() {
+  const status = $("#restart-service-status");
+  const passwordInput = $("#restart-service-password");
+  const password = (passwordInput?.value || "").trim();
+  if (!password) {
+    if (status) status.textContent = "Ingresa la contraseña para continuar.";
+    return;
+  }
+
+  const restartButton = $("#restart-service-now");
+  const laterButton = $("#restart-service-later");
+  if (restartButton) restartButton.disabled = true;
+  if (laterButton) laterButton.disabled = true;
+  if (status) status.textContent = "Reiniciando servicio...";
+
+  try {
+    const response = await fetch("/admin/api/service/restart", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ password }),
+    });
+    const data = await response.json();
+    if (!response.ok || !data.ok) {
+      throw new Error(data.error || data.details || `HTTP ${response.status}`);
+    }
+    if (status) status.textContent = "Servicio reiniciado correctamente.";
+    showToast(data.message || "Servicio reiniciado correctamente.");
+    if (passwordInput) passwordInput.value = "";
+    window.setTimeout(() => {
+      const modal = $("#restart-service-modal");
+      if (modal) modal.hidden = true;
+    }, 1200);
+  } catch (error) {
+    if (status) status.textContent = `No se pudo reiniciar: ${error.message}`;
+    showToast(`No se pudo reiniciar servicio: ${error.message}`, "error");
+  } finally {
+    if (restartButton) restartButton.disabled = false;
+    if (laterButton) laterButton.disabled = false;
   }
 }
 
@@ -755,7 +937,7 @@ function collectConfigPayload() {
 }
 
 function renderProjectControls() {
-  ["upload", "documents", "images"].forEach((target) => {
+  ["upload", "documents", "images", "migration"].forEach((target) => {
     const select = $(`#${target}-project`);
     if (!select) return;
     const current = select.value;
@@ -765,7 +947,7 @@ function renderProjectControls() {
       <option value="${escapeHTML(project.key)}">${escapeHTML(project.name || project.key)}</option>
     `).join("");
     const defaultProject = state.projects.default_project || "default";
-    if (target !== "upload" && current === "") {
+    if ((target === "documents" || target === "images") && current === "") {
       select.value = "";
     } else {
       select.value = projects.some((project) => project.key === current) ? current : defaultProject;
@@ -879,6 +1061,10 @@ function statusBadge(status) {
   const safeStatus = escapeHTML(status || "unknown");
   const className = status === "completed" ? "completed" : status === "error" ? "error" : "";
   return `<span class="status ${className}">${safeStatus}</span>`;
+}
+
+function migratedBadge(value) {
+  return value ? '<span class="status completed">Si</span>' : '<span class="status">No</span>';
 }
 
 function escapeHTML(value) {

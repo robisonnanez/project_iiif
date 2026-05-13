@@ -64,7 +64,7 @@ func (ms *MySQLStorage) UpdateDocument(doc *models.PDFDocument) error {
 
 func (ms *MySQLStorage) GetDocument(id string) (*models.PDFDocument, error) {
 	row := ms.db.QueryRow(`
-		SELECT id, original_name, COALESCE(project_key, 'default'), COALESCE(tenant_key, ''), status, total_pages, converted_pages, pdf_path, thumbnail_path, manifest_url, created_at
+		SELECT id, original_name, COALESCE(project_key, 'default'), COALESCE(tenant_key, ''), COALESCE(migrated_from_local, 0), status, total_pages, converted_pages, pdf_path, thumbnail_path, manifest_url, created_at
 		FROM documents
 		WHERE id = ?
 	`, id)
@@ -76,6 +76,7 @@ func (ms *MySQLStorage) GetDocument(id string) (*models.PDFDocument, error) {
 		&doc.Name,
 		&doc.ProjectKey,
 		&doc.TenantKey,
+		&doc.MigratedFromLocal,
 		&doc.Status,
 		&doc.TotalPages,
 		&doc.ConvertedPages,
@@ -100,7 +101,7 @@ func (ms *MySQLStorage) GetAllDocuments() ([]*models.PDFDocument, error) {
 
 func (ms *MySQLStorage) GetDocumentsByScope(projectKey, tenantKey string) ([]*models.PDFDocument, error) {
 	query := `
-		SELECT id, original_name, COALESCE(project_key, 'default'), COALESCE(tenant_key, ''), status, total_pages, converted_pages, pdf_path, thumbnail_path, manifest_url, created_at
+		SELECT id, original_name, COALESCE(project_key, 'default'), COALESCE(tenant_key, ''), COALESCE(migrated_from_local, 0), status, total_pages, converted_pages, pdf_path, thumbnail_path, manifest_url, created_at
 		FROM documents`
 	var args []interface{}
 	var conditions []string
@@ -132,6 +133,7 @@ func (ms *MySQLStorage) GetDocumentsByScope(projectKey, tenantKey string) ([]*mo
 			&doc.Name,
 			&doc.ProjectKey,
 			&doc.TenantKey,
+			&doc.MigratedFromLocal,
 			&doc.Status,
 			&doc.TotalPages,
 			&doc.ConvertedPages,
@@ -185,12 +187,13 @@ func (ms *MySQLStorage) SaveDocumentImage(image *models.DocumentImage) error {
 	}
 
 	_, err := ms.db.Exec(`
-		INSERT INTO document_images (id, document_id, project_key, tenant_key, page_number, image_path, width, height, format, media_type, byte_size, created_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		INSERT INTO document_images (id, document_id, project_key, tenant_key, migrated_from_local, page_number, image_path, width, height, format, media_type, byte_size, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON DUPLICATE KEY UPDATE
 			document_id = VALUES(document_id),
 			project_key = VALUES(project_key),
 			tenant_key = VALUES(tenant_key),
+			migrated_from_local = VALUES(migrated_from_local),
 			page_number = VALUES(page_number),
 			image_path = VALUES(image_path),
 			width = VALUES(width),
@@ -198,7 +201,7 @@ func (ms *MySQLStorage) SaveDocumentImage(image *models.DocumentImage) error {
 			format = VALUES(format),
 			media_type = VALUES(media_type),
 			byte_size = VALUES(byte_size)
-	`, image.ID, image.DocumentID, nullString(defaultProject(image.ProjectKey)), nullString(image.TenantKey), image.PageNumber, nullString(image.ImagePath), image.Width, image.Height, image.Format, nullString(image.MediaType), image.ByteSize, image.CreatedAt)
+	`, image.ID, image.DocumentID, nullString(defaultProject(image.ProjectKey)), nullString(image.TenantKey), image.MigratedFromLocal, image.PageNumber, nullString(image.ImagePath), image.Width, image.Height, image.Format, nullString(image.MediaType), image.ByteSize, image.CreatedAt)
 
 	return err
 }
@@ -214,7 +217,7 @@ func (ms *MySQLStorage) SaveDocumentImageData(imageID string, data []byte, media
 
 func (ms *MySQLStorage) GetDocumentImage(id string) (*models.DocumentImage, error) {
 	row := ms.db.QueryRow(`
-		SELECT id, document_id, COALESCE(project_key, 'default'), COALESCE(tenant_key, ''), page_number, image_path, width, height, format, media_type, byte_size, created_at
+		SELECT id, document_id, COALESCE(project_key, 'default'), COALESCE(tenant_key, ''), COALESCE(migrated_from_local, 0), page_number, image_path, width, height, format, media_type, byte_size, created_at
 		FROM document_images
 		WHERE id = ?
 	`, id)
@@ -223,7 +226,7 @@ func (ms *MySQLStorage) GetDocumentImage(id string) (*models.DocumentImage, erro
 
 func (ms *MySQLStorage) GetDocumentImageByPage(documentID string, page int) (*models.DocumentImage, error) {
 	row := ms.db.QueryRow(`
-		SELECT id, document_id, COALESCE(project_key, 'default'), COALESCE(tenant_key, ''), page_number, image_path, width, height, format, media_type, byte_size, created_at
+		SELECT id, document_id, COALESCE(project_key, 'default'), COALESCE(tenant_key, ''), COALESCE(migrated_from_local, 0), page_number, image_path, width, height, format, media_type, byte_size, created_at
 		FROM document_images
 		WHERE document_id = ? AND page_number = ?
 	`, documentID, page)
@@ -233,7 +236,7 @@ func (ms *MySQLStorage) GetDocumentImageByPage(documentID string, page int) (*mo
 func (ms *MySQLStorage) GetDocumentImages(documentID string) ([]*models.DocumentImage, error) {
 	// Entrega las paginas del documento ordenadas para la galeria administrativa.
 	rows, err := ms.db.Query(`
-		SELECT id, document_id, COALESCE(project_key, 'default'), COALESCE(tenant_key, ''), page_number, image_path, width, height, format, media_type, byte_size, created_at
+		SELECT id, document_id, COALESCE(project_key, 'default'), COALESCE(tenant_key, ''), COALESCE(migrated_from_local, 0), page_number, image_path, width, height, format, media_type, byte_size, created_at
 		FROM document_images
 		WHERE document_id = ?
 		ORDER BY page_number
@@ -286,12 +289,13 @@ func (ms *MySQLStorage) upsertDocument(doc *models.PDFDocument) error {
 	}
 
 	_, err := ms.db.Exec(`
-		INSERT INTO documents (id, original_name, project_key, tenant_key, status, total_pages, converted_pages, pdf_path, thumbnail_path, manifest_url, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
+		INSERT INTO documents (id, original_name, project_key, tenant_key, migrated_from_local, status, total_pages, converted_pages, pdf_path, thumbnail_path, manifest_url, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
 		ON DUPLICATE KEY UPDATE
 			original_name = VALUES(original_name),
 			project_key = VALUES(project_key),
 			tenant_key = VALUES(tenant_key),
+			migrated_from_local = VALUES(migrated_from_local),
 			status = VALUES(status),
 			total_pages = VALUES(total_pages),
 			converted_pages = VALUES(converted_pages),
@@ -299,7 +303,7 @@ func (ms *MySQLStorage) upsertDocument(doc *models.PDFDocument) error {
 			thumbnail_path = VALUES(thumbnail_path),
 			manifest_url = VALUES(manifest_url),
 			updated_at = NOW()
-	`, doc.ID, doc.Name, nullString(defaultProject(doc.ProjectKey)), nullString(doc.TenantKey), doc.Status, doc.TotalPages, doc.ConvertedPages, nullString(doc.FilePath), nullString(doc.ThumbnailURL), nullString(doc.ManifestURL), doc.UploadDate)
+	`, doc.ID, doc.Name, nullString(defaultProject(doc.ProjectKey)), nullString(doc.TenantKey), doc.MigratedFromLocal, doc.Status, doc.TotalPages, doc.ConvertedPages, nullString(doc.FilePath), nullString(doc.ThumbnailURL), nullString(doc.ManifestURL), doc.UploadDate)
 
 	return err
 }
@@ -330,6 +334,7 @@ func scanDocumentImage(row *sql.Row) (*models.DocumentImage, error) {
 		&image.DocumentID,
 		&image.ProjectKey,
 		&image.TenantKey,
+		&image.MigratedFromLocal,
 		&image.PageNumber,
 		&imagePath,
 		&image.Width,
@@ -356,6 +361,7 @@ func scanDocumentImageRows(rows *sql.Rows) (*models.DocumentImage, error) {
 		&image.DocumentID,
 		&image.ProjectKey,
 		&image.TenantKey,
+		&image.MigratedFromLocal,
 		&image.PageNumber,
 		&imagePath,
 		&image.Width,

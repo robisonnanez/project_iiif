@@ -5,19 +5,24 @@ import (
 	"encoding/json"
 	"fmt"
 	"image"
+	"image/jpeg"
 	_ "image/jpeg"
 	_ "image/png"
 	"log"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"iiif-pdf-server/internal/config"
 	"iiif-pdf-server/internal/models"
 	"iiif-pdf-server/internal/storage"
 
+	"github.com/gen2brain/go-fitz"
+	"github.com/google/uuid"
 	"golang.org/x/crypto/ssh"
 )
 
@@ -35,6 +40,11 @@ type stats struct {
 	MigratedImgs  int
 	SkippedImgs   int
 	ErroredImages int
+
+	DocsFromJSON      int
+	DocsFromPDFLayout int
+	ImagesFoundOnDisk int
+	ImagesFallback    int
 }
 
 type sourceConfig struct {
@@ -55,6 +65,8 @@ type sourceDocument struct {
 	PDFBytes  []byte
 	Images    []*models.DocumentImage
 	ImageData map[string][]byte
+	FromJSON  bool
+	SourceKey string
 }
 
 func main() {
@@ -93,17 +105,37 @@ func main() {
 	s.TotalDocuments = len(docs)
 	log.Printf("INFO documentos detectados: %d", len(docs))
 
-	for _, item := range docs {
-		if err := migrateDocument(item, cfg, mysqlStore, &s); err != nil {
+	for index, item := range docs {
+		log.Printf("PROGRESS_DOC %s|%s|%d|%d|running|iniciado", item.Doc.ID, item.Doc.Name, 0, len(item.Images))
+		if item.FromJSON {
+			s.DocsFromJSON++
+		} else {
+			s.DocsFromPDFLayout++
+		}
+		s.ImagesFoundOnDisk += len(item.Images)
+		if err := migrateDocument(item, mysqlStore, &s); err != nil {
 			s.ErroredDocs++
 			log.Printf("ERROR documento %s: %v", item.Doc.ID, err)
+			log.Printf("PROGRESS_DOC %s|%s|%d|%d|error|%s", item.Doc.ID, item.Doc.Name, 0, len(item.Images), sanitizeProgressMessage(err.Error()))
+			log.Printf("METRIC current_doc=%d", index+1)
+			continue
 		}
+		log.Printf("PROGRESS_DOC %s|%s|%d|%d|ok|migracion exitosa", item.Doc.ID, item.Doc.Name, len(item.Images), len(item.Images))
+		log.Printf("METRIC current_doc=%d", index+1)
 	}
 
 	log.Printf("INFO resumen")
 	log.Printf("INFO documentos total=%d migrados=%d omitidos=%d errores=%d", s.TotalDocuments, s.MigratedDocs, s.SkippedDocs, s.ErroredDocs)
 	log.Printf("INFO pdf total=%d migrados=%d omitidos=%d errores=%d", s.TotalPDFs, s.MigratedPDFs, s.SkippedPDFs, s.ErroredPDFs)
 	log.Printf("INFO imagenes total=%d migradas=%d omitidas=%d errores=%d", s.TotalImages, s.MigratedImgs, s.SkippedImgs, s.ErroredImages)
+	log.Printf("METRIC docs_discovered=%d", s.TotalDocuments)
+	log.Printf("METRIC docs_from_json=%d", s.DocsFromJSON)
+	log.Printf("METRIC docs_from_pdf_layout=%d", s.DocsFromPDFLayout)
+	log.Printf("METRIC images_found_on_disk=%d", s.ImagesFoundOnDisk)
+	log.Printf("METRIC images_migrated=%d", s.MigratedImgs)
+	log.Printf("METRIC images_fallback_converted=%d", s.ImagesFallback)
+	log.Printf("METRIC images_skipped_existing_blob=%d", s.SkippedImgs)
+	log.Printf("METRIC docs_total=%d", s.TotalDocuments)
 }
 
 func readSourceConfig(cfg *config.Config) sourceConfig {
@@ -175,7 +207,24 @@ func discoverLocalDocuments(cfg *config.Config, basePath string) ([]sourceDocume
 			PDFBytes:  pdfBytes,
 			Images:    images,
 			ImageData: imageData,
+			FromJSON:  true,
+			SourceKey: normalizeSourcePath(pdfPath),
 		})
+	}
+
+	layoutDocs, err := discoverPDFLayoutDocuments(cfg, basePath)
+	if err != nil {
+		log.Printf("WARN no se pudo procesar estructura pdf+images: %v", err)
+	}
+	existing := map[string]struct{}{}
+	for _, item := range out {
+		existing[item.Doc.ID] = struct{}{}
+	}
+	for _, item := range layoutDocs {
+		if _, ok := existing[item.Doc.ID]; ok {
+			continue
+		}
+		out = append(out, item)
 	}
 	return out, nil
 }
@@ -221,13 +270,33 @@ func discoverSSHDocuments(cfg *config.Config, src sourceConfig) ([]sourceDocumen
 			PDFBytes:  pdfBytes,
 			Images:    images,
 			ImageData: imageData,
+			SourceKey: normalizeSourcePath(pdfPath),
 		})
 	}
 	return out, nil
 }
 
-func migrateDocument(item sourceDocument, cfg *config.Config, mysqlStore storage.Storage, s *stats) error {
+func migrateDocument(item sourceDocument, mysqlStore storage.Storage, s *stats) error {
 	doc := item.Doc
+	originalImageData := item.ImageData
+	if strings.TrimSpace(item.SourceKey) == "" {
+		item.SourceKey = normalizeSourcePath(doc.FilePath)
+	}
+	doc.ID = stableDocumentID(doc.ProjectKey, doc.TenantKey, item.SourceKey, doc.Name)
+	doc.MigratedFromLocal = true
+	for _, img := range item.Images {
+		oldID := img.ID
+		img.ID = stableImageID(doc.ID, img.PageNumber)
+		img.DocumentID = doc.ID
+		img.MigratedFromLocal = true
+		if data, ok := originalImageData[oldID]; ok {
+			if item.ImageData == nil {
+				item.ImageData = map[string][]byte{}
+			}
+			item.ImageData[img.ID] = data
+		}
+	}
+
 	if err := mysqlStore.SaveDocument(doc); err != nil {
 		return fmt.Errorf("no se pudo guardar metadata documento: %w", err)
 	}
@@ -240,28 +309,44 @@ func migrateDocument(item sourceDocument, cfg *config.Config, mysqlStore storage
 	}
 
 	if len(item.Images) == 0 {
-		log.Printf("WARN documento %s no tiene imagenes para migrar", doc.ID)
-		return nil
+		if err := fillFallbackImagesFromPDF(&item); err != nil {
+			log.Printf("WARN documento %s sin imagenes y no se pudo convertir fallback: %v", doc.ID, err)
+		} else {
+			s.ImagesFallback += len(item.Images)
+		}
 	}
 	for _, img := range item.Images {
 		s.TotalImages++
+		oldID := img.ID
+		img.ID = stableImageID(doc.ID, img.PageNumber)
+		img.DocumentID = doc.ID
+		img.MigratedFromLocal = true
 		if strings.TrimSpace(img.ProjectKey) == "" {
 			img.ProjectKey = doc.ProjectKey
 		}
 		if strings.TrimSpace(img.TenantKey) == "" {
 			img.TenantKey = doc.TenantKey
 		}
+		if data, ok := originalImageData[oldID]; ok {
+			if item.ImageData == nil {
+				item.ImageData = map[string][]byte{}
+			}
+			item.ImageData[img.ID] = data
+		}
 		data := item.ImageData[img.ID]
 		if err := migrateImageBlob(img, data, mysqlStore); err != nil {
 			if err == errSkipImageBlob {
 				s.SkippedImgs++
+				log.Printf("PROGRESS_IMG %s|%d|%d", doc.ID, s.MigratedImgs+s.SkippedImgs+s.ErroredImages, s.TotalImages)
 				continue
 			}
 			s.ErroredImages++
 			log.Printf("ERROR imagen %s (doc=%s page=%d): %v", img.ID, doc.ID, img.PageNumber, err)
+			log.Printf("PROGRESS_IMG %s|%d|%d", doc.ID, s.MigratedImgs+s.SkippedImgs+s.ErroredImages, s.TotalImages)
 			continue
 		}
 		s.MigratedImgs++
+		log.Printf("PROGRESS_IMG %s|%d|%d", doc.ID, s.MigratedImgs+s.SkippedImgs+s.ErroredImages, s.TotalImages)
 	}
 	return nil
 }
@@ -344,6 +429,132 @@ func discoverDocumentIDs(basePath string) ([]string, error) {
 	}
 	sort.Strings(out)
 	return out, nil
+}
+
+func discoverPDFLayoutDocuments(cfg *config.Config, basePath string) ([]sourceDocument, error) {
+	pdfPaths := []string{}
+	err := filepath.WalkDir(basePath, func(path string, d os.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return nil
+		}
+		if strings.EqualFold(filepath.Ext(d.Name()), ".pdf") {
+			pdfPaths = append(pdfPaths, path)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	docs := []sourceDocument{}
+	for _, pdfPath := range pdfPaths {
+		pdfData, err := os.ReadFile(pdfPath)
+		if err != nil || len(pdfData) == 0 {
+			continue
+		}
+		baseName := strings.TrimSuffix(filepath.Base(pdfPath), filepath.Ext(pdfPath))
+		tenantFromPath := inferTenantFromPath(pdfPath, "pdfs")
+		scopeProject := strings.TrimSpace(os.Getenv("MIGRATION_SCOPE_PROJECT"))
+		scopeTenant := strings.TrimSpace(os.Getenv("MIGRATION_SCOPE_TENANT"))
+		project := scopeProject
+		if project == "" {
+			project = cfg.Projects.DefaultProject
+			if project == "" {
+				project = "default"
+			}
+		}
+		tenant := tenantFromPath
+		if scopeTenant != "" {
+			if tenant != "" && !strings.EqualFold(scopeTenant, tenant) {
+				log.Printf("WARN tenant inferido '%s' difiere de tenant modal '%s' para %s", tenant, scopeTenant, baseName)
+			}
+			tenant = scopeTenant
+		}
+		doc := &models.PDFDocument{
+			ID:             baseName,
+			Name:           filepath.Base(pdfPath),
+			ProjectKey:     project,
+			TenantKey:      tenant,
+			UploadDate:     time.Now(),
+			Status:         "completed",
+			TotalPages:     0,
+			ConvertedPages: 0,
+		}
+		images, imageData := readImagesForPDFLayout(cfg, basePath, tenantFromPath, baseName, doc.ID)
+		doc.TotalPages = len(images)
+		doc.ConvertedPages = len(images)
+		if doc.TotalPages == 0 {
+			doc.Status = "processing"
+		}
+		docs = append(docs, sourceDocument{
+			Doc:       doc,
+			PDFPath:   pdfPath,
+			PDFBytes:  pdfData,
+			Images:    images,
+			ImageData: imageData,
+			FromJSON:  false,
+			SourceKey: normalizeSourcePath(pdfPath),
+		})
+	}
+	return docs, nil
+}
+
+func readImagesForPDFLayout(cfg *config.Config, basePath, tenant, pdfDir, documentID string) ([]*models.DocumentImage, map[string][]byte) {
+	imageData := map[string][]byte{}
+	images := []*models.DocumentImage{}
+
+	candidates := []string{
+		filepath.Join(cfg.Storage.DataPath, "images", tenant, pdfDir),
+		filepath.Join(filepath.Dir(basePath), "images", tenant, pdfDir),
+		filepath.Join(basePath, pdfDir),
+	}
+	var imageRoot string
+	for _, c := range candidates {
+		if dirExists(c) {
+			imageRoot = c
+			break
+		}
+	}
+	if imageRoot == "" {
+		return images, imageData
+	}
+
+	files := []string{}
+	_ = filepath.WalkDir(imageRoot, func(path string, d os.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return nil
+		}
+		ext := strings.ToLower(filepath.Ext(d.Name()))
+		if ext == ".jpg" || ext == ".jpeg" || ext == ".png" || ext == ".webp" {
+			files = append(files, path)
+		}
+		return nil
+	})
+	sort.Strings(files)
+	for i, path := range files {
+		data, err := os.ReadFile(path)
+		if err != nil || len(data) == 0 {
+			continue
+		}
+		page := inferPageNumber(path, i+1)
+		id := fmt.Sprintf("%s_page_%d", documentID, page)
+		w, h := imageDimensionsBytes(data)
+		format := normalizeExt(filepath.Ext(path))
+		images = append(images, &models.DocumentImage{
+			ID:         id,
+			DocumentID: documentID,
+			PageNumber: page,
+			Width:      w,
+			Height:     h,
+			Format:     format,
+			MediaType:  mediaTypeFromFormat(format),
+			ByteSize:   int64(len(data)),
+			CreatedAt:  time.Now(),
+		})
+		imageData[id] = data
+	}
+	sort.Slice(images, func(i, j int) bool { return images[i].PageNumber < images[j].PageNumber })
+	return images, imageData
 }
 
 func resolvePDFPath(doc *models.PDFDocument, cfg *config.Config, root string) string {
@@ -597,4 +808,136 @@ func normalizeExt(ext string) string {
 		return "jpg"
 	}
 	return ext
+}
+
+func dirExists(path string) bool {
+	if strings.TrimSpace(path) == "" {
+		return false
+	}
+	st, err := os.Stat(path)
+	return err == nil && st.IsDir()
+}
+
+func inferTenantFromPath(path, marker string) string {
+	parts := strings.Split(filepath.ToSlash(path), "/")
+	for i := 0; i < len(parts)-1; i++ {
+		if parts[i] == marker {
+			return parts[i+1]
+		}
+	}
+	return ""
+}
+
+func inferPageNumber(path string, fallback int) int {
+	name := strings.ToLower(filepath.Base(path))
+	re := regexp.MustCompile(`(?:page|p)[_\-\s]?(\d+)`)
+	m := re.FindStringSubmatch(name)
+	if len(m) == 2 {
+		if value, err := strconv.Atoi(m[1]); err == nil && value > 0 {
+			return value
+		}
+	}
+	reNum := regexp.MustCompile(`(\d+)`)
+	m = reNum.FindStringSubmatch(name)
+	if len(m) == 2 {
+		if value, err := strconv.Atoi(m[1]); err == nil && value > 0 {
+			return value
+		}
+	}
+	return fallback
+}
+
+func fillFallbackImagesFromPDF(item *sourceDocument) error {
+	if len(item.PDFBytes) == 0 {
+		return fmt.Errorf("pdf sin bytes")
+	}
+	tmpFile, err := os.CreateTemp("", "iiif-migrate-*.pdf")
+	if err != nil {
+		return err
+	}
+	tmpPath := tmpFile.Name()
+	if _, err := tmpFile.Write(item.PDFBytes); err != nil {
+		tmpFile.Close()
+		_ = os.Remove(tmpPath)
+		return err
+	}
+	tmpFile.Close()
+	defer os.Remove(tmpPath)
+
+	doc, err := fitz.New(tmpPath)
+	if err != nil {
+		return err
+	}
+	defer doc.Close()
+
+	total := doc.NumPage()
+	images := make([]*models.DocumentImage, 0, total)
+	imageData := map[string][]byte{}
+	for i := 0; i < total; i++ {
+		img, err := doc.Image(i)
+		if err != nil {
+			continue
+		}
+		buf := new(bytes.Buffer)
+		if err := jpeg.Encode(buf, img, &jpeg.Options{Quality: 90}); err != nil {
+			continue
+		}
+		page := i + 1
+		id := fmt.Sprintf("%s_page_%d", item.Doc.ID, page)
+		w, h := imageDimensionsBytes(buf.Bytes())
+		images = append(images, &models.DocumentImage{
+			ID:         id,
+			DocumentID: item.Doc.ID,
+			ProjectKey: item.Doc.ProjectKey,
+			TenantKey:  item.Doc.TenantKey,
+			PageNumber: page,
+			Width:      w,
+			Height:     h,
+			Format:     "jpg",
+			MediaType:  "image/jpeg",
+			ByteSize:   int64(buf.Len()),
+			CreatedAt:  time.Now(),
+		})
+		imageData[id] = buf.Bytes()
+	}
+	item.Images = images
+	item.ImageData = imageData
+	item.Doc.TotalPages = maxInt(item.Doc.TotalPages, len(images))
+	item.Doc.ConvertedPages = len(images)
+	if len(images) > 0 {
+		item.Doc.Status = "completed"
+	}
+	return nil
+}
+
+func maxInt(a, b int) int {
+	if b > a {
+		return b
+	}
+	return a
+}
+
+var migrationNamespaceUUID = uuid.MustParse("d26ef5bc-8d99-4f87-a0c2-4c6052a4e2cc")
+
+func stableDocumentID(project, tenant, sourceKey, name string) string {
+	key := fmt.Sprintf("%s|%s|%s|%s",
+		strings.ToLower(strings.TrimSpace(project)),
+		strings.ToLower(strings.TrimSpace(tenant)),
+		normalizeSourcePath(sourceKey),
+		strings.ToLower(strings.TrimSpace(name)),
+	)
+	return uuid.NewSHA1(migrationNamespaceUUID, []byte(key)).String()
+}
+
+func stableImageID(documentID string, page int) string {
+	key := fmt.Sprintf("%s|%d", documentID, page)
+	return uuid.NewSHA1(migrationNamespaceUUID, []byte(key)).String()
+}
+
+func normalizeSourcePath(path string) string {
+	return strings.ToLower(strings.ReplaceAll(filepath.ToSlash(strings.TrimSpace(path)), "//", "/"))
+}
+
+func sanitizeProgressMessage(message string) string {
+	return strings.TrimSpace(strings.ReplaceAll(message, "|", "/"))
 }
