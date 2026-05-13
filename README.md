@@ -131,6 +131,40 @@ http://localhost:8080/iiif/3/{image_id}/full/max/0/default.jpg
 
 - La vista **Configuración** permite editar campos permitidos del `config.yaml`. Los passwords se muestran como `********`; si se dejan así, se conserva el valor real.
 - Después de guardar configuración, reinicia el servicio para aplicar cambios sensibles como puerto, storage o credenciales.
+- La vista **Migración** permite elegir fuente `local` o `SSH`, explorar directorios locales permitidos y ejecutar la migración con logs en vivo.
+
+### Build de estilos (Tailwind CLI)
+
+El frontend incluye toolchain local de Tailwind CLI en `backend/frontend`.
+
+```bash
+cd backend/frontend
+npm install
+npm run build:css
+```
+
+Para desarrollo:
+
+```bash
+npm run watch:css
+```
+
+El CSS compilado se publica en `backend/frontend/assets/styles.css`.
+
+## Migracion local a MySQL BLOB
+
+Si tienes documentos e imagenes historicas en filesystem local y quieres pasarlas a MySQL BLOB:
+
+```bash
+cd backend
+go run ./cmd/migrate-local-to-mysql
+```
+
+Comportamiento del migrador:
+- Importa metadata de documentos e imagenes.
+- Carga `pdf_blob` y `image_blob` desde archivos locales.
+- Es idempotente: si el blob ya existe, lo omite.
+- No borra ni mueve archivos locales al finalizar.
 
 ## API Endpoints
 
@@ -150,6 +184,9 @@ http://localhost:8080/iiif/3/{image_id}/full/max/0/default.jpg
 - `PUT /admin/api/config` - Guardar configuración permitida
 - `GET /admin/api/projects` - Listar proyectos y tenants configurados
 - `GET /admin/api/documents/:id/images` - Listar imágenes IIIF de un documento
+- `GET /admin/api/migrations/sources/local/browse` - Explorar directorios locales permitidos
+- `POST /admin/api/migrations/local-to-mysql/start` - Iniciar migración local/SSH -> MySQL BLOB
+- `GET /admin/api/migrations/local-to-mysql/status` - Estado y logs de migración
 
 ### IIIF
 - `GET /api/iiif/:id/manifest` - Manifiesto IIIF

@@ -105,3 +105,13 @@ performance:
   queue_size: 100
   cleanup_interval: 3600
   max_cache_size: "1GB"
+
+migration:
+  enabled: true
+  allowed_local_roots:
+    - "./data"
+    - "/var/lib/project_iiif"
+  max_log_lines: 1000
+  ssh:
+    connect_timeout_sec: 15
+    allowed_hosts: []

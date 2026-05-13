@@ -383,3 +383,27 @@ func defaultProject(value string) string {
 	}
 	return value
 }
+
+func (ms *MySQLStorage) HasDocumentPDFBlob(documentID string) (bool, error) {
+	row := ms.db.QueryRow("SELECT COALESCE(pdf_size, 0) FROM documents WHERE id = ?", documentID)
+	var pdfSize int64
+	if err := row.Scan(&pdfSize); err != nil {
+		if err == sql.ErrNoRows {
+			return false, nil
+		}
+		return false, err
+	}
+	return pdfSize > 0, nil
+}
+
+func (ms *MySQLStorage) HasImageBlob(imageID string) (bool, error) {
+	row := ms.db.QueryRow("SELECT COALESCE(byte_size, 0) FROM document_images WHERE id = ?", imageID)
+	var byteSize int64
+	if err := row.Scan(&byteSize); err != nil {
+		if err == sql.ErrNoRows {
+			return false, nil
+		}
+		return false, err
+	}
+	return byteSize > 0, nil
+}

@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Project IIIF Dashboard</title>
-  <link rel="stylesheet" href="/dashboard/assets/styles.css?v=20260510-dashboard-routes-pagination">
+  <link rel="stylesheet" href="/dashboard/assets/styles.css?v=20260511-tailwind-migrator">
 </head>
 <body>
   <div class="app">
@@ -22,6 +22,7 @@
         <button class="nav-item" data-view="documents">Documentos</button>
         <button class="nav-item" data-view="images">Imagenes</button>
         <button class="nav-item" data-view="config">Configuracion</button>
+        <button class="nav-item" data-view="migration">Migracion</button>
       </nav>
       <button class="logout-button" id="logout-button" type="button">Cerrar sesion</button>
     </aside>
@@ -139,10 +140,83 @@
           <form id="config-form" class="config-form"></form>
         </div>
       </section>
+
+      <section class="view" id="migration-view">
+        <div class="panel">
+          <h2>Migracion local a MySQL BLOB</h2>
+          <p>Ejecuta la migracion one-shot de metadatos y binarios desde almacenamiento local hacia MySQL.</p>
+          <div class="toolbar-row">
+            <button class="primary" id="start-migration-button" type="button">Iniciar migracion</button>
+            <button class="secondary" id="refresh-migration-button" type="button">Actualizar estado</button>
+            <span id="migration-status-badge" class="status">sin ejecutar</span>
+          </div>
+          <div class="panel">
+            <h3>Fuente de datos</h3>
+            <div class="toolbar-row">
+              <label class="field">
+                <span>Tipo de origen</span>
+                <select id="migration-source-type">
+                  <option value="local">Local</option>
+                  <option value="ssh">Servidor remoto (SSH)</option>
+                </select>
+              </label>
+            </div>
+            <div id="migration-local-source">
+              <div class="toolbar-row">
+                <label class="field" style="min-width: 360px;">
+                  <span>Ruta local</span>
+                  <input id="migration-local-path" type="text" placeholder="/var/lib/project_iiif">
+                </label>
+                <button class="secondary" id="browse-migration-local-button" type="button">Explorar directorios</button>
+              </div>
+              <div class="table-wrap">
+                <table>
+                  <thead>
+                    <tr><th>Directorio</th><th>Ruta</th><th>Accion</th></tr>
+                  </thead>
+                  <tbody id="migration-local-browser"></tbody>
+                </table>
+              </div>
+            </div>
+            <div id="migration-ssh-source" hidden>
+              <div class="toolbar-row">
+                <label class="field">
+                  <span>Host</span>
+                  <input id="migration-ssh-host" type="text" placeholder="172.21.227.83">
+                </label>
+                <label class="field">
+                  <span>Puerto</span>
+                  <input id="migration-ssh-port" type="number" value="22">
+                </label>
+                <label class="field">
+                  <span>Usuario</span>
+                  <input id="migration-ssh-user" type="text" placeholder="robison">
+                </label>
+                <label class="field" style="min-width: 320px;">
+                  <span>Ruta base remota</span>
+                  <input id="migration-ssh-path" type="text" placeholder="/var/lib/project_iiif">
+                </label>
+              </div>
+              <label class="field">
+                <span>Llave privada SSH</span>
+                <textarea id="migration-ssh-key" rows="8" placeholder="-----BEGIN OPENSSH PRIVATE KEY-----"></textarea>
+              </label>
+            </div>
+          </div>
+          <div class="panel">
+            <h3>Estado</h3>
+            <pre id="migration-summary" class="result">Sin ejecuciones todavia.</pre>
+          </div>
+          <div class="panel">
+            <h3>Logs</h3>
+            <pre id="migration-logs" class="result">Sin logs.</pre>
+          </div>
+        </div>
+      </section>
     </main>
   </div>
   <div class="toast-stack" id="toast-stack" aria-live="polite"></div>
 
-  <script src="/dashboard/assets/app.js?v=20260510-dashboard-routes-pagination"></script>
+  <script src="/dashboard/assets/app.js?v=20260511-tailwind-migrator"></script>
 </body>
 </html>

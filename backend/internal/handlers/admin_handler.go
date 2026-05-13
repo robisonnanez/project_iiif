@@ -2,6 +2,8 @@ package handlers
 
 import (
 	"net/http"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -14,10 +16,15 @@ import (
 type AdminHandler struct {
 	config          *config.Config
 	documentService *services.DocumentService
+	migrationRunner *migrationRunner
 }
 
 func NewAdminHandler(config *config.Config, documentService *services.DocumentService) *AdminHandler {
-	return &AdminHandler{config: config, documentService: documentService}
+	return &AdminHandler{
+		config:          config,
+		documentService: documentService,
+		migrationRunner: newMigrationRunner(config.Migration.MaxLogLines),
+	}
 }
 
 func (h *AdminHandler) GetConfig(c *gin.Context) {
@@ -109,6 +116,126 @@ func (h *AdminHandler) GetDocumentImages(c *gin.Context) {
 		"tenant_key":  doc.TenantKey,
 		"images":      items,
 	})
+}
+
+func (h *AdminHandler) StartLocalToMySQLMigration(c *gin.Context) {
+	// Ejecuta la migracion en background y devuelve estado inicial.
+	var payload migrationStartRequest
+	if err := c.ShouldBindJSON(&payload); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "payload invalido"})
+		return
+	}
+	if err := validateMigrationRequest(payload, h.config); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if err := h.migrationRunner.Start(payload); err != nil {
+		c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusAccepted, gin.H{
+		"message": "Migracion iniciada",
+		"status":  h.migrationRunner.Status(),
+	})
+}
+
+func (h *AdminHandler) GetLocalToMySQLMigrationStatus(c *gin.Context) {
+	// Devuelve estado y logs acumulados de la ultima migracion.
+	c.JSON(http.StatusOK, h.migrationRunner.Status())
+}
+
+func (h *AdminHandler) BrowseLocalMigrationSource(c *gin.Context) {
+	// Lista directorios hijos para ayudar a seleccionar ruta local de migracion.
+	path := strings.TrimSpace(c.Query("path"))
+	if path == "" {
+		path = h.config.Storage.DataPath
+	}
+	resolved, err := filepath.Abs(path)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "ruta invalida"})
+		return
+	}
+	if !h.isAllowedLocalPath(resolved) {
+		c.JSON(http.StatusForbidden, gin.H{"error": "ruta fuera de los directorios permitidos"})
+		return
+	}
+	entries, err := os.ReadDir(resolved)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "no se pudo leer la ruta: " + err.Error()})
+		return
+	}
+
+	dirs := []gin.H{}
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		child := filepath.Join(resolved, e.Name())
+		if !h.isAllowedLocalPath(child) {
+			continue
+		}
+		dirs = append(dirs, gin.H{
+			"name": e.Name(),
+			"path": child,
+		})
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"path": path,
+		"dirs": dirs,
+	})
+}
+
+func (h *AdminHandler) isAllowedLocalPath(path string) bool {
+	path = filepath.Clean(path)
+	for _, root := range h.config.Migration.AllowedLocalRoots {
+		if strings.TrimSpace(root) == "" {
+			continue
+		}
+		absRoot, err := filepath.Abs(root)
+		if err != nil {
+			continue
+		}
+		absRoot = filepath.Clean(absRoot)
+		if path == absRoot || strings.HasPrefix(path, absRoot+string(filepath.Separator)) {
+			return true
+		}
+	}
+	return false
+}
+
+func validateMigrationRequest(req migrationStartRequest, cfg *config.Config) error {
+	sourceType := strings.ToLower(strings.TrimSpace(req.Source.Type))
+	if sourceType != "local" && sourceType != "ssh" {
+		return &configError{"source.type debe ser local o ssh"}
+	}
+	if sourceType == "local" {
+		if strings.TrimSpace(req.Source.Local.Path) == "" {
+			return &configError{"source.local.path es obligatorio"}
+		}
+		return nil
+	}
+	if strings.TrimSpace(req.Source.SSH.Host) == "" || strings.TrimSpace(req.Source.SSH.User) == "" {
+		return &configError{"source.ssh.host y source.ssh.user son obligatorios"}
+	}
+	if strings.TrimSpace(req.Source.SSH.Path) == "" {
+		return &configError{"source.ssh.path es obligatorio"}
+	}
+	if strings.TrimSpace(req.Source.SSH.PrivateKey) == "" {
+		return &configError{"source.ssh.private_key es obligatoria"}
+	}
+	if len(cfg.Migration.SSH.AllowedHosts) > 0 {
+		allowed := false
+		for _, host := range cfg.Migration.SSH.AllowedHosts {
+			if strings.EqualFold(strings.TrimSpace(host), strings.TrimSpace(req.Source.SSH.Host)) {
+				allowed = true
+				break
+			}
+		}
+		if !allowed {
+			return &configError{"host SSH no permitido por migration.ssh.allowed_hosts"}
+		}
+	}
+	return nil
 }
 
 func (h *AdminHandler) sanitizedConfig() gin.H {

@@ -146,6 +146,22 @@ projects:
 
 No guardes claves reales en el repositorio.
 
+Para habilitar migracion con seleccion de directorio local y SSH remoto:
+
+```yaml
+migration:
+  enabled: true
+  allowed_local_roots:
+    - "/var/lib/project_iiif"
+    - "/home/robison/projects/project_iiif/backend/data"
+  max_log_lines: 1000
+  ssh:
+    connect_timeout_sec: 15
+    allowed_hosts: []
+```
+
+Si `allowed_hosts` tiene valores, la UI solo permitira migrar a esos hosts SSH.
+
 ## 5. Build de produccion
 
 ```bash
@@ -153,6 +169,14 @@ cd /opt/project_iiif/backend
 export PATH=$PATH:/usr/local/go/bin
 go mod download
 CGO_ENABLED=1 go build -ldflags="-s -w" -o iiif-server main.go
+```
+
+Build de estilos del dashboard (Tailwind CLI):
+
+```bash
+cd /opt/project_iiif/backend/frontend
+npm install
+npm run build:css
 ```
 
 El binario busca `config.yaml` en el `WorkingDirectory`. Para usar `/etc/project_iiif/config.yaml`, crea un enlace:
@@ -215,6 +239,13 @@ journalctl -u project-iiif -f
 curl http://localhost:8080/health
 curl http://localhost:8080/api/documents
 curl -I http://localhost:8080/dashboard
+```
+
+Si quieres migrar historico local hacia MySQL BLOB:
+
+```bash
+cd /opt/project_iiif/backend
+go run ./cmd/migrate-local-to-mysql
 ```
 
 Despues de subir un PDF en modo MySQL:

@@ -6,6 +6,7 @@ const state = {
   config: null,
   projects: { enabled: false, default_project: "default", items: [] },
   images: { items: [], page: 1, pageSize: 10 },
+  migration: { timer: null, running: false },
   polling: new Map(),
 };
 
@@ -15,6 +16,7 @@ const viewMeta = {
   documents: ["Documentos", "Consulta documentos, estados y manifiestos."],
   images: ["Imagenes", "Galeria de paginas servidas por IIIF."],
   config: ["Configuracion", "Edita valores permitidos del config.yaml sin exponer secretos."],
+  migration: ["Migracion", "Migra datos locales hacia MySQL BLOB de forma controlada."],
 };
 
 const viewRoutes = {
@@ -23,6 +25,7 @@ const viewRoutes = {
   documents: "/dashboard/documentos",
   images: "/dashboard/imagenes",
   config: "/dashboard/configuracion",
+  migration: "/dashboard/migracion",
 };
 
 const routeViews = {
@@ -33,6 +36,7 @@ const routeViews = {
   "/dashboard/documentos": "documents",
   "/dashboard/imagenes": "images",
   "/dashboard/configuracion": "config",
+  "/dashboard/migracion": "migration",
 };
 
 const $ = (selector) => document.querySelector(selector);
@@ -64,11 +68,16 @@ document.addEventListener("DOMContentLoaded", () => {
     renderImageDocumentOptions();
   });
   $("#images-document").addEventListener("change", resetImages);
+  $("#start-migration-button").addEventListener("click", startMigration);
+  $("#refresh-migration-button").addEventListener("click", loadMigrationStatus);
+  $("#migration-source-type").addEventListener("change", updateMigrationSourceMode);
+  $("#browse-migration-local-button").addEventListener("click", browseMigrationLocalDirs);
   window.addEventListener("popstate", () => showView(viewFromLocation(), false));
 
   loadProjects();
   loadConfig();
   showView(viewFromLocation(), false);
+  updateMigrationSourceMode();
 });
 
 function showView(name, pushRoute = false) {
@@ -93,12 +102,15 @@ function showView(name, pushRoute = false) {
     loadAllDocuments().then(() => renderImageDocumentOptions());
   }
   if (name === "config") loadConfig();
+  if (name === "migration") loadMigrationStatus();
 }
 
 function refreshCurrentView() {
   const active = $(".nav-item.active")?.dataset.view || "summary";
   if (active === "config") {
     loadConfig();
+  } else if (active === "migration") {
+    loadMigrationStatus();
   } else if (active === "images") {
     loadSelectedImages();
   } else if (active === "summary") {
@@ -106,6 +118,153 @@ function refreshCurrentView() {
     loadAllDocuments();
   } else {
     loadDocuments(active === "documents");
+  }
+}
+
+async function startMigration() {
+  // Lanza la migracion local->mysql en backend y activa seguimiento de estado.
+  const payload = collectMigrationPayload();
+  if (!payload) return;
+  try {
+    const response = await fetch("/admin/api/migrations/local-to-mysql/start", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);
+    showToast(data.message || "Migracion iniciada.");
+    await loadMigrationStatus();
+  } catch (error) {
+    showToast(`No se pudo iniciar migracion: ${error.message}`, "error");
+  }
+}
+
+async function loadMigrationStatus() {
+  const badge = $("#migration-status-badge");
+  const summary = $("#migration-summary");
+  const logs = $("#migration-logs");
+  if (!badge || !summary || !logs) return;
+
+  try {
+    const response = await fetch("/admin/api/migrations/local-to-mysql/status");
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);
+
+    const running = Boolean(data.running);
+    badge.className = `status ${running ? "" : data.exit_code === 0 ? "completed" : data.exit_code > 0 ? "error" : ""}`;
+    badge.textContent = running ? "en ejecucion" : data.exit_code === 0 ? "completada" : data.exit_code > 0 ? "con errores" : "sin ejecutar";
+
+    const started = data.started_at ? new Date(data.started_at).toLocaleString() : "-";
+    const finished = data.finished_at ? new Date(data.finished_at).toLocaleString() : "-";
+    summary.textContent = [
+      `running: ${running}`,
+      `exit_code: ${data.exit_code}`,
+      `started_at: ${started}`,
+      `finished_at: ${finished}`,
+      `message: ${data.message || "-"}`
+    ].join("\n");
+
+    const logLines = Array.isArray(data.logs) && data.logs.length ? data.logs : ["Sin logs."];
+    logs.textContent = logLines.join("\n");
+
+    toggleMigrationPolling(running);
+    $("#start-migration-button").disabled = running;
+  } catch (error) {
+    summary.textContent = `No se pudo consultar estado: ${error.message}`;
+    toggleMigrationPolling(false);
+  }
+}
+
+function toggleMigrationPolling(shouldRun) {
+  if (shouldRun && !state.migration.timer) {
+    state.migration.timer = window.setInterval(() => {
+      loadMigrationStatus();
+    }, 3000);
+  }
+  if (!shouldRun && state.migration.timer) {
+    window.clearInterval(state.migration.timer);
+    state.migration.timer = null;
+  }
+}
+
+function updateMigrationSourceMode() {
+  const sourceType = $("#migration-source-type")?.value || "local";
+  const localBox = $("#migration-local-source");
+  const sshBox = $("#migration-ssh-source");
+  if (localBox) localBox.hidden = sourceType !== "local";
+  if (sshBox) sshBox.hidden = sourceType !== "ssh";
+}
+
+function collectMigrationPayload() {
+  const sourceType = $("#migration-source-type")?.value || "local";
+  if (sourceType === "local") {
+    const path = ($("#migration-local-path")?.value || "").trim();
+    if (!path) {
+      showToast("La ruta local es obligatoria.", "error");
+      return null;
+    }
+    return {
+      source: {
+        type: "local",
+        local: { path },
+      },
+    };
+  }
+
+  const host = ($("#migration-ssh-host")?.value || "").trim();
+  const user = ($("#migration-ssh-user")?.value || "").trim();
+  const path = ($("#migration-ssh-path")?.value || "").trim();
+  const privateKey = ($("#migration-ssh-key")?.value || "").trim();
+  const port = Number.parseInt($("#migration-ssh-port")?.value || "22", 10) || 22;
+  if (!host || !user || !path || !privateKey) {
+    showToast("Para SSH: host, usuario, ruta y llave privada son obligatorios.", "error");
+    return null;
+  }
+  return {
+    source: {
+      type: "ssh",
+      ssh: {
+        host,
+        port,
+        user,
+        path,
+        private_key: privateKey,
+      },
+    },
+  };
+}
+
+async function browseMigrationLocalDirs() {
+  const input = $("#migration-local-path");
+  const table = $("#migration-local-browser");
+  if (!input || !table) return;
+  const path = (input.value || "").trim();
+  const query = path ? `?path=${encodeURIComponent(path)}` : "";
+  try {
+    const response = await fetch(`/admin/api/migrations/sources/local/browse${query}`);
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);
+    const rows = Array.isArray(data.dirs) ? data.dirs : [];
+    if (!rows.length) {
+      table.innerHTML = `<tr><td colspan="3">Sin subdirectorios permitidos.</td></tr>`;
+      return;
+    }
+    table.innerHTML = rows.map((row) => `
+      <tr>
+        <td>${escapeHTML(row.name || "")}</td>
+        <td><code>${escapeHTML(row.path || "")}</code></td>
+        <td><button class="secondary" type="button" data-pick-path="${escapeHTML(row.path || "")}">Seleccionar</button></td>
+      </tr>
+    `).join("");
+    $$("[data-pick-path]").forEach((button) => {
+      button.addEventListener("click", () => {
+        const selected = button.getAttribute("data-pick-path") || "";
+        input.value = selected;
+      });
+    });
+  } catch (error) {
+    table.innerHTML = `<tr><td colspan="3">No se pudo explorar: ${escapeHTML(error.message)}</td></tr>`;
   }
 }
 

@@ -1,0 +1,14 @@
+{
+  "name": "project-iiif-dashboard",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "build:css": "tailwindcss -c ./tailwind.config.js -i ./src/styles.css -o ./assets/styles.css --minify",
+    "watch:css": "tailwindcss -c ./tailwind.config.js -i ./src/styles.css -o ./assets/styles.css --watch"
+  },
+  "devDependencies": {
+    "autoprefixer": "^10.4.20",
+    "postcss": "^8.4.49",
+    "tailwindcss": "^3.4.17"
+  }
+}

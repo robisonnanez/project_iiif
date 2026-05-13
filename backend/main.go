@@ -83,6 +83,7 @@ func main() {
 			dashboard.GET("/documentos", frontendHandler.Dashboard)
 			dashboard.GET("/imagenes", frontendHandler.Dashboard)
 			dashboard.GET("/configuracion", frontendHandler.Dashboard)
+			dashboard.GET("/migracion", frontendHandler.Dashboard)
 			dashboard.Static("/assets", cfg.Frontend.Path+"/assets")
 		}
 
@@ -93,6 +94,9 @@ func main() {
 			admin.PUT("/config", adminHandler.UpdateConfig)
 			admin.GET("/projects", adminHandler.GetProjects)
 			admin.GET("/documents/:id/images", adminHandler.GetDocumentImages)
+			admin.GET("/migrations/sources/local/browse", adminHandler.BrowseLocalMigrationSource)
+			admin.POST("/migrations/local-to-mysql/start", adminHandler.StartLocalToMySQLMigration)
+			admin.GET("/migrations/local-to-mysql/status", adminHandler.GetLocalToMySQLMigrationStatus)
 		}
 	} else {
 		router.GET("/dashboard", frontendHandler.Disabled)

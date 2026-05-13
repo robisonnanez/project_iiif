@@ -21,6 +21,7 @@ RUN go mod download
 
 COPY backend/ ./
 RUN CGO_ENABLED=1 go build -ldflags="-s -w" -o /out/iiif-server main.go
+RUN CGO_ENABLED=1 go build -ldflags="-s -w" -o /out/migrate-local-to-mysql ./cmd/migrate-local-to-mysql
 
 FROM debian:bookworm-slim
 
@@ -30,6 +31,7 @@ RUN apt-get update \
 
 WORKDIR /app
 COPY --from=builder /out/iiif-server /app/iiif-server
+COPY --from=builder /out/migrate-local-to-mysql /app/migrate-local-to-mysql
 COPY backend/frontend /app/frontend
 COPY backend/migrations /app/migrations
 COPY backend/config.yaml.example /app/config.yaml.example
@@ -41,6 +43,13 @@ RUN mkdir -p /data/pdfs /data/images /data/documents /data/thumbnails /data/mani
 USER iiif
 EXPOSE 8080
 CMD ["/app/iiif-server"]
+```
+
+Si prefieres construir CSS en la imagen, agrega antes de `go build` en el stage builder:
+
+```dockerfile
+RUN apt-get update && apt-get install -y --no-install-recommends nodejs npm
+RUN cd /src/backend/frontend && npm install && npm run build:css
 ```
 
 Crea un `.dockerignore` en la raiz:
@@ -104,6 +113,15 @@ frontend:
   require_auth: true
   username: "admin"
   password: "CAMBIAR_PASSWORD"
+
+migration:
+  enabled: true
+  allowed_local_roots:
+    - "/data"
+  max_log_lines: 1000
+  ssh:
+    connect_timeout_sec: 15
+    allowed_hosts: []
 ```
 
 En modo `mysql`, PDFs e imagenes quedan en BLOB dentro de MySQL; `/data/temp` solo se usa para temporales de procesamiento.
@@ -161,6 +179,12 @@ Las migraciones se ejecutan automaticamente la primera vez que se crea el volume
 docker compose build
 docker compose up -d
 docker compose logs -f iiif
+```
+
+Para migrar historico local a MySQL BLOB dentro del contenedor:
+
+```bash
+docker compose exec iiif /app/migrate-local-to-mysql
 ```
 
 Pruebas:

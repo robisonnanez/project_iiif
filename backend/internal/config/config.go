@@ -108,6 +108,16 @@ type Config struct {
 		CleanupInterval int    `yaml:"cleanup_interval"`
 		MaxCacheSize    string `yaml:"max_cache_size"`
 	} `yaml:"performance"`
+
+	Migration struct {
+		Enabled           bool     `yaml:"enabled"`
+		AllowedLocalRoots []string `yaml:"allowed_local_roots"`
+		MaxLogLines       int      `yaml:"max_log_lines"`
+		SSH               struct {
+			ConnectTimeoutSec int      `yaml:"connect_timeout_sec"`
+			AllowedHosts      []string `yaml:"allowed_hosts"`
+		} `yaml:"ssh"`
+	} `yaml:"migration"`
 }
 
 type ProjectConfig struct {
@@ -261,6 +271,15 @@ func applyDefaults(config *Config) {
 	}
 	if len(config.Projects.Items) == 0 {
 		config.Projects.Items = defaults.Projects.Items
+	}
+	if len(config.Migration.AllowedLocalRoots) == 0 {
+		config.Migration.AllowedLocalRoots = defaults.Migration.AllowedLocalRoots
+	}
+	if config.Migration.MaxLogLines <= 0 {
+		config.Migration.MaxLogLines = defaults.Migration.MaxLogLines
+	}
+	if config.Migration.SSH.ConnectTimeoutSec <= 0 {
+		config.Migration.SSH.ConnectTimeoutSec = defaults.Migration.SSH.ConnectTimeoutSec
 	}
 	config.StorageBackend = config.Storage.Backend
 	config.DBConnection = config.Storage.Backend
@@ -423,6 +442,26 @@ func Default() *Config {
 			QueueSize:       100,
 			CleanupInterval: 3600,
 			MaxCacheSize:    "1GB",
+		},
+		Migration: struct {
+			Enabled           bool     `yaml:"enabled"`
+			AllowedLocalRoots []string `yaml:"allowed_local_roots"`
+			MaxLogLines       int      `yaml:"max_log_lines"`
+			SSH               struct {
+				ConnectTimeoutSec int      `yaml:"connect_timeout_sec"`
+				AllowedHosts      []string `yaml:"allowed_hosts"`
+			} `yaml:"ssh"`
+		}{
+			Enabled:           true,
+			AllowedLocalRoots: []string{"./data", "/var/lib/project_iiif"},
+			MaxLogLines:       1000,
+			SSH: struct {
+				ConnectTimeoutSec int      `yaml:"connect_timeout_sec"`
+				AllowedHosts      []string `yaml:"allowed_hosts"`
+			}{
+				ConnectTimeoutSec: 15,
+				AllowedHosts:      []string{},
+			},
 		},
 	}
 	cfg.StorageBackend = cfg.Storage.Backend

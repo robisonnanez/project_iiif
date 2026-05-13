@@ -1,0 +1,57 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    @apply m-0 min-h-screen bg-slate-100 text-slate-900 antialiased;
+    font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+  }
+}
+
+@layer components {
+  .app-shell {
+    @apply min-h-screen grid;
+    grid-template-columns: 280px minmax(0, 1fr);
+  }
+
+  .sidebar {
+    @apply bg-slate-950 text-slate-100 p-6 flex flex-col gap-6;
+  }
+
+  .brand-badge {
+    @apply w-11 h-11 rounded-lg bg-blue-600 grid place-items-center font-bold text-sm;
+  }
+
+  .nav-item {
+    @apply w-full text-left px-4 py-3 rounded-md border border-transparent text-slate-300 transition-colors;
+  }
+
+  .nav-item:hover {
+    @apply bg-slate-900 text-white;
+  }
+
+  .nav-item.active {
+    @apply bg-blue-600 text-white border-blue-500;
+  }
+
+  .panel {
+    @apply bg-white border border-slate-200 rounded-xl p-5 shadow-soft;
+  }
+
+  .metric {
+    @apply panel;
+  }
+
+  .status {
+    @apply inline-flex px-2 py-1 rounded-full text-xs font-semibold bg-slate-200 text-slate-700;
+  }
+
+  .status.completed {
+    @apply bg-emerald-100 text-emerald-700;
+  }
+
+  .status.error {
+    @apply bg-rose-100 text-rose-700;
+  }
+}
