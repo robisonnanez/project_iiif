@@ -20,6 +20,13 @@ export PATH=$PATH:/usr/local/go/bin
 source ~/.bashrc
 ```
 
+Instala CLI de Swagger:
+
+```bash
+go install github.com/swaggo/swag/cmd/swag@latest
+export PATH=$PATH:$(go env GOPATH)/bin
+```
+
 ## 2. Estructura recomendada
 
 ```bash
@@ -171,6 +178,13 @@ go mod download
 CGO_ENABLED=1 go build -ldflags="-s -w" -o iiif-server main.go
 ```
 
+Genera documentacion Swagger antes de compilar/desplegar:
+
+```bash
+cd /opt/project_iiif/backend
+swag init -g main.go -o docs
+```
+
 Build de estilos del dashboard (Tailwind CLI):
 
 ```bash
@@ -241,6 +255,12 @@ curl http://localhost:8080/api/documents
 curl -I http://localhost:8080/dashboard
 ```
 
+Con sesion admin iniciada, valida Swagger:
+
+```bash
+curl -I http://localhost:8080/swagger/index.html
+```
+
 Si quieres migrar historico local hacia MySQL BLOB:
 
 ```bash
@@ -270,4 +290,8 @@ curl -I http://localhost:8080/iiif/3/metavisor~sunat~IMAGE_ID/full/max/0/default
 - Si falla MuPDF, confirma `libmupdf-dev` y recompila con `CGO_ENABLED=1`.
 - Si MySQL falla, revisa usuario, password, base de datos y migraciones.
 - Si `config.yaml` no existe, copia `config.yaml.example` y ajusta rutas/credenciales.
-- Si cambias configuracion desde el dashboard, reinicia el servicio para aplicar cambios sensibles.
+- Si cambias configuracion desde el dashboard, puedes usar el modal "Reiniciar ahora". El reinicio web es asíncrono: responde primero y ejecuta `systemctl restart project-iiif` en segundo plano.
+- Si el dashboard muestra demora al volver, valida estado con:
+  - `systemctl status project-iiif`
+  - `journalctl -u project-iiif -n 100`
+- Si Swagger no refleja endpoints recientes, regenera `backend/docs` con `swag init -g main.go -o docs` y recompila.

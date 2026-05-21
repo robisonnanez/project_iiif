@@ -1,0 +1,1193 @@
+{
+    "swagger": "2.0",
+    "info": {
+        "description": "API para conversion de PDF a imagenes IIIF v3, administracion y migracion.",
+        "title": "IIIF PDF Server API",
+        "contact": {},
+        "version": "2.1"
+    },
+    "basePath": "/",
+    "paths": {
+        "/admin/api/config": {
+            "get": {
+                "security": [
+                    {
+                        "SessionCookie": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Admin"
+                ],
+                "summary": "Obtener configuracion saneada",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.errorResponse"
+                        }
+                    }
+                }
+            },
+            "put": {
+                "security": [
+                    {
+                        "SessionCookie": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Admin"
+                ],
+                "summary": "Guardar configuracion editable",
+                "parameters": [
+                    {
+                        "description": "Configuracion editable",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/handlers.editableConfigPayload"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.errorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.errorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.errorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/admin/api/documents/{id}/images": {
+            "get": {
+                "security": [
+                    {
+                        "SessionCookie": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Admin"
+                ],
+                "summary": "Listar imagenes IIIF por documento",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "ID documento",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.errorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.errorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.errorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/admin/api/migrations/local-to-mysql/start": {
+            "post": {
+                "security": [
+                    {
+                        "SessionCookie": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Admin"
+                ],
+                "summary": "Iniciar migracion local/ssh a MySQL BLOB",
+                "parameters": [
+                    {
+                        "description": "Origen y scope",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/handlers.migrationStartPayload"
+                        }
+                    }
+                ],
+                "responses": {
+                    "202": {
+                        "description": "Accepted",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.errorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.errorResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.errorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/admin/api/migrations/local-to-mysql/status": {
+            "get": {
+                "security": [
+                    {
+                        "SessionCookie": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Admin"
+                ],
+                "summary": "Estado de migracion local/ssh a MySQL",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.errorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/admin/api/migrations/sources/local/browse": {
+            "get": {
+                "security": [
+                    {
+                        "SessionCookie": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Admin"
+                ],
+                "summary": "Explorar directorios locales permitidos para migracion",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Ruta base a explorar",
+                        "name": "path",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.errorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.errorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.errorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/admin/api/projects": {
+            "get": {
+                "security": [
+                    {
+                        "SessionCookie": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Admin"
+                ],
+                "summary": "Listar proyectos y tenants",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.errorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/admin/api/service/restart": {
+            "post": {
+                "security": [
+                    {
+                        "SessionCookie": []
+                    }
+                ],
+                "description": "Valida password sudo y programa reinicio asincrono de project-iiif.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Admin"
+                ],
+                "summary": "Programar reinicio del servicio",
+                "parameters": [
+                    {
+                        "description": "Password sudo",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/handlers.restartServiceRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.restartServiceResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.errorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.errorResponse"
+                        }
+                    },
+                    "429": {
+                        "description": "Too Many Requests",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.errorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.errorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/documents": {
+            "get": {
+                "description": "Lista documentos con filtros opcionales por proyecto y tenant.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Documentos"
+                ],
+                "summary": "Listar documentos",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Proyecto",
+                        "name": "project",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Tenant",
+                        "name": "tenant",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/models.PDFDocument"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.errorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/documents/{id}": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Documentos"
+                ],
+                "summary": "Obtener documento por ID",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "ID documento",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/models.PDFDocument"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.errorResponse"
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Documentos"
+                ],
+                "summary": "Eliminar documento",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "ID documento",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.okMessageResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.errorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/upload": {
+            "post": {
+                "description": "Recibe archivo PDF y crea documento con paginas convertidas.",
+                "consumes": [
+                    "multipart/form-data"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Documentos"
+                ],
+                "summary": "Subir y convertir PDF",
+                "parameters": [
+                    {
+                        "type": "file",
+                        "description": "Archivo PDF",
+                        "name": "pdf",
+                        "in": "formData",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Proyecto",
+                        "name": "project",
+                        "in": "formData"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Tenant",
+                        "name": "tenant",
+                        "in": "formData"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/models.PDFDocument"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.errorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.errorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/auth/login": {
+            "post": {
+                "description": "Crea cookie de sesion para rutas administrativas.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Auth"
+                ],
+                "summary": "Iniciar sesion de dashboard",
+                "parameters": [
+                    {
+                        "description": "Credenciales",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/handlers.loginRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.sessionResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.errorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.errorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/auth/logout": {
+            "post": {
+                "description": "Elimina cookie de sesion activa.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Auth"
+                ],
+                "summary": "Cerrar sesion",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.sessionResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/auth/me": {
+            "get": {
+                "description": "Devuelve estado de autenticacion actual.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Auth"
+                ],
+                "summary": "Verificar sesion",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.sessionResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/iiif/3/{identifier}/info.json": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "IIIF"
+                ],
+                "summary": "Obtener info IIIF",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Identificador IIIF",
+                        "name": "identifier",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/models.IIIFImageInfo"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.errorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.errorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/iiif/3/{identifier}/{region}/{size}/{rotation}/{quality_format}": {
+            "get": {
+                "produces": [
+                    "image/jpeg",
+                    "image/png",
+                    "image/webp"
+                ],
+                "tags": [
+                    "IIIF"
+                ],
+                "summary": "Obtener imagen IIIF transformada",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Identificador IIIF",
+                        "name": "identifier",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Region",
+                        "name": "region",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Tamano",
+                        "name": "size",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Rotacion",
+                        "name": "rotation",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "quality.format",
+                        "name": "quality_format",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "file"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.errorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.errorResponse"
+                        }
+                    }
+                }
+            }
+        }
+    },
+    "definitions": {
+        "config.ProjectConfig": {
+            "type": "object",
+            "properties": {
+                "key": {
+                    "type": "string"
+                },
+                "multitenant": {
+                    "type": "boolean"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "tenants": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                }
+            }
+        },
+        "handlers.editableConfigPayload": {
+            "type": "object",
+            "properties": {
+                "binary_storage": {
+                    "type": "object",
+                    "properties": {
+                        "mode": {
+                            "type": "string"
+                        },
+                        "temp_path": {
+                            "type": "string"
+                        }
+                    }
+                },
+                "database": {
+                    "type": "object",
+                    "properties": {
+                        "DB_CONNECTION": {
+                            "type": "string"
+                        },
+                        "DB_DATABASE": {
+                            "type": "string"
+                        },
+                        "DB_HOST": {
+                            "type": "string"
+                        },
+                        "DB_PASSWORD": {
+                            "type": "string"
+                        },
+                        "DB_PORT": {
+                            "type": "string"
+                        },
+                        "DB_USERNAME": {
+                            "type": "string"
+                        },
+                        "mysql": {
+                            "type": "object",
+                            "properties": {
+                                "charset": {
+                                    "type": "string"
+                                },
+                                "database": {
+                                    "type": "string"
+                                },
+                                "host": {
+                                    "type": "string"
+                                },
+                                "parse_time": {
+                                    "type": "boolean"
+                                },
+                                "password": {
+                                    "type": "string"
+                                },
+                                "port": {
+                                    "type": "string"
+                                },
+                                "user": {
+                                    "type": "string"
+                                }
+                            }
+                        }
+                    }
+                },
+                "frontend": {
+                    "type": "object",
+                    "properties": {
+                        "enabled": {
+                            "type": "boolean"
+                        },
+                        "password": {
+                            "type": "string"
+                        },
+                        "path": {
+                            "type": "string"
+                        },
+                        "require_auth": {
+                            "type": "boolean"
+                        },
+                        "username": {
+                            "type": "string"
+                        }
+                    }
+                },
+                "iiif": {
+                    "type": "object",
+                    "properties": {
+                        "api_version": {
+                            "type": "string"
+                        },
+                        "base_url": {
+                            "type": "string"
+                        },
+                        "cache": {
+                            "type": "boolean"
+                        },
+                        "cache_ttl": {
+                            "type": "integer"
+                        },
+                        "max_height": {
+                            "type": "integer"
+                        },
+                        "max_width": {
+                            "type": "integer"
+                        }
+                    }
+                },
+                "projects": {
+                    "type": "object",
+                    "properties": {
+                        "allow_dynamic_tenants": {
+                            "type": "boolean"
+                        },
+                        "default_project": {
+                            "type": "string"
+                        },
+                        "enabled": {
+                            "type": "boolean"
+                        },
+                        "items": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/config.ProjectConfig"
+                            }
+                        },
+                        "require_project": {
+                            "type": "boolean"
+                        }
+                    }
+                },
+                "server": {
+                    "type": "object",
+                    "properties": {
+                        "mode": {
+                            "type": "string"
+                        },
+                        "port": {
+                            "type": "string"
+                        }
+                    }
+                },
+                "storage": {
+                    "type": "object",
+                    "properties": {
+                        "backend": {
+                            "type": "string"
+                        },
+                        "data_path": {
+                            "type": "string"
+                        },
+                        "documents_path": {
+                            "type": "string"
+                        },
+                        "images_path": {
+                            "type": "string"
+                        },
+                        "manifests_path": {
+                            "type": "string"
+                        },
+                        "pdfs_path": {
+                            "type": "string"
+                        },
+                        "thumbnails_path": {
+                            "type": "string"
+                        }
+                    }
+                }
+            }
+        },
+        "handlers.errorResponse": {
+            "type": "object",
+            "properties": {
+                "details": {
+                    "type": "string",
+                    "example": "detalle interno"
+                },
+                "error": {
+                    "type": "string",
+                    "example": "login requerido"
+                }
+            }
+        },
+        "handlers.loginRequest": {
+            "type": "object",
+            "properties": {
+                "password": {
+                    "type": "string",
+                    "example": "CAMBIAR_PASSWORD"
+                },
+                "username": {
+                    "type": "string",
+                    "example": "admin"
+                }
+            }
+        },
+        "handlers.migrationStartPayload": {
+            "type": "object",
+            "properties": {
+                "scope": {
+                    "$ref": "#/definitions/handlers.migrationStartScope"
+                },
+                "source": {
+                    "$ref": "#/definitions/handlers.migrationStartSource"
+                }
+            }
+        },
+        "handlers.migrationStartScope": {
+            "type": "object",
+            "properties": {
+                "project_key": {
+                    "type": "string",
+                    "example": "metavisor"
+                },
+                "tenant_key": {
+                    "type": "string",
+                    "example": "sunat"
+                }
+            }
+        },
+        "handlers.migrationStartSource": {
+            "type": "object",
+            "properties": {
+                "local": {
+                    "$ref": "#/definitions/handlers.migrationStartSourceLocal"
+                },
+                "ssh": {
+                    "$ref": "#/definitions/handlers.migrationStartSourceSSH"
+                },
+                "type": {
+                    "type": "string",
+                    "example": "local"
+                }
+            }
+        },
+        "handlers.migrationStartSourceLocal": {
+            "type": "object",
+            "properties": {
+                "path": {
+                    "type": "string",
+                    "example": "/var/lib/project_iiif"
+                }
+            }
+        },
+        "handlers.migrationStartSourceSSH": {
+            "type": "object",
+            "properties": {
+                "host": {
+                    "type": "string",
+                    "example": "172.21.227.83"
+                },
+                "path": {
+                    "type": "string",
+                    "example": "/var/lib/project_iiif"
+                },
+                "port": {
+                    "type": "integer",
+                    "example": 2230
+                },
+                "private_key": {
+                    "type": "string",
+                    "example": "-----BEGIN OPENSSH PRIVATE KEY-----"
+                },
+                "user": {
+                    "type": "string",
+                    "example": "robison"
+                }
+            }
+        },
+        "handlers.okMessageResponse": {
+            "type": "object",
+            "properties": {
+                "message": {
+                    "type": "string",
+                    "example": "ok"
+                }
+            }
+        },
+        "handlers.restartServiceRequest": {
+            "type": "object",
+            "properties": {
+                "password": {
+                    "type": "string",
+                    "example": "tu_password_sudo"
+                }
+            }
+        },
+        "handlers.restartServiceResponse": {
+            "type": "object",
+            "properties": {
+                "active": {
+                    "type": "boolean",
+                    "example": true
+                },
+                "message": {
+                    "type": "string",
+                    "example": "reinicio programado; el servicio se reiniciara en breve"
+                },
+                "ok": {
+                    "type": "boolean",
+                    "example": true
+                }
+            }
+        },
+        "handlers.sessionResponse": {
+            "type": "object",
+            "properties": {
+                "authenticated": {
+                    "type": "boolean",
+                    "example": true
+                },
+                "username": {
+                    "type": "string",
+                    "example": "admin"
+                }
+            }
+        },
+        "models.IIIFImageInfo": {
+            "type": "object",
+            "properties": {
+                "@context": {
+                    "type": "string"
+                },
+                "height": {
+                    "type": "integer"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "profile": {
+                    "type": "string"
+                },
+                "protocol": {
+                    "type": "string"
+                },
+                "sizes": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/models.IIIFSize"
+                    }
+                },
+                "tiles": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/models.IIIFTile"
+                    }
+                },
+                "type": {
+                    "type": "string"
+                },
+                "width": {
+                    "type": "integer"
+                }
+            }
+        },
+        "models.IIIFSize": {
+            "type": "object",
+            "properties": {
+                "height": {
+                    "type": "integer"
+                },
+                "width": {
+                    "type": "integer"
+                }
+            }
+        },
+        "models.IIIFTile": {
+            "type": "object",
+            "properties": {
+                "height": {
+                    "type": "integer"
+                },
+                "scaleFactors": {
+                    "type": "array",
+                    "items": {
+                        "type": "integer"
+                    }
+                },
+                "width": {
+                    "type": "integer"
+                }
+            }
+        },
+        "models.PDFDocument": {
+            "type": "object",
+            "properties": {
+                "convertedPages": {
+                    "type": "integer"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "manifestUrl": {
+                    "type": "string"
+                },
+                "migratedFromLocal": {
+                    "type": "boolean"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "projectKey": {
+                    "type": "string"
+                },
+                "status": {
+                    "description": "processing, completed, error",
+                    "type": "string"
+                },
+                "tenantKey": {
+                    "type": "string"
+                },
+                "thumbnailUrl": {
+                    "type": "string"
+                },
+                "totalPages": {
+                    "type": "integer"
+                },
+                "uploadDate": {
+                    "type": "string"
+                }
+            }
+        }
+    },
+    "securityDefinitions": {
+        "SessionCookie": {
+            "type": "apiKey",
+            "name": "project_iiif_session",
+            "in": "cookie"
+        }
+    }
+}

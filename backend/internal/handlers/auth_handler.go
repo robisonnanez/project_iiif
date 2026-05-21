@@ -25,6 +25,17 @@ func NewAuthHandler(config *config.Config) *AuthHandler {
 	return &AuthHandler{config: config}
 }
 
+// Login godoc
+// @Summary Iniciar sesion de dashboard
+// @Description Crea cookie de sesion para rutas administrativas.
+// @Tags Auth
+// @Accept json
+// @Produce json
+// @Param request body loginRequest true "Credenciales"
+// @Success 200 {object} sessionResponse
+// @Failure 400 {object} errorResponse
+// @Failure 401 {object} errorResponse
+// @Router /auth/login [post]
 func (h *AuthHandler) Login(c *gin.Context) {
 	var payload struct {
 		Username string `json:"username"`
@@ -46,11 +57,25 @@ func (h *AuthHandler) Login(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"authenticated": true})
 }
 
+// Logout godoc
+// @Summary Cerrar sesion
+// @Description Elimina cookie de sesion activa.
+// @Tags Auth
+// @Produce json
+// @Success 200 {object} sessionResponse
+// @Router /auth/logout [post]
 func (h *AuthHandler) Logout(c *gin.Context) {
 	c.SetCookie(sessionCookieName, "", -1, "/", "", false, true)
 	c.JSON(http.StatusOK, gin.H{"authenticated": false})
 }
 
+// Me godoc
+// @Summary Verificar sesion
+// @Description Devuelve estado de autenticacion actual.
+// @Tags Auth
+// @Produce json
+// @Success 200 {object} sessionResponse
+// @Router /auth/me [get]
 func (h *AuthHandler) Me(c *gin.Context) {
 	username, ok := h.sessionUsername(c)
 	c.JSON(http.StatusOK, gin.H{"authenticated": ok, "username": username})

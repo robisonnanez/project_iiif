@@ -7,6 +7,7 @@ import (
 	"regexp"
 	"strings"
 
+	_ "iiif-pdf-server/docs"
 	"iiif-pdf-server/internal/config"
 	"iiif-pdf-server/internal/handlers"
 	"iiif-pdf-server/internal/services"
@@ -14,8 +15,17 @@ import (
 
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
+	swaggerFiles "github.com/swaggo/files"
+	ginSwagger "github.com/swaggo/gin-swagger"
 )
 
+// @title IIIF PDF Server API
+// @version 2.1
+// @description API para conversion de PDF a imagenes IIIF v3, administracion y migracion.
+// @BasePath /
+// @securityDefinitions.apikey SessionCookie
+// @in cookie
+// @name project_iiif_session
 func main() {
 	// Cargar configuración
 	cfg, err := config.Load("config.yaml")
@@ -98,6 +108,12 @@ func main() {
 			admin.GET("/migrations/sources/local/browse", adminHandler.BrowseLocalMigrationSource)
 			admin.POST("/migrations/local-to-mysql/start", adminHandler.StartLocalToMySQLMigration)
 			admin.GET("/migrations/local-to-mysql/status", adminHandler.GetLocalToMySQLMigrationStatus)
+		}
+
+		swagger := router.Group("/swagger")
+		swagger.Use(authHandler.RequireSession())
+		{
+			swagger.GET("/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))
 		}
 	} else {
 		router.GET("/dashboard", frontendHandler.Disabled)

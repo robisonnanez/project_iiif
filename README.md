@@ -16,6 +16,7 @@ Servidor Go que convierte archivos PDF a imágenes y los sirve usando el protoco
 - ✅ Configuración editable desde el dashboard con secretos enmascarados
 - ✅ Almacenamiento MySQL BLOB para PDFs e imágenes convertidas
 - ✅ Organización opcional por proyecto y tenant
+- ✅ Swagger/OpenAPI para manual de APIs (solo admin autenticado)
 
 ## Instalación
 
@@ -130,7 +131,7 @@ http://localhost:8080/iiif/3/{image_id}/full/max/0/default.jpg
 ```
 
 - La vista **Configuración** permite editar campos permitidos del `config.yaml`. Los passwords se muestran como `********`; si se dejan así, se conserva el valor real.
-- Después de guardar configuración, reinicia el servicio para aplicar cambios sensibles como puerto, storage o credenciales.
+- Después de guardar configuración, el dashboard puede programar reinicio asíncrono de `project-iiif` (sin cortar la respuesta HTTP). El frontend valida recuperación consultando `/health`.
 - La vista **Migración** permite elegir fuente `local` o `SSH`, explorar directorios locales permitidos y ejecutar la migración con logs en vivo.
 
 ### Build de estilos (Tailwind CLI)
@@ -150,6 +151,31 @@ npm run watch:css
 ```
 
 El CSS compilado se publica en `backend/frontend/assets/styles.css`.
+
+### Swagger / OpenAPI
+
+Genera o refresca la documentacion:
+
+```bash
+cd backend
+swag init -g main.go -o docs
+```
+
+Tambien puedes usar scripts:
+
+```bash
+./scripts/generate-swagger.sh
+# o en Windows PowerShell
+.\scripts\generate-swagger.ps1
+```
+
+Ruta de Swagger UI:
+
+```text
+/swagger/index.html
+```
+
+Swagger esta protegido por sesion admin. Primero inicia sesion en `/` y luego abre `/swagger/index.html`.
 
 ## Migracion local a MySQL BLOB
 
@@ -183,6 +209,8 @@ Comportamiento del migrador:
 - `GET /admin/api/config` - Configuración saneada
 - `PUT /admin/api/config` - Guardar configuración permitida
 - `GET /admin/api/projects` - Listar proyectos y tenants configurados
+- `GET /swagger/index.html` - Manual Swagger (protegido por sesion admin)
+- `POST /admin/api/service/restart` - Programar reinicio asíncrono de `project-iiif`
 - `GET /admin/api/documents/:id/images` - Listar imágenes IIIF de un documento
 - `GET /admin/api/migrations/sources/local/browse` - Explorar directorios locales permitidos
 - `POST /admin/api/migrations/local-to-mysql/start` - Iniciar migración local/SSH -> MySQL BLOB

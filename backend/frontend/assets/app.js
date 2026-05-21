@@ -82,6 +82,7 @@ document.addEventListener("DOMContentLoaded", () => {
   $("#migration-progress-close").addEventListener("click", closeMigrationProgressModal);
   $("#restart-service-later").addEventListener("click", closeRestartServiceModal);
   $("#restart-service-now").addEventListener("click", restartServiceNow);
+  $("#api-docs-button")?.addEventListener("click", openAPIDocs);
   window.addEventListener("popstate", () => showView(viewFromLocation(), false));
 
   loadProjects();
@@ -129,6 +130,10 @@ function refreshCurrentView() {
   } else {
     loadDocuments(active === "documents");
   }
+}
+
+function openAPIDocs() {
+  window.location.href = "/swagger/index.html";
 }
 
 async function startMigration() {
@@ -845,7 +850,7 @@ async function restartServiceNow() {
   const laterButton = $("#restart-service-later");
   if (restartButton) restartButton.disabled = true;
   if (laterButton) laterButton.disabled = true;
-  if (status) status.textContent = "Reiniciando servicio...";
+  if (status) status.textContent = "Programando reinicio...";
 
   try {
     const response = await fetch("/admin/api/service/restart", {
@@ -853,24 +858,63 @@ async function restartServiceNow() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ password }),
     });
-    const data = await response.json();
+    let data = {};
+    try {
+      data = await response.json();
+    } catch (jsonError) {
+      data = {};
+    }
     if (!response.ok || !data.ok) {
       throw new Error(data.error || data.details || `HTTP ${response.status}`);
     }
-    if (status) status.textContent = "Servicio reiniciado correctamente.";
-    showToast(data.message || "Servicio reiniciado correctamente.");
+    if (status) status.textContent = "Reinicio programado. Esperando que el servicio vuelva...";
+    showToast(data.message || "Reinicio programado.");
     if (passwordInput) passwordInput.value = "";
     window.setTimeout(() => {
       const modal = $("#restart-service-modal");
       if (modal) modal.hidden = true;
     }, 1200);
+    void monitorServiceRecovery();
   } catch (error) {
-    if (status) status.textContent = `No se pudo reiniciar: ${error.message}`;
-    showToast(`No se pudo reiniciar servicio: ${error.message}`, "error");
+    const message = String(error?.message || "");
+    const networkError = /failed to fetch|networkerror|load failed/i.test(message);
+    const readable = networkError
+      ? "No hubo respuesta del servidor. Verifica si el servicio se esta reiniciando."
+      : `No se pudo reiniciar: ${message}`;
+    if (status) status.textContent = readable;
+    showToast(networkError ? readable : `No se pudo reiniciar servicio: ${message}`, "error");
   } finally {
     if (restartButton) restartButton.disabled = false;
     if (laterButton) laterButton.disabled = false;
   }
+}
+
+async function monitorServiceRecovery() {
+  // Espera la caida y vuelta del endpoint /health para confirmar reinicio exitoso.
+  const timeoutMs = 60000;
+  const intervalMs = 3000;
+  const deadline = Date.now() + timeoutMs;
+  let sawDown = false;
+
+  while (Date.now() < deadline) {
+    try {
+      const response = await fetch("/health", { cache: "no-store" });
+      if (response.ok) {
+        if (sawDown) {
+          showToast("Servicio activo nuevamente.");
+          return;
+        }
+      } else {
+        sawDown = true;
+      }
+    } catch (error) {
+      sawDown = true;
+    }
+    // eslint-disable-next-line no-await-in-loop
+    await new Promise((resolve) => window.setTimeout(resolve, intervalMs));
+  }
+
+  showToast("El servicio tarda en volver. Revisa: journalctl -u project-iiif -n 100", "error");
 }
 
 function collectConfigPayload() {

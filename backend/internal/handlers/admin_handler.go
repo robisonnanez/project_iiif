@@ -36,10 +36,26 @@ func NewAdminHandler(config *config.Config, documentService *services.DocumentSe
 	}
 }
 
+// GetConfig godoc
+// @Summary Obtener configuracion saneada
+// @Tags Admin
+// @Security SessionCookie
+// @Produce json
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 {object} errorResponse
+// @Router /admin/api/config [get]
 func (h *AdminHandler) GetConfig(c *gin.Context) {
 	c.JSON(http.StatusOK, h.sanitizedConfig())
 }
 
+// GetProjects godoc
+// @Summary Listar proyectos y tenants
+// @Tags Admin
+// @Security SessionCookie
+// @Produce json
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 {object} errorResponse
+// @Router /admin/api/projects [get]
 func (h *AdminHandler) GetProjects(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"enabled":               h.config.Projects.Enabled,
@@ -50,8 +66,22 @@ func (h *AdminHandler) GetProjects(c *gin.Context) {
 	})
 }
 
+// RestartService godoc
+// @Summary Programar reinicio del servicio
+// @Description Valida password sudo y programa reinicio asincrono de project-iiif.
+// @Tags Admin
+// @Security SessionCookie
+// @Accept json
+// @Produce json
+// @Param request body restartServiceRequest true "Password sudo"
+// @Success 200 {object} restartServiceResponse
+// @Failure 400 {object} errorResponse
+// @Failure 401 {object} errorResponse
+// @Failure 429 {object} errorResponse
+// @Failure 500 {object} errorResponse
+// @Router /admin/api/service/restart [post]
 func (h *AdminHandler) RestartService(c *gin.Context) {
-	// Reinicia el servicio systemd project-iiif con password enviada desde modal de confirmacion.
+	// Programa un reinicio asíncrono de project-iiif para evitar cortar la respuesta HTTP al frontend.
 	var payload struct {
 		Password string `json:"password"`
 	}
@@ -78,35 +108,48 @@ func (h *AdminHandler) RestartService(c *gin.Context) {
 	ctx, cancel := context.WithTimeout(c.Request.Context(), 20*time.Second)
 	defer cancel()
 
-	if err := runSudoSystemctl(ctx, payload.Password, "restart", "project-iiif"); err != nil {
-		log.Printf("ERROR service restart failed: %v", err)
+	// Valida credenciales sudo antes de programar el reinicio.
+	if err := runSudoSystemctl(ctx, payload.Password, "-k", "true"); err != nil {
+		log.Printf("ERROR service restart precheck failed: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{
-			"ok":      false,
-			"error":   "no se pudo reiniciar el servicio",
+			"ok":     false,
+			"error":  "no se pudo validar permisos para reiniciar",
 			"details": sanitizeCommandError(err.Error()),
 		})
 		return
 	}
 
-	active, err := isServiceActive(ctx, payload.Password, "project-iiif")
-	if err != nil {
-		log.Printf("WARN service restarted but status check failed: %v", err)
-		c.JSON(http.StatusOK, gin.H{
-			"ok":      true,
-			"message": "servicio reiniciado, pero no se pudo validar estado",
-			"active":  false,
-		})
-		return
-	}
+	// Ejecuta restart después de responder para que el fetch no pierda conexión.
+	password := payload.Password
+	time.AfterFunc(1500*time.Millisecond, func() {
+		bgCtx, bgCancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer bgCancel()
+		if err := runSudoSystemctl(bgCtx, password, "-k", "systemctl", "restart", "project-iiif"); err != nil {
+			log.Printf("ERROR deferred service restart failed: %v", err)
+			return
+		}
+		log.Printf("INFO service project-iiif restart scheduled and executed")
+	})
 
-	log.Printf("INFO service project-iiif restarted successfully active=%t", active)
 	c.JSON(http.StatusOK, gin.H{
 		"ok":      true,
-		"message": "servicio reiniciado correctamente",
-		"active":  active,
+		"message": "reinicio programado; el servicio se reiniciara en breve",
+		"active":  true,
 	})
 }
 
+// UpdateConfig godoc
+// @Summary Guardar configuracion editable
+// @Tags Admin
+// @Security SessionCookie
+// @Accept json
+// @Produce json
+// @Param request body editableConfigPayload true "Configuracion editable"
+// @Success 200 {object} map[string]interface{}
+// @Failure 400 {object} errorResponse
+// @Failure 401 {object} errorResponse
+// @Failure 500 {object} errorResponse
+// @Router /admin/api/config [put]
 func (h *AdminHandler) UpdateConfig(c *gin.Context) {
 	// Guarda solo campos permitidos del formulario para evitar sobrescribir secretos o YAML arbitrario.
 	var payload editableConfigPayload
@@ -140,8 +183,9 @@ func (h *AdminHandler) UpdateConfig(c *gin.Context) {
 	})
 }
 
-func runSudoSystemctl(ctx context.Context, password, action, service string) error {
-	cmd := exec.CommandContext(ctx, "sudo", "-S", "systemctl", action, service)
+func runSudoSystemctl(ctx context.Context, password string, args ...string) error {
+	cmdArgs := append([]string{"-S"}, args...)
+	cmd := exec.CommandContext(ctx, "sudo", cmdArgs...)
 	cmd.Stdin = strings.NewReader(password + "\n")
 	var out bytes.Buffer
 	var stderr bytes.Buffer
@@ -151,19 +195,6 @@ func runSudoSystemctl(ctx context.Context, password, action, service string) err
 		return &configError{message: strings.TrimSpace(stderr.String() + " " + out.String() + " " + err.Error())}
 	}
 	return nil
-}
-
-func isServiceActive(ctx context.Context, password, service string) (bool, error) {
-	cmd := exec.CommandContext(ctx, "sudo", "-S", "systemctl", "is-active", service)
-	cmd.Stdin = strings.NewReader(password + "\n")
-	var out bytes.Buffer
-	var stderr bytes.Buffer
-	cmd.Stdout = &out
-	cmd.Stderr = &stderr
-	if err := cmd.Run(); err != nil {
-		return false, &configError{message: strings.TrimSpace(stderr.String() + " " + out.String() + " " + err.Error())}
-	}
-	return strings.TrimSpace(out.String()) == "active", nil
 }
 
 func sanitizeCommandError(message string) string {
@@ -179,6 +210,17 @@ func sanitizeCommandError(message string) string {
 	return clean
 }
 
+// GetDocumentImages godoc
+// @Summary Listar imagenes IIIF por documento
+// @Tags Admin
+// @Security SessionCookie
+// @Produce json
+// @Param id path string true "ID documento"
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 {object} errorResponse
+// @Failure 404 {object} errorResponse
+// @Failure 500 {object} errorResponse
+// @Router /admin/api/documents/{id}/images [get]
 func (h *AdminHandler) GetDocumentImages(c *gin.Context) {
 	// Expone identificadores IIIF seguros para la galeria sin revelar rutas internas ni BLOBs.
 	documentID := c.Param("id")
@@ -200,19 +242,19 @@ func (h *AdminHandler) GetDocumentImages(c *gin.Context) {
 		identifier := image.ID
 		servicePath := "/iiif/" + h.config.IIIF.APIVersion + "/" + identifier
 		items = append(items, gin.H{
-			"image_id":            identifier,
-			"document_id":         image.DocumentID,
-			"project_key":         image.ProjectKey,
-			"tenant_key":          image.TenantKey,
-			"page_number":         image.PageNumber,
-			"width":               image.Width,
-			"height":              image.Height,
-			"format":              image.Format,
-			"media_type":          image.MediaType,
-			"byte_size":           image.ByteSize,
+			"image_id":    identifier,
+			"document_id": image.DocumentID,
+			"project_key": image.ProjectKey,
+			"tenant_key":  image.TenantKey,
+			"page_number": image.PageNumber,
+			"width":       image.Width,
+			"height":      image.Height,
+			"format":      image.Format,
+			"media_type":  image.MediaType,
+			"byte_size":   image.ByteSize,
 			"migrated_from_local": image.MigratedFromLocal,
-			"iiif_url":            base + servicePath + "/full/max/0/default.jpg",
-			"info_url":            base + servicePath + "/info.json",
+			"iiif_url":    base + servicePath + "/full/max/0/default.jpg",
+			"info_url":    base + servicePath + "/info.json",
 		})
 	}
 
@@ -224,6 +266,18 @@ func (h *AdminHandler) GetDocumentImages(c *gin.Context) {
 	})
 }
 
+// StartLocalToMySQLMigration godoc
+// @Summary Iniciar migracion local/ssh a MySQL BLOB
+// @Tags Admin
+// @Security SessionCookie
+// @Accept json
+// @Produce json
+// @Param request body migrationStartPayload true "Origen y scope"
+// @Success 202 {object} map[string]interface{}
+// @Failure 400 {object} errorResponse
+// @Failure 401 {object} errorResponse
+// @Failure 409 {object} errorResponse
+// @Router /admin/api/migrations/local-to-mysql/start [post]
 func (h *AdminHandler) StartLocalToMySQLMigration(c *gin.Context) {
 	// Ejecuta la migracion en background y devuelve estado inicial.
 	var payload migrationStartRequest
@@ -245,11 +299,30 @@ func (h *AdminHandler) StartLocalToMySQLMigration(c *gin.Context) {
 	})
 }
 
+// GetLocalToMySQLMigrationStatus godoc
+// @Summary Estado de migracion local/ssh a MySQL
+// @Tags Admin
+// @Security SessionCookie
+// @Produce json
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 {object} errorResponse
+// @Router /admin/api/migrations/local-to-mysql/status [get]
 func (h *AdminHandler) GetLocalToMySQLMigrationStatus(c *gin.Context) {
 	// Devuelve estado y logs acumulados de la ultima migracion.
 	c.JSON(http.StatusOK, h.migrationRunner.Status())
 }
 
+// BrowseLocalMigrationSource godoc
+// @Summary Explorar directorios locales permitidos para migracion
+// @Tags Admin
+// @Security SessionCookie
+// @Produce json
+// @Param path query string false "Ruta base a explorar"
+// @Success 200 {object} map[string]interface{}
+// @Failure 400 {object} errorResponse
+// @Failure 401 {object} errorResponse
+// @Failure 403 {object} errorResponse
+// @Router /admin/api/migrations/sources/local/browse [get]
 func (h *AdminHandler) BrowseLocalMigrationSource(c *gin.Context) {
 	// Lista directorios hijos para ayudar a seleccionar ruta local de migracion.
 	path := strings.TrimSpace(c.Query("path"))
