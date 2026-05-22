@@ -47,6 +47,15 @@ type Config struct {
 			Charset   string `yaml:"charset"`
 			ParseTime bool   `yaml:"parse_time"`
 		} `yaml:"mysql"`
+		Postgres struct {
+			Host     string `yaml:"host"`
+			Port     string `yaml:"port"`
+			User     string `yaml:"user"`
+			Password string `yaml:"password"`
+			Database string `yaml:"database"`
+			SSLMode  string `yaml:"sslmode"`
+			Schema   string `yaml:"schema"`
+		} `yaml:"postgres"`
 	} `yaml:"database"`
 
 	PDF struct {
@@ -196,20 +205,41 @@ func applyDefaults(config *Config) {
 	if config.DBConnection != "" {
 		config.Storage.Backend = config.DBConnection
 	}
+	isPostgres := strings.EqualFold(config.Storage.Backend, "postgres") || strings.EqualFold(config.DBConnection, "postgres")
 	if config.DBHost != "" {
-		config.Database.MySQL.Host = config.DBHost
+		if isPostgres {
+			config.Database.Postgres.Host = config.DBHost
+		} else {
+			config.Database.MySQL.Host = config.DBHost
+		}
 	}
 	if config.DBPort != "" {
-		config.Database.MySQL.Port = config.DBPort
+		if isPostgres {
+			config.Database.Postgres.Port = config.DBPort
+		} else {
+			config.Database.MySQL.Port = config.DBPort
+		}
 	}
 	if config.DBUsername != "" {
-		config.Database.MySQL.User = config.DBUsername
+		if isPostgres {
+			config.Database.Postgres.User = config.DBUsername
+		} else {
+			config.Database.MySQL.User = config.DBUsername
+		}
 	}
 	if config.DBPassword != "" {
-		config.Database.MySQL.Password = config.DBPassword
+		if isPostgres {
+			config.Database.Postgres.Password = config.DBPassword
+		} else {
+			config.Database.MySQL.Password = config.DBPassword
+		}
 	}
 	if config.DBDatabase != "" {
-		config.Database.MySQL.Database = config.DBDatabase
+		if isPostgres {
+			config.Database.Postgres.Database = config.DBDatabase
+		} else {
+			config.Database.MySQL.Database = config.DBDatabase
+		}
 	}
 	if config.Storage.Backend == "" {
 		config.Storage.Backend = defaults.Storage.Backend
@@ -247,6 +277,21 @@ func applyDefaults(config *Config) {
 	if config.Database.MySQL.Charset == "" {
 		config.Database.MySQL.Charset = defaults.Database.MySQL.Charset
 	}
+	if config.Database.Postgres.Host == "" {
+		config.Database.Postgres.Host = defaults.Database.Postgres.Host
+	}
+	if config.Database.Postgres.Port == "" {
+		config.Database.Postgres.Port = defaults.Database.Postgres.Port
+	}
+	if config.Database.Postgres.User == "" {
+		config.Database.Postgres.User = defaults.Database.Postgres.User
+	}
+	if config.Database.Postgres.Database == "" {
+		config.Database.Postgres.Database = defaults.Database.Postgres.Database
+	}
+	if config.Database.Postgres.SSLMode == "" {
+		config.Database.Postgres.SSLMode = defaults.Database.Postgres.SSLMode
+	}
 	if config.BinaryStorage.Mode == "" {
 		if config.Storage.Backend == "local" {
 			config.BinaryStorage.Mode = "local"
@@ -283,11 +328,19 @@ func applyDefaults(config *Config) {
 	}
 	config.StorageBackend = config.Storage.Backend
 	config.DBConnection = config.Storage.Backend
-	config.DBHost = config.Database.MySQL.Host
-	config.DBPort = config.Database.MySQL.Port
-	config.DBUsername = config.Database.MySQL.User
-	config.DBPassword = config.Database.MySQL.Password
-	config.DBDatabase = config.Database.MySQL.Database
+	if strings.EqualFold(config.Storage.Backend, "postgres") {
+		config.DBHost = config.Database.Postgres.Host
+		config.DBPort = config.Database.Postgres.Port
+		config.DBUsername = config.Database.Postgres.User
+		config.DBPassword = config.Database.Postgres.Password
+		config.DBDatabase = config.Database.Postgres.Database
+	} else {
+		config.DBHost = config.Database.MySQL.Host
+		config.DBPort = config.Database.MySQL.Port
+		config.DBUsername = config.Database.MySQL.User
+		config.DBPassword = config.Database.MySQL.Password
+		config.DBDatabase = config.Database.MySQL.Database
+	}
 }
 
 func Default() *Config {
@@ -326,6 +379,15 @@ func Default() *Config {
 				Charset   string `yaml:"charset"`
 				ParseTime bool   `yaml:"parse_time"`
 			} `yaml:"mysql"`
+			Postgres struct {
+				Host     string `yaml:"host"`
+				Port     string `yaml:"port"`
+				User     string `yaml:"user"`
+				Password string `yaml:"password"`
+				Database string `yaml:"database"`
+				SSLMode  string `yaml:"sslmode"`
+				Schema   string `yaml:"schema"`
+			} `yaml:"postgres"`
 		}{
 			MySQL: struct {
 				Host      string `yaml:"host"`
@@ -343,6 +405,23 @@ func Default() *Config {
 				Database:  "project_iiif",
 				Charset:   "utf8mb4",
 				ParseTime: true,
+			},
+			Postgres: struct {
+				Host     string `yaml:"host"`
+				Port     string `yaml:"port"`
+				User     string `yaml:"user"`
+				Password string `yaml:"password"`
+				Database string `yaml:"database"`
+				SSLMode  string `yaml:"sslmode"`
+				Schema   string `yaml:"schema"`
+			}{
+				Host:     "127.0.0.1",
+				Port:     "5432",
+				User:     "postgres",
+				Password: "",
+				Database: "project_iiif",
+				SSLMode:  "disable",
+				Schema:   "public",
 			},
 		},
 		PDF: struct {

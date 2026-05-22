@@ -16,7 +16,7 @@ const viewMeta = {
   documents: ["Documentos", "Consulta documentos, estados y manifiestos."],
   images: ["Imagenes", "Galeria de paginas servidas por IIIF."],
   config: ["Configuracion", "Edita valores permitidos del config.yaml sin exponer secretos."],
-  migration: ["Migracion", "Migra datos locales hacia MySQL BLOB de forma controlada."],
+  migration: ["Migracion", "Migra datos locales hacia la base de datos activa de forma controlada."],
 };
 
 const viewRoutes = {
@@ -37,6 +37,11 @@ const routeViews = {
   "/dashboard/imagenes": "images",
   "/dashboard/configuracion": "config",
   "/dashboard/migracion": "migration",
+};
+
+const DB_PORT_DEFAULTS = {
+  mysql: "3306",
+  postgres: "5432",
 };
 
 const $ = (selector) => document.querySelector(selector);
@@ -83,6 +88,7 @@ document.addEventListener("DOMContentLoaded", () => {
   $("#restart-service-later").addEventListener("click", closeRestartServiceModal);
   $("#restart-service-now").addEventListener("click", restartServiceNow);
   $("#api-docs-button")?.addEventListener("click", openAPIDocs);
+  $("#config-view")?.addEventListener("click", handleConfigActions);
   window.addEventListener("popstate", () => showView(viewFromLocation(), false));
 
   loadProjects();
@@ -136,6 +142,14 @@ function openAPIDocs() {
   window.location.href = "/swagger/index.html";
 }
 
+function handleConfigActions(event) {
+  const runButton = event.target.closest("#run-db-migrations");
+  if (runButton) {
+    event.preventDefault();
+    runDBMigrations();
+  }
+}
+
 async function startMigration() {
   // Abre modal para confirmar proyecto/tenant antes de iniciar la migracion.
   const payload = collectMigrationPayload(false);
@@ -152,7 +166,7 @@ async function submitMigrationFromModal() {
   }
   closeMigrationModal();
   try {
-    const response = await fetch("/admin/api/migrations/local-to-mysql/start", {
+    const response = await fetch("/admin/api/migrations/local-to-db/start", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
@@ -174,7 +188,7 @@ async function loadMigrationStatus() {
   if (!badge || !summary || !logs) return;
 
   try {
-    const response = await fetch("/admin/api/migrations/local-to-mysql/status");
+    const response = await fetch("/admin/api/migrations/local-to-db/status");
     const data = await response.json();
     if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);
 
@@ -431,11 +445,22 @@ async function loadConfig() {
     const response = await fetch("/admin/api/config");
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     state.config = await response.json();
+    updateMigrationCopy();
     renderSummary();
     renderConfigForm();
   } catch (error) {
     $("#config-form").innerHTML = `<div class="config-card"><pre>No se pudo cargar configuracion: ${escapeHTML(error.message)}</pre></div>`;
   }
+}
+
+function updateMigrationCopy() {
+  // Ajusta textos de migracion segun el motor de base de datos activo.
+  const backend = String(state.config?.storage?.backend || state.config?.database?.DB_CONNECTION || "base de datos").toLowerCase();
+  const dbLabel = backend === "postgres" ? "Postgres" : backend === "mysql" ? "MySQL" : "base de datos";
+  const title = $("#migration-title");
+  const subtitle = $("#migration-subtitle");
+  if (title) title.textContent = `Migracion local a ${dbLabel} BLOB`;
+  if (subtitle) subtitle.textContent = `Ejecuta la migracion one-shot de metadatos y binarios desde almacenamiento local hacia ${dbLabel}.`;
 }
 
 async function loadProjects() {
@@ -750,14 +775,7 @@ function renderConfigForm() {
         input("database.DB_PORT", "DB port", config.database?.DB_PORT || ""),
         input("database.DB_DATABASE", "DB database", config.database?.DB_DATABASE || ""),
         input("database.DB_USERNAME", "DB username", config.database?.DB_USERNAME || ""),
-        input("database.DB_PASSWORD", "DB password", config.database?.DB_PASSWORD || "", "password"),
-        input("database.mysql.host", "MySQL host", config.database?.mysql?.host || ""),
-        input("database.mysql.port", "MySQL port", config.database?.mysql?.port || ""),
-        input("database.mysql.user", "MySQL user", config.database?.mysql?.user || ""),
-        input("database.mysql.password", "MySQL password", config.database?.mysql?.password || "", "password"),
-        input("database.mysql.database", "MySQL database", config.database?.mysql?.database || ""),
-        input("database.mysql.charset", "MySQL charset", config.database?.mysql?.charset || ""),
-        checkbox("database.mysql.parse_time", "MySQL parse time", Boolean(config.database?.mysql?.parse_time))
+        input("database.DB_PASSWORD", "DB password", config.database?.DB_PASSWORD || "", "password")
       ])}
       ${fieldset("Frontend", [
         checkbox("frontend.enabled", "Frontend activo", Boolean(config.frontend?.enabled)),
@@ -786,6 +804,18 @@ function renderConfigForm() {
         textarea("projects.items", "Proyectos JSON", JSON.stringify(config.projects?.items || [], null, 2))
       ])}
     </div>
+    <div class="config-card">
+      <legend>Migraciones DB</legend>
+      <div class="toolbar-row">
+        <button class="primary" type="button" id="run-db-migrations">Ejecutar migraciones</button>
+        <span class="muted">Motor activo: ${escapeHTML(config.storage?.backend || "local")}</span>
+      </div>
+      <pre id="db-migration-status" class="result">Sin ejecuciones de migracion DB.</pre>
+      <label class="field">
+        <span>Ejemplo de nueva migracion (${escapeHTML((config.storage?.backend || "local").toLowerCase())})</span>
+        <textarea rows="8" readonly>${escapeHTML(exampleMigrationSQL(config.storage?.backend || "local"))}</textarea>
+      </label>
+    </div>
     <div class="form-actions">
       <button class="primary" type="submit">Guardar configuracion</button>
       <span class="muted">Los secretos en ${MASKED_SECRET} se conservan sin cambios.</span>
@@ -793,6 +823,34 @@ function renderConfigForm() {
   `;
 
   $("#config-form").addEventListener("submit", saveConfig);
+  bindDBConnectionAutofill();
+  void loadDBMigrationStatus();
+}
+
+function bindDBConnectionAutofill() {
+  // Sincroniza puerto por defecto al cambiar motor para simplificar configuracion.
+  const connection = $("#config-form select[name='database.DB_CONNECTION']");
+  const port = $("#config-form input[name='database.DB_PORT']");
+  const storageBackend = $("#config-form select[name='storage.backend']");
+  if (!connection || !port) return;
+
+  let lastEngine = String(connection.value || "local").toLowerCase();
+  connection.addEventListener("change", () => {
+    const nextEngine = String(connection.value || "local").toLowerCase();
+    const nextDefaultPort = DB_PORT_DEFAULTS[nextEngine] || "";
+    const previousDefaultPort = DB_PORT_DEFAULTS[lastEngine] || "";
+
+    // Cambia puerto automaticamente cuando coincide con el default anterior o esta vacio.
+    if (nextDefaultPort && (!port.value || port.value === previousDefaultPort)) {
+      port.value = nextDefaultPort;
+    }
+
+    // Mantiene storage.backend alineado con el motor de DB cuando aplica.
+    if (storageBackend && (nextEngine === "mysql" || nextEngine === "postgres" || nextEngine === "local")) {
+      storageBackend.value = nextEngine;
+    }
+    lastEngine = nextEngine;
+  });
 }
 
 async function saveConfig(event) {
@@ -923,6 +981,48 @@ function collectConfigPayload() {
   const checked = (name) => Boolean(form.elements[name]?.checked);
   const intValue = (name) => Number.parseInt(value(name), 10) || 0;
 
+  const dbConnection = value("database.DB_CONNECTION");
+  const dbHost = value("database.DB_HOST");
+  const dbPort = value("database.DB_PORT");
+  const dbName = value("database.DB_DATABASE");
+  const dbUser = value("database.DB_USERNAME");
+  const dbPassword = value("database.DB_PASSWORD");
+
+  const mysqlCurrent = state.config?.database?.mysql || {};
+  const postgresCurrent = state.config?.database?.postgres || {};
+  const mysqlPayload = {
+    host: mysqlCurrent.host || dbHost,
+    port: mysqlCurrent.port || DB_PORT_DEFAULTS.mysql,
+    user: mysqlCurrent.user || dbUser,
+    password: mysqlCurrent.password || dbPassword,
+    database: mysqlCurrent.database || dbName,
+    charset: mysqlCurrent.charset || "utf8mb4",
+    parse_time: mysqlCurrent.parse_time !== undefined ? Boolean(mysqlCurrent.parse_time) : true,
+  };
+  const postgresPayload = {
+    host: postgresCurrent.host || dbHost,
+    port: postgresCurrent.port || DB_PORT_DEFAULTS.postgres,
+    user: postgresCurrent.user || dbUser,
+    password: postgresCurrent.password || dbPassword,
+    database: postgresCurrent.database || dbName,
+    sslmode: postgresCurrent.sslmode || "disable",
+    schema: postgresCurrent.schema || "public",
+  };
+
+  if (dbConnection === "mysql") {
+    mysqlPayload.host = dbHost;
+    mysqlPayload.port = dbPort || DB_PORT_DEFAULTS.mysql;
+    mysqlPayload.user = dbUser;
+    mysqlPayload.password = dbPassword;
+    mysqlPayload.database = dbName;
+  } else if (dbConnection === "postgres") {
+    postgresPayload.host = dbHost;
+    postgresPayload.port = dbPort || DB_PORT_DEFAULTS.postgres;
+    postgresPayload.user = dbUser;
+    postgresPayload.password = dbPassword;
+    postgresPayload.database = dbName;
+  }
+
   return {
     server: { port: value("server.port"), mode: value("server.mode") },
     storage: {
@@ -935,21 +1035,14 @@ function collectConfigPayload() {
       manifests_path: value("storage.manifests_path"),
     },
     database: {
-      DB_CONNECTION: value("database.DB_CONNECTION"),
-      DB_HOST: value("database.DB_HOST"),
-      DB_PORT: value("database.DB_PORT"),
-      DB_DATABASE: value("database.DB_DATABASE"),
-      DB_USERNAME: value("database.DB_USERNAME"),
-      DB_PASSWORD: value("database.DB_PASSWORD"),
-      mysql: {
-        host: value("database.mysql.host"),
-        port: value("database.mysql.port"),
-        user: value("database.mysql.user"),
-        password: value("database.mysql.password"),
-        database: value("database.mysql.database"),
-        charset: value("database.mysql.charset"),
-        parse_time: checked("database.mysql.parse_time"),
-      },
+      DB_CONNECTION: dbConnection,
+      DB_HOST: dbHost,
+      DB_PORT: dbPort,
+      DB_DATABASE: dbName,
+      DB_USERNAME: dbUser,
+      DB_PASSWORD: dbPassword,
+      mysql: mysqlPayload,
+      postgres: postgresPayload,
     },
     frontend: {
       enabled: checked("frontend.enabled"),
@@ -978,6 +1071,57 @@ function collectConfigPayload() {
       items: parseProjectsItems(value("projects.items")),
     },
   };
+}
+
+async function loadDBMigrationStatus() {
+  const box = $("#db-migration-status");
+  if (!box) return;
+  try {
+    const response = await fetch("/admin/api/db/migrations/status");
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);
+    box.textContent = formatDBMigrationStatus(data.result || {}, Boolean(data.running));
+  } catch (error) {
+    box.textContent = `No se pudo cargar estado: ${error.message}`;
+  }
+}
+
+async function runDBMigrations() {
+  const box = $("#db-migration-status");
+  if (box) box.textContent = "Ejecutando migraciones pendientes...";
+  try {
+    const response = await fetch("/admin/api/db/migrations/run", { method: "POST" });
+    const data = await response.json();
+    if (!response.ok) {
+      throw new Error(data.error || data?.result?.message || `HTTP ${response.status}`);
+    }
+    if (box) box.textContent = formatDBMigrationStatus(data, false);
+    showToast(data.message || "Migraciones ejecutadas.");
+  } catch (error) {
+    if (box) box.textContent = `Error ejecutando migraciones: ${error.message}`;
+    showToast(`No se pudo ejecutar migraciones: ${error.message}`, "error");
+  }
+}
+
+function formatDBMigrationStatus(data, running = false) {
+  return [
+    `running: ${running}`,
+    `engine: ${data.engine || "-"}`,
+    `pending_before: ${Number(data.pending_before || 0)}`,
+    `applied: ${Number(data.applied || 0)}`,
+    `skipped: ${Number(data.skipped || 0)}`,
+    `duration_ms: ${Number(data.duration_ms || 0)}`,
+    `message: ${data.message || "-"}`,
+    Array.isArray(data.applied_files) && data.applied_files.length ? `applied_files: ${data.applied_files.join(", ")}` : "",
+    Array.isArray(data.errors) && data.errors.length ? `errors: ${data.errors.join(" | ")}` : "",
+  ].filter(Boolean).join("\n");
+}
+
+function exampleMigrationSQL(engine) {
+  if (String(engine).toLowerCase().startsWith("post")) {
+    return "BEGIN;\n-- 005_add_example_table.sql\nCREATE TABLE IF NOT EXISTS example_table (\n  id UUID PRIMARY KEY,\n  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()\n);\nCOMMIT;";
+  }
+  return "START TRANSACTION;\n-- 005_add_example_table.sql\nCREATE TABLE IF NOT EXISTS example_table (\n  id VARCHAR(36) PRIMARY KEY,\n  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP\n);\nCOMMIT;";
 }
 
 function renderProjectControls() {

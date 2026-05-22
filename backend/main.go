@@ -81,6 +81,7 @@ func main() {
 	router.POST("/auth/login", authHandler.Login)
 	router.POST("/auth/logout", authHandler.Logout)
 	router.GET("/auth/me", authHandler.Me)
+	router.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))
 
 	if cfg.Frontend.Enabled {
 		dashboard := router.Group("/dashboard")
@@ -106,15 +107,14 @@ func main() {
 			admin.GET("/projects", adminHandler.GetProjects)
 			admin.GET("/documents/:id/images", adminHandler.GetDocumentImages)
 			admin.GET("/migrations/sources/local/browse", adminHandler.BrowseLocalMigrationSource)
+			admin.POST("/migrations/local-to-db/start", adminHandler.StartLocalToDBMigration)
+			admin.GET("/migrations/local-to-db/status", adminHandler.GetLocalToDBMigrationStatus)
 			admin.POST("/migrations/local-to-mysql/start", adminHandler.StartLocalToMySQLMigration)
 			admin.GET("/migrations/local-to-mysql/status", adminHandler.GetLocalToMySQLMigrationStatus)
+			admin.POST("/db/migrations/run", adminHandler.RunDBMigrations)
+			admin.GET("/db/migrations/status", adminHandler.GetDBMigrationsStatus)
 		}
 
-		swagger := router.Group("/swagger")
-		swagger.Use(authHandler.RequireSession())
-		{
-			swagger.GET("/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))
-		}
 	} else {
 		router.GET("/dashboard", frontendHandler.Disabled)
 		router.GET("/dashboard/*path", frontendHandler.Disabled)
@@ -192,7 +192,9 @@ func newStorage(cfg *config.Config) (storage.Storage, error) {
 		return storage.NewFileStorageFromConfig(cfg), nil
 	case "mysql":
 		return storage.NewMySQLStorage(cfg)
-	case "postgres", "postgresql", "mongo", "mongodb":
+	case "postgres", "postgresql":
+		return storage.NewPostgresStorage(cfg)
+	case "mongo", "mongodb":
 		return nil, fmt.Errorf("storage backend %s reconocido pero todavia no implementado", cfg.Storage.Backend)
 	default:
 		return nil, fmt.Errorf("storage backend no soportado: %s", cfg.Storage.Backend)

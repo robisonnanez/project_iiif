@@ -69,6 +69,17 @@ type sourceDocument struct {
 	SourceKey string
 }
 
+func newDatabaseStore(cfg *config.Config, engine string) (storage.Storage, error) {
+	switch engine {
+	case "mysql":
+		return storage.NewMySQLStorage(cfg)
+	case "postgres":
+		return storage.NewPostgresStorage(cfg)
+	default:
+		return nil, fmt.Errorf("motor no soportado para migracion: %s", engine)
+	}
+}
+
 func main() {
 	log.SetFlags(0)
 
@@ -76,14 +87,18 @@ func main() {
 	if err != nil {
 		log.Fatalf("ERROR no se pudo cargar config.yaml: %v", err)
 	}
-	if strings.ToLower(cfg.Storage.Backend) != "mysql" {
-		log.Fatalf("ERROR storage.backend debe ser mysql para migrar a BLOB. valor actual: %s", cfg.Storage.Backend)
+	engine := strings.ToLower(strings.TrimSpace(cfg.Storage.Backend))
+	if engine == "postgresql" {
+		engine = "postgres"
+	}
+	if engine != "mysql" && engine != "postgres" {
+		log.Fatalf("ERROR storage.backend debe ser mysql o postgres para migrar a BLOB. valor actual: %s", cfg.Storage.Backend)
 	}
 
 	src := readSourceConfig(cfg)
-	mysqlStore, err := storage.NewMySQLStorage(cfg)
+	dbStore, err := newDatabaseStore(cfg, engine)
 	if err != nil {
-		log.Fatalf("ERROR no se pudo conectar a MySQL: %v", err)
+		log.Fatalf("ERROR no se pudo conectar a %s: %v", engine, err)
 	}
 
 	var docs []sourceDocument
@@ -113,7 +128,7 @@ func main() {
 			s.DocsFromPDFLayout++
 		}
 		s.ImagesFoundOnDisk += len(item.Images)
-		if err := migrateDocument(item, mysqlStore, &s); err != nil {
+		if err := migrateDocument(item, dbStore, &s); err != nil {
 			s.ErroredDocs++
 			log.Printf("ERROR documento %s: %v", item.Doc.ID, err)
 			log.Printf("PROGRESS_DOC %s|%s|%d|%d|error|%s", item.Doc.ID, item.Doc.Name, 0, len(item.Images), sanitizeProgressMessage(err.Error()))
@@ -276,7 +291,7 @@ func discoverSSHDocuments(cfg *config.Config, src sourceConfig) ([]sourceDocumen
 	return out, nil
 }
 
-func migrateDocument(item sourceDocument, mysqlStore storage.Storage, s *stats) error {
+func migrateDocument(item sourceDocument, dbStore storage.Storage, s *stats) error {
 	doc := item.Doc
 	originalImageData := item.ImageData
 	if strings.TrimSpace(item.SourceKey) == "" {
@@ -297,13 +312,13 @@ func migrateDocument(item sourceDocument, mysqlStore storage.Storage, s *stats) 
 		}
 	}
 
-	if err := mysqlStore.SaveDocument(doc); err != nil {
+	if err := dbStore.SaveDocument(doc); err != nil {
 		return fmt.Errorf("no se pudo guardar metadata documento: %w", err)
 	}
 	s.MigratedDocs++
 
 	s.TotalPDFs++
-	if err := migratePDFBlob(doc, item.PDFBytes, mysqlStore, s); err != nil {
+	if err := migratePDFBlob(doc, item.PDFBytes, dbStore, s); err != nil {
 		s.ErroredPDFs++
 		log.Printf("ERROR pdf documento %s: %v", doc.ID, err)
 	}
@@ -334,7 +349,7 @@ func migrateDocument(item sourceDocument, mysqlStore storage.Storage, s *stats) 
 			item.ImageData[img.ID] = data
 		}
 		data := item.ImageData[img.ID]
-		if err := migrateImageBlob(img, data, mysqlStore); err != nil {
+		if err := migrateImageBlob(img, data, dbStore); err != nil {
 			if err == errSkipImageBlob {
 				s.SkippedImgs++
 				log.Printf("PROGRESS_IMG %s|%d|%d", doc.ID, s.MigratedImgs+s.SkippedImgs+s.ErroredImages, s.TotalImages)
@@ -351,9 +366,18 @@ func migrateDocument(item sourceDocument, mysqlStore storage.Storage, s *stats) 
 	return nil
 }
 
-func migratePDFBlob(doc *models.PDFDocument, pdfData []byte, mysqlStore storage.Storage, s *stats) error {
-	if ms, ok := mysqlStore.(*storage.MySQLStorage); ok {
+func migratePDFBlob(doc *models.PDFDocument, pdfData []byte, dbStore storage.Storage, s *stats) error {
+	if ms, ok := dbStore.(*storage.MySQLStorage); ok {
 		exists, err := ms.HasDocumentPDFBlob(doc.ID)
+		if err != nil {
+			log.Printf("WARN no se pudo verificar pdf_blob para %s: %v", doc.ID, err)
+		} else if exists {
+			s.SkippedPDFs++
+			return nil
+		}
+	}
+	if ps, ok := dbStore.(*storage.PostgresStorage); ok {
+		exists, err := ps.HasDocumentPDFBlob(doc.ID)
 		if err != nil {
 			log.Printf("WARN no se pudo verificar pdf_blob para %s: %v", doc.ID, err)
 		} else if exists {
@@ -365,16 +389,24 @@ func migratePDFBlob(doc *models.PDFDocument, pdfData []byte, mysqlStore storage.
 		s.SkippedPDFs++
 		return fmt.Errorf("pdf sin bytes para migrar")
 	}
-	if err := mysqlStore.SaveDocumentPDF(doc.ID, pdfData, "application/pdf"); err != nil {
+	if err := dbStore.SaveDocumentPDF(doc.ID, pdfData, "application/pdf"); err != nil {
 		return fmt.Errorf("fallo al guardar pdf_blob: %w", err)
 	}
 	s.MigratedPDFs++
 	return nil
 }
 
-func migrateImageBlob(img *models.DocumentImage, data []byte, mysqlStore storage.Storage) error {
-	if ms, ok := mysqlStore.(*storage.MySQLStorage); ok {
+func migrateImageBlob(img *models.DocumentImage, data []byte, dbStore storage.Storage) error {
+	if ms, ok := dbStore.(*storage.MySQLStorage); ok {
 		exists, err := ms.HasImageBlob(img.ID)
+		if err != nil {
+			log.Printf("WARN no se pudo verificar image_blob para %s: %v", img.ID, err)
+		} else if exists {
+			return errSkipImageBlob
+		}
+	}
+	if ps, ok := dbStore.(*storage.PostgresStorage); ok {
+		exists, err := ps.HasImageBlob(img.ID)
 		if err != nil {
 			log.Printf("WARN no se pudo verificar image_blob para %s: %v", img.ID, err)
 		} else if exists {
@@ -394,10 +426,10 @@ func migrateImageBlob(img *models.DocumentImage, data []byte, mysqlStore storage
 		img.MediaType = mediaTypeFromFormat(img.Format)
 	}
 	img.ByteSize = int64(len(data))
-	if err := mysqlStore.SaveDocumentImage(img); err != nil {
+	if err := dbStore.SaveDocumentImage(img); err != nil {
 		return fmt.Errorf("fallo al guardar metadata imagen: %w", err)
 	}
-	if err := mysqlStore.SaveDocumentImageData(img.ID, data, img.MediaType); err != nil {
+	if err := dbStore.SaveDocumentImageData(img.ID, data, img.MediaType); err != nil {
 		return fmt.Errorf("fallo al guardar image_blob: %w", err)
 	}
 	return nil

@@ -15,6 +15,7 @@ import (
 
 	"iiif-pdf-server/internal/config"
 	"iiif-pdf-server/internal/services"
+	"iiif-pdf-server/internal/storage"
 
 	"github.com/gin-gonic/gin"
 )
@@ -23,6 +24,9 @@ type AdminHandler struct {
 	config          *config.Config
 	documentService *services.DocumentService
 	migrationRunner *migrationRunner
+	dbMigrateMu     sync.Mutex
+	dbMigrateRunning bool
+	dbMigrateStatus storage.MigrationRunResult
 	restartMu       sync.Mutex
 	lastRestartByIP map[string]time.Time
 }
@@ -32,6 +36,7 @@ func NewAdminHandler(config *config.Config, documentService *services.DocumentSe
 		config:          config,
 		documentService: documentService,
 		migrationRunner: newMigrationRunner(config.Migration.MaxLogLines),
+		dbMigrateStatus: storage.MigrationRunResult{Engine: config.Storage.Backend, Message: "sin ejecutar"},
 		lastRestartByIP: map[string]time.Time{},
 	}
 }
@@ -46,6 +51,58 @@ func NewAdminHandler(config *config.Config, documentService *services.DocumentSe
 // @Router /admin/api/config [get]
 func (h *AdminHandler) GetConfig(c *gin.Context) {
 	c.JSON(http.StatusOK, h.sanitizedConfig())
+}
+
+// GetDBMigrationsStatus godoc
+// @Summary Estado de migraciones de base de datos
+// @Tags Admin
+// @Security SessionCookie
+// @Produce json
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 {object} errorResponse
+// @Router /admin/api/db/migrations/status [get]
+func (h *AdminHandler) GetDBMigrationsStatus(c *gin.Context) {
+	h.dbMigrateMu.Lock()
+	defer h.dbMigrateMu.Unlock()
+	c.JSON(http.StatusOK, gin.H{
+		"running": h.dbMigrateRunning,
+		"result":  h.dbMigrateStatus,
+	})
+}
+
+// RunDBMigrations godoc
+// @Summary Ejecutar migraciones pendientes del motor activo
+// @Tags Admin
+// @Security SessionCookie
+// @Produce json
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 {object} errorResponse
+// @Failure 409 {object} errorResponse
+// @Failure 500 {object} errorResponse
+// @Router /admin/api/db/migrations/run [post]
+func (h *AdminHandler) RunDBMigrations(c *gin.Context) {
+	h.dbMigrateMu.Lock()
+	if h.dbMigrateRunning {
+		h.dbMigrateMu.Unlock()
+		c.JSON(http.StatusConflict, gin.H{"error": "ya hay una ejecucion de migraciones en curso"})
+		return
+	}
+	h.dbMigrateRunning = true
+	h.dbMigrateMu.Unlock()
+
+	result, err := storage.RunDBMigrations(h.config, ".")
+	h.dbMigrateMu.Lock()
+	h.dbMigrateStatus = result
+	h.dbMigrateRunning = false
+	h.dbMigrateMu.Unlock()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error":  "no se pudieron ejecutar migraciones",
+			"result": result,
+		})
+		return
+	}
+	c.JSON(http.StatusOK, result)
 }
 
 // GetProjects godoc
@@ -266,8 +323,8 @@ func (h *AdminHandler) GetDocumentImages(c *gin.Context) {
 	})
 }
 
-// StartLocalToMySQLMigration godoc
-// @Summary Iniciar migracion local/ssh a MySQL BLOB
+// StartLocalToDBMigration godoc
+// @Summary Iniciar migracion local/ssh a base de datos activa (MySQL/Postgres)
 // @Tags Admin
 // @Security SessionCookie
 // @Accept json
@@ -277,8 +334,8 @@ func (h *AdminHandler) GetDocumentImages(c *gin.Context) {
 // @Failure 400 {object} errorResponse
 // @Failure 401 {object} errorResponse
 // @Failure 409 {object} errorResponse
-// @Router /admin/api/migrations/local-to-mysql/start [post]
-func (h *AdminHandler) StartLocalToMySQLMigration(c *gin.Context) {
+// @Router /admin/api/migrations/local-to-db/start [post]
+func (h *AdminHandler) StartLocalToDBMigration(c *gin.Context) {
 	// Ejecuta la migracion en background y devuelve estado inicial.
 	var payload migrationStartRequest
 	if err := c.ShouldBindJSON(&payload); err != nil {
@@ -299,17 +356,27 @@ func (h *AdminHandler) StartLocalToMySQLMigration(c *gin.Context) {
 	})
 }
 
-// GetLocalToMySQLMigrationStatus godoc
-// @Summary Estado de migracion local/ssh a MySQL
+// GetLocalToDBMigrationStatus godoc
+// @Summary Estado de migracion local/ssh a base de datos activa (MySQL/Postgres)
 // @Tags Admin
 // @Security SessionCookie
 // @Produce json
 // @Success 200 {object} map[string]interface{}
 // @Failure 401 {object} errorResponse
-// @Router /admin/api/migrations/local-to-mysql/status [get]
-func (h *AdminHandler) GetLocalToMySQLMigrationStatus(c *gin.Context) {
+// @Router /admin/api/migrations/local-to-db/status [get]
+func (h *AdminHandler) GetLocalToDBMigrationStatus(c *gin.Context) {
 	// Devuelve estado y logs acumulados de la ultima migracion.
 	c.JSON(http.StatusOK, h.migrationRunner.Status())
+}
+
+// StartLocalToMySQLMigration mantiene compatibilidad con clientes antiguos.
+func (h *AdminHandler) StartLocalToMySQLMigration(c *gin.Context) {
+	h.StartLocalToDBMigration(c)
+}
+
+// GetLocalToMySQLMigrationStatus mantiene compatibilidad con clientes antiguos.
+func (h *AdminHandler) GetLocalToMySQLMigrationStatus(c *gin.Context) {
+	h.GetLocalToDBMigrationStatus(c)
 }
 
 // BrowseLocalMigrationSource godoc
@@ -475,6 +542,15 @@ func (h *AdminHandler) sanitizedConfig() gin.H {
 				"charset":    h.config.Database.MySQL.Charset,
 				"parse_time": h.config.Database.MySQL.ParseTime,
 			},
+			"postgres": gin.H{
+				"host":     h.config.Database.Postgres.Host,
+				"port":     h.config.Database.Postgres.Port,
+				"user":     h.config.Database.Postgres.User,
+				"password": maskedSecret(h.config.Database.Postgres.Password),
+				"database": h.config.Database.Postgres.Database,
+				"sslmode":  h.config.Database.Postgres.SSLMode,
+				"schema":   h.config.Database.Postgres.Schema,
+			},
 		},
 		"frontend": gin.H{
 			"enabled":      h.config.Frontend.Enabled,
@@ -541,6 +617,15 @@ type editableConfigPayload struct {
 			Charset   string `json:"charset"`
 			ParseTime bool   `json:"parse_time"`
 		} `json:"mysql"`
+		Postgres struct {
+			Host     string `json:"host"`
+			Port     string `json:"port"`
+			User     string `json:"user"`
+			Password string `json:"password"`
+			Database string `json:"database"`
+			SSLMode  string `json:"sslmode"`
+			Schema   string `json:"schema"`
+		} `json:"postgres"`
 	} `json:"database"`
 	Frontend struct {
 		Enabled     bool   `json:"enabled"`
@@ -580,6 +665,9 @@ func applyEditableConfig(next, current *config.Config, payload editableConfigPay
 	if err := validatePort(payload.Database.MySQL.Port, "database.mysql.port"); err != nil {
 		return err
 	}
+	if err := validatePort(payload.Database.Postgres.Port, "database.postgres.port"); err != nil {
+		return err
+	}
 	if !allowedValue(payload.Storage.Backend, "local", "mysql", "postgres", "postgresql", "mongo", "mongodb") {
 		return &configError{"storage.backend debe ser local, mysql, postgres, postgresql, mongo o mongodb"}
 	}
@@ -607,6 +695,13 @@ func applyEditableConfig(next, current *config.Config, payload editableConfigPay
 	next.Database.MySQL.Database = payload.Database.MySQL.Database
 	next.Database.MySQL.Charset = payload.Database.MySQL.Charset
 	next.Database.MySQL.ParseTime = payload.Database.MySQL.ParseTime
+	next.Database.Postgres.Host = payload.Database.Postgres.Host
+	next.Database.Postgres.Port = payload.Database.Postgres.Port
+	next.Database.Postgres.User = payload.Database.Postgres.User
+	next.Database.Postgres.Password = secretOrCurrent(payload.Database.Postgres.Password, current.Database.Postgres.Password)
+	next.Database.Postgres.Database = payload.Database.Postgres.Database
+	next.Database.Postgres.SSLMode = payload.Database.Postgres.SSLMode
+	next.Database.Postgres.Schema = payload.Database.Postgres.Schema
 
 	next.DBConnection = payload.Database.DBConnection
 	next.DBHost = payload.Database.DBHost
@@ -614,6 +709,19 @@ func applyEditableConfig(next, current *config.Config, payload editableConfigPay
 	next.DBDatabase = payload.Database.DBDatabase
 	next.DBUsername = payload.Database.DBUsername
 	next.DBPassword = secretOrCurrent(payload.Database.DBPassword, current.DBPassword)
+	if strings.EqualFold(next.Storage.Backend, "postgres") || strings.EqualFold(next.DBConnection, "postgres") {
+		next.DBHost = next.Database.Postgres.Host
+		next.DBPort = next.Database.Postgres.Port
+		next.DBDatabase = next.Database.Postgres.Database
+		next.DBUsername = next.Database.Postgres.User
+		next.DBPassword = next.Database.Postgres.Password
+	} else {
+		next.DBHost = next.Database.MySQL.Host
+		next.DBPort = next.Database.MySQL.Port
+		next.DBDatabase = next.Database.MySQL.Database
+		next.DBUsername = next.Database.MySQL.User
+		next.DBPassword = next.Database.MySQL.Password
+	}
 
 	next.Frontend.Enabled = payload.Frontend.Enabled
 	next.Frontend.Path = payload.Frontend.Path

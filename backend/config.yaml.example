@@ -2,7 +2,7 @@
 # CONFIGURACION DEL SERVIDOR IIIF PDF
 # =============================================================================
 
-# Backend principal de almacenamiento: local o mysql.
+# Backend principal de almacenamiento: local, mysql o postgres.
 # Si STORAGE_BACKEND/DB_CONNECTION es mysql, la metadata va a MySQL y los PDFs
 # e imagenes quedan en las rutas configuradas abajo.
 STORAGE_BACKEND: "local"
@@ -36,6 +36,14 @@ database:
     database: "project_iiif"
     charset: "utf8mb4"
     parse_time: true
+  postgres:
+    host: "127.0.0.1"
+    port: "5432"
+    user: "postgres"
+    password: "CAMBIAR_PASSWORD"
+    database: "project_iiif"
+    sslmode: "disable"
+    schema: "public"
 
 pdf:
   max_file_size: 104857600
