@@ -343,6 +343,24 @@ td code {
   padding: 0 4px;
 }
 
+#sql-db-fields,
+#mongo-db-fields {
+  display: grid;
+  gap: 12px;
+}
+
+.field-help {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--muted);
+}
+
+.field-help code {
+  font-family: Consolas, "Liberation Mono", monospace;
+  font-size: 12px;
+}
+
 .check-field {
   display: flex;
   align-items: center;

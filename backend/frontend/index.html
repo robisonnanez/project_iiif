@@ -23,6 +23,7 @@
         <button class="nav-item" data-view="images">Imagenes</button>
         <button class="nav-item" data-view="config">Configuracion</button>
         <button class="nav-item" data-view="migration">Migracion</button>
+        <button class="nav-item" id="api-docs-button" type="button">Documentacion API</button>
       </nav>
       <button class="logout-button" id="logout-button" type="button">Cerrar sesion</button>
     </aside>
@@ -144,8 +145,8 @@
 
       <section class="view" id="migration-view">
         <div class="panel">
-          <h2>Migracion local a MySQL BLOB</h2>
-          <p>Ejecuta la migracion one-shot de metadatos y binarios desde almacenamiento local hacia MySQL.</p>
+          <h2 id="migration-title">Migracion local a base de datos BLOB</h2>
+          <p id="migration-subtitle">Ejecuta la migracion one-shot de metadatos y binarios desde almacenamiento local hacia el motor activo.</p>
           <div class="toolbar-row">
             <button class="primary" id="start-migration-button" type="button">Iniciar migracion</button>
             <button class="secondary" id="refresh-migration-button" type="button">Actualizar estado</button>
@@ -278,6 +279,6 @@
     </div>
   </div>
 
-  <script src="/dashboard/assets/app.js?v=20260511-tailwind-migrator"></script>
+  <script src="/dashboard/assets/app.js?v=20260521-db-engine-migration"></script>
 </body>
 </html>

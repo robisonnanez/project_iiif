@@ -37,6 +37,19 @@ func NewAPIHandler(
 	}
 }
 
+// UploadPDF godoc
+// @Summary Subir y convertir PDF
+// @Description Recibe archivo PDF y crea documento con paginas convertidas.
+// @Tags Documentos
+// @Accept multipart/form-data
+// @Produce json
+// @Param pdf formData file true "Archivo PDF"
+// @Param project formData string false "Proyecto"
+// @Param tenant formData string false "Tenant"
+// @Success 200 {object} models.PDFDocument
+// @Failure 400 {object} errorResponse
+// @Failure 500 {object} errorResponse
+// @Router /api/v1/documents/upload [post]
 func (h *APIHandler) UploadPDF(c *gin.Context) {
 	// Obtener archivo
 	file, header, err := c.Request.FormFile("pdf")
@@ -97,6 +110,16 @@ func (h *APIHandler) UploadPDF(c *gin.Context) {
 	c.JSON(http.StatusOK, doc)
 }
 
+// GetDocuments godoc
+// @Summary Listar documentos
+// @Description Lista documentos con filtros opcionales por proyecto y tenant.
+// @Tags Documentos
+// @Produce json
+// @Param project query string false "Proyecto"
+// @Param tenant query string false "Tenant"
+// @Success 200 {array} models.PDFDocument
+// @Failure 500 {object} errorResponse
+// @Router /api/v1/documents [get]
 func (h *APIHandler) GetDocuments(c *gin.Context) {
 	project := strings.TrimSpace(c.Query("project"))
 	tenant := strings.TrimSpace(c.Query("tenant"))
@@ -115,6 +138,14 @@ func (h *APIHandler) GetDocuments(c *gin.Context) {
 	c.JSON(http.StatusOK, docs)
 }
 
+// GetDocument godoc
+// @Summary Obtener documento por ID
+// @Tags Documentos
+// @Produce json
+// @Param id path string true "ID documento"
+// @Success 200 {object} models.PDFDocument
+// @Failure 404 {object} errorResponse
+// @Router /api/v1/documents/{id} [get]
 func (h *APIHandler) GetDocument(c *gin.Context) {
 	id := c.Param("id")
 	doc, err := h.documentService.GetDocument(id)
@@ -126,6 +157,14 @@ func (h *APIHandler) GetDocument(c *gin.Context) {
 	c.JSON(http.StatusOK, doc)
 }
 
+// DeleteDocument godoc
+// @Summary Eliminar documento
+// @Tags Documentos
+// @Produce json
+// @Param id path string true "ID documento"
+// @Success 200 {object} okMessageResponse
+// @Failure 500 {object} errorResponse
+// @Router /api/v1/documents/{id} [delete]
 func (h *APIHandler) DeleteDocument(c *gin.Context) {
 	id := c.Param("id")
 	if err := h.documentService.DeleteDocument(id); err != nil {
@@ -184,6 +223,15 @@ func (h *APIHandler) GetManifest(c *gin.Context) {
 }
 
 // GET /iiif/3/{identifier}/info.json
+// GetImageInfo godoc
+// @Summary Obtener info IIIF
+// @Tags IIIF
+// @Produce json
+// @Param identifier path string true "Identificador IIIF"
+// @Success 200 {object} models.IIIFImageInfo
+// @Failure 400 {object} errorResponse
+// @Failure 404 {object} errorResponse
+// @Router /iiif/3/{identifier}/info.json [get]
 func (h *APIHandler) GetImageInfo(c *gin.Context) {
 	identifier := c.Param("identifier")
 
@@ -205,6 +253,19 @@ func (h *APIHandler) GetImageInfo(c *gin.Context) {
 }
 
 // GET /iiif/3/{identifier}/{region}/{size}/{rotation}/{quality}.{format}
+// GetImage godoc
+// @Summary Obtener imagen IIIF transformada
+// @Tags IIIF
+// @Produce image/jpeg,image/png,image/webp
+// @Param identifier path string true "Identificador IIIF"
+// @Param region path string true "Region"
+// @Param size path string true "Tamano"
+// @Param rotation path string true "Rotacion"
+// @Param quality_format path string true "quality.format"
+// @Success 200 {file} file
+// @Failure 400 {object} errorResponse
+// @Failure 404 {object} errorResponse
+// @Router /iiif/3/{identifier}/{region}/{size}/{rotation}/{quality_format} [get]
 func (h *APIHandler) GetImage(c *gin.Context) {
 	identifier := c.Param("identifier")
 	region := c.Param("region")

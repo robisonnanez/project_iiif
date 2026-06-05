@@ -8,6 +8,7 @@ const state = {
   images: { items: [], page: 1, pageSize: 10 },
   migration: { timer: null, running: false },
   polling: new Map(),
+  mongoURIEdited: false,
 };
 
 const viewMeta = {
@@ -16,7 +17,7 @@ const viewMeta = {
   documents: ["Documentos", "Consulta documentos, estados y manifiestos."],
   images: ["Imagenes", "Galeria de paginas servidas por IIIF."],
   config: ["Configuracion", "Edita valores permitidos del config.yaml sin exponer secretos."],
-  migration: ["Migracion", "Migra datos locales hacia MySQL BLOB de forma controlada."],
+  migration: ["Migracion", "Migra datos locales hacia la base de datos activa de forma controlada."],
 };
 
 const viewRoutes = {
@@ -38,6 +39,16 @@ const routeViews = {
   "/dashboard/configuracion": "config",
   "/dashboard/migracion": "migration",
 };
+
+const DB_PORT_DEFAULTS = {
+  mysql: "3306",
+  postgres: "5432",
+  mongodb: "27017",
+};
+
+const API_V1_BASE = "/api/v1";
+const DOCUMENTS_API_BASE = `${API_V1_BASE}/documents`;
+const ADMIN_API_BASE = `${API_V1_BASE}/admin`;
 
 const $ = (selector) => document.querySelector(selector);
 const $$ = (selector) => Array.from(document.querySelectorAll(selector));
@@ -82,6 +93,8 @@ document.addEventListener("DOMContentLoaded", () => {
   $("#migration-progress-close").addEventListener("click", closeMigrationProgressModal);
   $("#restart-service-later").addEventListener("click", closeRestartServiceModal);
   $("#restart-service-now").addEventListener("click", restartServiceNow);
+  $("#api-docs-button")?.addEventListener("click", openAPIDocs);
+  $("#config-view")?.addEventListener("click", handleConfigActions);
   window.addEventListener("popstate", () => showView(viewFromLocation(), false));
 
   loadProjects();
@@ -131,6 +144,18 @@ function refreshCurrentView() {
   }
 }
 
+function openAPIDocs() {
+  window.location.href = "/swagger/index.html";
+}
+
+function handleConfigActions(event) {
+  const runButton = event.target.closest("#run-db-migrations");
+  if (runButton) {
+    event.preventDefault();
+    runDBMigrations();
+  }
+}
+
 async function startMigration() {
   // Abre modal para confirmar proyecto/tenant antes de iniciar la migracion.
   const payload = collectMigrationPayload(false);
@@ -147,7 +172,7 @@ async function submitMigrationFromModal() {
   }
   closeMigrationModal();
   try {
-    const response = await fetch("/admin/api/migrations/local-to-mysql/start", {
+    const response = await fetch(`${ADMIN_API_BASE}/migrations/local-to-db/start`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
@@ -169,7 +194,7 @@ async function loadMigrationStatus() {
   if (!badge || !summary || !logs) return;
 
   try {
-    const response = await fetch("/admin/api/migrations/local-to-mysql/status");
+    const response = await fetch(`${ADMIN_API_BASE}/migrations/local-to-db/status`);
     const data = await response.json();
     if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);
 
@@ -358,7 +383,7 @@ async function browseMigrationLocalDirs() {
   const path = (input.value || "").trim();
   const query = path ? `?path=${encodeURIComponent(path)}` : "";
   try {
-    const response = await fetch(`/admin/api/migrations/sources/local/browse${query}`);
+    const response = await fetch(`${ADMIN_API_BASE}/migrations/sources/local/browse${query}`);
     const data = await response.json();
     if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);
     const rows = Array.isArray(data.dirs) ? data.dirs : [];
@@ -399,7 +424,7 @@ function viewFromLocation() {
 
 async function loadAllDocuments() {
   try {
-    const response = await fetch("/api/documents");
+    const response = await fetch(DOCUMENTS_API_BASE);
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     state.allDocuments = await response.json();
     renderSummary();
@@ -412,7 +437,7 @@ async function loadAllDocuments() {
 async function loadDocuments(applyFilters = true) {
   try {
     const params = applyFilters ? selectedScopeParams("documents") : "";
-    const response = await fetch(`/api/documents${params ? `?${params}` : ""}`);
+    const response = await fetch(`${DOCUMENTS_API_BASE}${params ? `?${params}` : ""}`);
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     state.filteredDocuments = await response.json();
     renderDocuments();
@@ -423,9 +448,10 @@ async function loadDocuments(applyFilters = true) {
 
 async function loadConfig() {
   try {
-    const response = await fetch("/admin/api/config");
+    const response = await fetch(`${ADMIN_API_BASE}/config`);
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     state.config = await response.json();
+    updateMigrationCopy();
     renderSummary();
     renderConfigForm();
   } catch (error) {
@@ -433,9 +459,19 @@ async function loadConfig() {
   }
 }
 
+function updateMigrationCopy() {
+  // Ajusta textos de migracion segun el motor de base de datos activo.
+  const backend = String(state.config?.storage?.backend || state.config?.database?.DB_CONNECTION || "base de datos").toLowerCase();
+  const dbLabel = backend === "postgres" ? "Postgres" : backend === "mysql" ? "MySQL" : backend === "mongodb" || backend === "mongo" ? "MongoDB" : "base de datos";
+  const title = $("#migration-title");
+  const subtitle = $("#migration-subtitle");
+  if (title) title.textContent = `Migracion local a ${dbLabel} BLOB`;
+  if (subtitle) subtitle.textContent = `Ejecuta la migracion one-shot de metadatos y binarios desde almacenamiento local hacia ${dbLabel}.`;
+}
+
 async function loadProjects() {
   try {
-    const response = await fetch("/admin/api/projects");
+    const response = await fetch(`${ADMIN_API_BASE}/projects`);
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     state.projects = await response.json();
   } catch (error) {
@@ -462,7 +498,7 @@ async function uploadPDF(event) {
   result.textContent = "Subiendo PDF...";
 
   try {
-    const response = await fetch("/api/upload", {
+    const response = await fetch(`${DOCUMENTS_API_BASE}/upload`, {
       method: "POST",
       body: formData,
     });
@@ -488,7 +524,7 @@ function watchDocument(documentID) {
   const timer = window.setInterval(async () => {
     attempts += 1;
     try {
-      const response = await fetch(`/api/documents/${encodeURIComponent(documentID)}`);
+      const response = await fetch(`${DOCUMENTS_API_BASE}/${encodeURIComponent(documentID)}`);
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       const doc = await response.json();
 
@@ -622,7 +658,7 @@ async function loadSelectedImages() {
   gallery.textContent = "Cargando imagenes...";
 
   try {
-    const response = await fetch(`/admin/api/documents/${encodeURIComponent(documentID)}/images`);
+    const response = await fetch(`${ADMIN_API_BASE}/documents/${encodeURIComponent(documentID)}/images`);
     const data = await response.json();
     if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);
     state.images.items = data.images || [];
@@ -720,9 +756,26 @@ function bindImagesPagination(totalPages) {
   });
 }
 
+function hydrateMongoFieldsFromConfig() {
+  const database = state.config?.database || {};
+  const mongo = database.mongodb || {};
+  const setValue = (name, nextValue) => {
+    const field = formField(name);
+    if (!field) return;
+    field.value = nextValue ?? "";
+  };
+
+  setValue("database.DB_HOST", mongo.host || database.DB_HOST || "127.0.0.1");
+  setValue("database.DB_PORT", mongo.port || database.DB_PORT || DB_PORT_DEFAULTS.mongodb);
+  setValue("database.DB_DATABASE", mongo.database || database.DB_DATABASE || "");
+  setValue("database.DB_USERNAME", mongo.user || database.DB_USERNAME || "");
+  setValue("database.DB_PASSWORD", mongo.password || database.DB_PASSWORD || "");
+}
+
 function renderConfigForm() {
   const config = state.config;
   if (!config) return;
+  state.mongoURIEdited = false;
 
   $("#config-form").innerHTML = `
     <div class="form-grid">
@@ -739,21 +792,7 @@ function renderConfigForm() {
         input("storage.thumbnails_path", "Thumbnails path", config.storage?.thumbnails_path || ""),
         input("storage.manifests_path", "Manifests path", config.storage?.manifests_path || "")
       ])}
-      ${fieldset("Base de datos", [
-        select("database.DB_CONNECTION", "DB connection", config.database?.DB_CONNECTION || "local", ["local", "mysql", "postgres", "mongodb"]),
-        input("database.DB_HOST", "DB host", config.database?.DB_HOST || ""),
-        input("database.DB_PORT", "DB port", config.database?.DB_PORT || ""),
-        input("database.DB_DATABASE", "DB database", config.database?.DB_DATABASE || ""),
-        input("database.DB_USERNAME", "DB username", config.database?.DB_USERNAME || ""),
-        input("database.DB_PASSWORD", "DB password", config.database?.DB_PASSWORD || "", "password"),
-        input("database.mysql.host", "MySQL host", config.database?.mysql?.host || ""),
-        input("database.mysql.port", "MySQL port", config.database?.mysql?.port || ""),
-        input("database.mysql.user", "MySQL user", config.database?.mysql?.user || ""),
-        input("database.mysql.password", "MySQL password", config.database?.mysql?.password || "", "password"),
-        input("database.mysql.database", "MySQL database", config.database?.mysql?.database || ""),
-        input("database.mysql.charset", "MySQL charset", config.database?.mysql?.charset || ""),
-        checkbox("database.mysql.parse_time", "MySQL parse time", Boolean(config.database?.mysql?.parse_time))
-      ])}
+      ${renderDatabaseFieldset(config)}
       ${fieldset("Frontend", [
         checkbox("frontend.enabled", "Frontend activo", Boolean(config.frontend?.enabled)),
         checkbox("frontend.require_auth", "Requiere login", Boolean(config.frontend?.require_auth)),
@@ -773,6 +812,12 @@ function renderConfigForm() {
         input("iiif.cache_ttl", "Cache TTL", config.iiif?.cache_ttl || 3600, "number"),
         checkbox("iiif.cache", "Cache activo", Boolean(config.iiif?.cache))
       ])}
+      ${fieldset("Security", [
+        checkbox("security.enable_auth", "Enable auth", Boolean(config.security?.enable_auth)),
+        input("security.log_level", "Log level", config.security?.log_level || "info"),
+        input("security.max_concurrent_uploads", "Max concurrent uploads", config.security?.max_concurrent_uploads || 5, "number"),
+        textarea("security.cors_origins", "CORS origins (una URL por linea)", (config.security?.cors_origins || []).join("\n"))
+      ])}
       ${fieldset("Proyectos", [
         checkbox("projects.enabled", "Proyectos activos", Boolean(config.projects?.enabled)),
         input("projects.default_project", "Proyecto por defecto", config.projects?.default_project || "default"),
@@ -781,6 +826,18 @@ function renderConfigForm() {
         textarea("projects.items", "Proyectos JSON", JSON.stringify(config.projects?.items || [], null, 2))
       ])}
     </div>
+    <div class="config-card">
+      <legend>Migraciones DB</legend>
+      <div class="toolbar-row">
+        <button class="primary" type="button" id="run-db-migrations">Ejecutar migraciones</button>
+        <span class="muted">Motor activo: ${escapeHTML(config.storage?.backend || "local")}</span>
+      </div>
+      <pre id="db-migration-status" class="result">Sin ejecuciones de migracion DB.</pre>
+      <label class="field">
+        <span>Ejemplo de nueva migracion (${escapeHTML((config.storage?.backend || "local").toLowerCase())})</span>
+        <textarea rows="8" readonly>${escapeHTML(exampleMigrationSQL(config.storage?.backend || "local"))}</textarea>
+      </label>
+    </div>
     <div class="form-actions">
       <button class="primary" type="submit">Guardar configuracion</button>
       <span class="muted">Los secretos en ${MASKED_SECRET} se conservan sin cambios.</span>
@@ -788,14 +845,82 @@ function renderConfigForm() {
   `;
 
   $("#config-form").addEventListener("submit", saveConfig);
+  bindDBConnectionAutofill();
+  void loadDBMigrationStatus();
+}
+
+function bindDBConnectionAutofill() {
+  // Sincroniza puerto por defecto, backend y visibilidad de campos al cambiar motor.
+  const connection = $("#config-form select[name='database.DB_CONNECTION']");
+  const port = $("#config-form input[name='database.DB_PORT']");
+  const storageBackend = $("#config-form select[name='storage.backend']");
+  if (!connection || !port) return;
+
+  const syncDatabaseUI = () => {
+    const engine = normalizedDBEngine(connection.value || "local");
+    const sqlBlocks = $$("#sql-db-fields");
+    const mongoBlocks = $$("#mongo-db-fields");
+    sqlBlocks.forEach((block) => {
+      block.hidden = engine === "mongodb";
+    });
+    mongoBlocks.forEach((block) => {
+      block.hidden = engine !== "mongodb";
+    });
+    if (engine === "mongodb" && !state.mongoURIEdited) {
+      hydrateMongoFieldsFromConfig();
+    }
+    updateMongoURIPreview();
+  };
+
+  let lastEngine = String(connection.value || "local").toLowerCase();
+  connection.addEventListener("change", () => {
+    const nextEngine = normalizedDBEngine(connection.value || "local");
+    const nextDefaultPort = DB_PORT_DEFAULTS[nextEngine] || "";
+    const previousDefaultPort = DB_PORT_DEFAULTS[normalizedDBEngine(lastEngine)] || "";
+
+    // Cambia puerto automaticamente cuando coincide con el default anterior o esta vacio.
+    if (nextDefaultPort && (!port.value || port.value === previousDefaultPort)) {
+      port.value = nextDefaultPort;
+    }
+
+    // Mantiene storage.backend alineado con el motor de DB cuando aplica.
+    if (storageBackend && (nextEngine === "mysql" || nextEngine === "postgres" || nextEngine === "mongodb" || nextEngine === "local")) {
+      storageBackend.value = nextEngine;
+    }
+    lastEngine = nextEngine;
+    syncDatabaseUI();
+  });
+
+  [
+    "database.DB_HOST",
+    "database.DB_PORT",
+    "database.DB_DATABASE",
+    "database.DB_USERNAME",
+    "database.DB_PASSWORD",
+  ].forEach((name) => {
+    const field = formField(name);
+    if (!field) return;
+    field.addEventListener("input", updateMongoURIPreview);
+    field.addEventListener("change", updateMongoURIPreview);
+  });
+
+  const mongoURIField = $("#mongo-uri-preview");
+  if (mongoURIField) {
+    mongoURIField.addEventListener("input", () => {
+      state.mongoURIEdited = true;
+    });
+  }
+
+  syncDatabaseUI();
 }
 
 async function saveConfig(event) {
   // Envia solo el formulario permitido y deja que el backend valide antes de escribir config.yaml.
   event.preventDefault();
   const payload = collectConfigPayload();
+  if (!payload) return;
   try {
-    const response = await fetch("/admin/api/config", {
+    const response = await fetch(`${ADMIN_API_BASE}/config`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
@@ -845,32 +970,71 @@ async function restartServiceNow() {
   const laterButton = $("#restart-service-later");
   if (restartButton) restartButton.disabled = true;
   if (laterButton) laterButton.disabled = true;
-  if (status) status.textContent = "Reiniciando servicio...";
+  if (status) status.textContent = "Programando reinicio...";
 
   try {
-    const response = await fetch("/admin/api/service/restart", {
+    const response = await fetch(`${ADMIN_API_BASE}/service/restart`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ password }),
     });
-    const data = await response.json();
+    let data = {};
+    try {
+      data = await response.json();
+    } catch (jsonError) {
+      data = {};
+    }
     if (!response.ok || !data.ok) {
       throw new Error(data.error || data.details || `HTTP ${response.status}`);
     }
-    if (status) status.textContent = "Servicio reiniciado correctamente.";
-    showToast(data.message || "Servicio reiniciado correctamente.");
+    if (status) status.textContent = "Reinicio programado. Esperando que el servicio vuelva...";
+    showToast(data.message || "Reinicio programado.");
     if (passwordInput) passwordInput.value = "";
     window.setTimeout(() => {
       const modal = $("#restart-service-modal");
       if (modal) modal.hidden = true;
     }, 1200);
+    void monitorServiceRecovery();
   } catch (error) {
-    if (status) status.textContent = `No se pudo reiniciar: ${error.message}`;
-    showToast(`No se pudo reiniciar servicio: ${error.message}`, "error");
+    const message = String(error?.message || "");
+    const networkError = /failed to fetch|networkerror|load failed/i.test(message);
+    const readable = networkError
+      ? "No hubo respuesta del servidor. Verifica si el servicio se esta reiniciando."
+      : `No se pudo reiniciar: ${message}`;
+    if (status) status.textContent = readable;
+    showToast(networkError ? readable : `No se pudo reiniciar servicio: ${message}`, "error");
   } finally {
     if (restartButton) restartButton.disabled = false;
     if (laterButton) laterButton.disabled = false;
   }
+}
+
+async function monitorServiceRecovery() {
+  // Espera la caida y vuelta del endpoint /health para confirmar reinicio exitoso.
+  const timeoutMs = 60000;
+  const intervalMs = 3000;
+  const deadline = Date.now() + timeoutMs;
+  let sawDown = false;
+
+  while (Date.now() < deadline) {
+    try {
+      const response = await fetch("/health", { cache: "no-store" });
+      if (response.ok) {
+        if (sawDown) {
+          showToast("Servicio activo nuevamente.");
+          return;
+        }
+      } else {
+        sawDown = true;
+      }
+    } catch (error) {
+      sawDown = true;
+    }
+    // eslint-disable-next-line no-await-in-loop
+    await new Promise((resolve) => window.setTimeout(resolve, intervalMs));
+  }
+
+  showToast("El servicio tarda en volver. Revisa: journalctl -u project-iiif -n 100", "error");
 }
 
 function collectConfigPayload() {
@@ -878,6 +1042,92 @@ function collectConfigPayload() {
   const value = (name) => form.elements[name]?.value || "";
   const checked = (name) => Boolean(form.elements[name]?.checked);
   const intValue = (name) => Number.parseInt(value(name), 10) || 0;
+
+  const dbConnection = normalizedDBEngine(value("database.DB_CONNECTION"));
+  let dbHost = value("database.DB_HOST");
+  let dbPort = value("database.DB_PORT");
+  let dbName = value("database.DB_DATABASE");
+  let dbUser = value("database.DB_USERNAME");
+  let dbPassword = value("database.DB_PASSWORD");
+  let mongoAuthSource = value("database.mongodb.auth_source");
+  let mongoTimeout = intValue("database.mongodb.server_selection_timeout_ms");
+  let mongoDirectConnection = checked("database.mongodb.direct_connection");
+
+  const mysqlCurrent = state.config?.database?.mysql || {};
+  const postgresCurrent = state.config?.database?.postgres || {};
+  const mongoCurrent = state.config?.database?.mongodb || {};
+  const mysqlPayload = {
+    host: mysqlCurrent.host || dbHost,
+    port: mysqlCurrent.port || DB_PORT_DEFAULTS.mysql,
+    user: mysqlCurrent.user || dbUser,
+    password: mysqlCurrent.password || dbPassword,
+    database: mysqlCurrent.database || dbName,
+    charset: mysqlCurrent.charset || "utf8mb4",
+    parse_time: mysqlCurrent.parse_time !== undefined ? Boolean(mysqlCurrent.parse_time) : true,
+  };
+  const postgresPayload = {
+    host: postgresCurrent.host || dbHost,
+    port: postgresCurrent.port || DB_PORT_DEFAULTS.postgres,
+    user: postgresCurrent.user || dbUser,
+    password: postgresCurrent.password || dbPassword,
+    database: postgresCurrent.database || dbName,
+    sslmode: postgresCurrent.sslmode || "disable",
+    schema: postgresCurrent.schema || "public",
+  };
+  const mongoPayload = {
+    host: mongoCurrent.host || dbHost,
+    port: mongoCurrent.port || DB_PORT_DEFAULTS.mongodb,
+    user: mongoCurrent.user || dbUser,
+    password: mongoCurrent.password || dbPassword,
+    database: mongoCurrent.database || dbName,
+    auth_source: mongoCurrent.auth_source || "admin",
+    direct_connection: mongoCurrent.direct_connection !== undefined ? Boolean(mongoCurrent.direct_connection) : true,
+    server_selection_timeout_ms: Number.parseInt(mongoCurrent.server_selection_timeout_ms, 10) || mongoCurrent.server_selection_timeout_ms || 2000,
+  };
+
+  if (dbConnection === "mysql") {
+    mysqlPayload.host = dbHost;
+    mysqlPayload.port = dbPort || DB_PORT_DEFAULTS.mysql;
+    mysqlPayload.user = dbUser;
+    mysqlPayload.password = dbPassword;
+    mysqlPayload.database = dbName;
+  } else if (dbConnection === "postgres") {
+    postgresPayload.host = dbHost;
+    postgresPayload.port = dbPort || DB_PORT_DEFAULTS.postgres;
+    postgresPayload.user = dbUser;
+    postgresPayload.password = dbPassword;
+    postgresPayload.database = dbName;
+  } else if (dbConnection === "mongodb" || dbConnection === "mongo") {
+    const mongoURI = ($("#mongo-uri-preview")?.value || "").trim();
+    if (mongoURI) {
+      if (/^mongodb\+srv:\/\//i.test(mongoURI)) {
+        showToast("Este proyecto aun no soporta Mongo URI tipo mongodb+srv://. Usa mongodb:// con host y puerto.", "error");
+        return null;
+      }
+      const parsedMongoURI = parseMongoURI(mongoURI);
+      if (parsedMongoURI) {
+        dbHost = parsedMongoURI.host || dbHost;
+        dbPort = parsedMongoURI.port || dbPort || DB_PORT_DEFAULTS.mongodb;
+        dbName = parsedMongoURI.database || dbName;
+        dbUser = parsedMongoURI.username || dbUser;
+        dbPassword = parsedMongoURI.password || dbPassword;
+        mongoAuthSource = parsedMongoURI.authSource || mongoAuthSource || "admin";
+        mongoDirectConnection = parsedMongoURI.directConnection ?? mongoDirectConnection;
+        mongoTimeout = parsedMongoURI.serverSelectionTimeoutMS || mongoTimeout || 2000;
+      } else {
+        showToast("El Mongo URI no es valido. Usa el formato mongodb://...", "error");
+        return null;
+      }
+    }
+    mongoPayload.host = dbHost;
+    mongoPayload.port = dbPort || DB_PORT_DEFAULTS.mongodb;
+    mongoPayload.user = dbUser;
+    mongoPayload.password = dbPassword;
+    mongoPayload.database = dbName;
+    mongoPayload.auth_source = mongoAuthSource || "admin";
+    mongoPayload.direct_connection = mongoDirectConnection;
+    mongoPayload.server_selection_timeout_ms = mongoTimeout || 2000;
+  }
 
   return {
     server: { port: value("server.port"), mode: value("server.mode") },
@@ -891,21 +1141,15 @@ function collectConfigPayload() {
       manifests_path: value("storage.manifests_path"),
     },
     database: {
-      DB_CONNECTION: value("database.DB_CONNECTION"),
-      DB_HOST: value("database.DB_HOST"),
-      DB_PORT: value("database.DB_PORT"),
-      DB_DATABASE: value("database.DB_DATABASE"),
-      DB_USERNAME: value("database.DB_USERNAME"),
-      DB_PASSWORD: value("database.DB_PASSWORD"),
-      mysql: {
-        host: value("database.mysql.host"),
-        port: value("database.mysql.port"),
-        user: value("database.mysql.user"),
-        password: value("database.mysql.password"),
-        database: value("database.mysql.database"),
-        charset: value("database.mysql.charset"),
-        parse_time: checked("database.mysql.parse_time"),
-      },
+      DB_CONNECTION: dbConnection,
+      DB_HOST: dbHost,
+      DB_PORT: dbPort,
+      DB_DATABASE: dbName,
+      DB_USERNAME: dbUser,
+      DB_PASSWORD: dbPassword,
+      mysql: mysqlPayload,
+      postgres: postgresPayload,
+      mongodb: mongoPayload,
     },
     frontend: {
       enabled: checked("frontend.enabled"),
@@ -933,7 +1177,67 @@ function collectConfigPayload() {
       allow_dynamic_tenants: checked("projects.allow_dynamic_tenants"),
       items: parseProjectsItems(value("projects.items")),
     },
+    security: {
+      enable_auth: checked("security.enable_auth"),
+      log_level: value("security.log_level"),
+      cors_origins: parseCorsOrigins(value("security.cors_origins")),
+      max_concurrent_uploads: intValue("security.max_concurrent_uploads"),
+    },
   };
+}
+
+async function loadDBMigrationStatus() {
+  const box = $("#db-migration-status");
+  if (!box) return;
+  try {
+    const response = await fetch(`${ADMIN_API_BASE}/db/migrations/status`);
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);
+    box.textContent = formatDBMigrationStatus(data.result || {}, Boolean(data.running));
+  } catch (error) {
+    box.textContent = `No se pudo cargar estado: ${error.message}`;
+  }
+}
+
+async function runDBMigrations() {
+  const box = $("#db-migration-status");
+  if (box) box.textContent = "Ejecutando migraciones pendientes...";
+  try {
+    const response = await fetch(`${ADMIN_API_BASE}/db/migrations/run`, { method: "POST" });
+    const data = await response.json();
+    if (!response.ok) {
+      throw new Error(data.error || data?.result?.message || `HTTP ${response.status}`);
+    }
+    if (box) box.textContent = formatDBMigrationStatus(data, false);
+    showToast(data.message || "Migraciones ejecutadas.");
+  } catch (error) {
+    if (box) box.textContent = `Error ejecutando migraciones: ${error.message}`;
+    showToast(`No se pudo ejecutar migraciones: ${error.message}`, "error");
+  }
+}
+
+function formatDBMigrationStatus(data, running = false) {
+  return [
+    `running: ${running}`,
+    `engine: ${data.engine || "-"}`,
+    `pending_before: ${Number(data.pending_before || 0)}`,
+    `applied: ${Number(data.applied || 0)}`,
+    `skipped: ${Number(data.skipped || 0)}`,
+    `duration_ms: ${Number(data.duration_ms || 0)}`,
+    `message: ${data.message || "-"}`,
+    Array.isArray(data.applied_files) && data.applied_files.length ? `applied_files: ${data.applied_files.join(", ")}` : "",
+    Array.isArray(data.errors) && data.errors.length ? `errors: ${data.errors.join(" | ")}` : "",
+  ].filter(Boolean).join("\n");
+}
+
+function exampleMigrationSQL(engine) {
+  if (String(engine).toLowerCase().startsWith("mongo")) {
+    return `// 006_add_example_index.js\n// Ejecutar desde el runner interno de Mongo\nawait db.collection("documents").createIndex(\n  { status: 1, created_at: -1 },\n  { name: "documents_status_created_at" }\n);`;
+  }
+  if (String(engine).toLowerCase().startsWith("post")) {
+    return "BEGIN;\n-- 005_add_example_table.sql\nCREATE TABLE IF NOT EXISTS example_table (\n  id UUID PRIMARY KEY,\n  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()\n);\nCOMMIT;";
+  }
+  return "START TRANSACTION;\n-- 005_add_example_table.sql\nCREATE TABLE IF NOT EXISTS example_table (\n  id VARCHAR(36) PRIMARY KEY,\n  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP\n);\nCOMMIT;";
 }
 
 function renderProjectControls() {
@@ -1008,6 +1312,112 @@ function parseProjectsItems(value) {
     showToast("El JSON de proyectos no es valido.", "error");
     return state.config?.projects?.items || [];
   }
+}
+
+function parseCorsOrigins(value) {
+  return String(value || "")
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0);
+}
+
+function normalizedDBEngine(value) {
+  const engine = String(value || "local").toLowerCase();
+  if (engine === "mongo") return "mongodb";
+  if (engine === "postgresql") return "postgres";
+  return engine;
+}
+
+function renderDatabaseFieldset(config) {
+  const database = config.database || {};
+  const mongo = database.mongodb || {};
+  const engine = normalizedDBEngine(database.DB_CONNECTION || "local");
+  const mongoURI = buildMongoURI({
+    host: database.DB_HOST || mongo.host || "127.0.0.1",
+    port: database.DB_PORT || mongo.port || DB_PORT_DEFAULTS.mongodb,
+    authSource: mongo.auth_source || "admin",
+    directConnection: mongo.direct_connection !== undefined ? Boolean(mongo.direct_connection) : true,
+    timeoutMs: mongo.server_selection_timeout_ms || 2000,
+  });
+
+  return `
+    <fieldset class="config-card">
+      <legend>Base de datos</legend>
+      ${select("database.DB_CONNECTION", "DB connection", engine, ["local", "mysql", "postgres", "mongodb"])}
+      <div id="sql-db-fields" ${engine === "mongodb" ? "hidden" : ""}>
+        ${input("database.DB_HOST", "DB host", database.DB_HOST || "")}
+        ${input("database.DB_PORT", "DB port", database.DB_PORT || "")}
+        ${input("database.DB_DATABASE", "DB database", database.DB_DATABASE || "")}
+        ${input("database.DB_USERNAME", "DB username", database.DB_USERNAME || "")}
+        ${input("database.DB_PASSWORD", "DB password", database.DB_PASSWORD || "", "password")}
+      </div>
+      <div id="mongo-db-fields" ${engine === "mongodb" ? "" : "hidden"}>
+        <label class="field">
+          <span>Mongo URI</span>
+          <textarea id="mongo-uri-preview" rows="4" placeholder="mongodb://usuario:password@127.0.0.1:27017/project_iiif?directConnection=true&serverSelectionTimeoutMS=2000&authSource=admin">${escapeHTML(mongoURI)}</textarea>
+        </label>
+        <p class="field-help">Pega la misma URI que usas en MongoDB Compass. Esta version soporta formato <code>mongodb://</code> con host y puerto; <code>mongodb+srv://</code> aun no esta soportado.</p>
+      </div>
+    </fieldset>
+  `;
+}
+
+function buildMongoURI({ host, port, authSource, directConnection, timeoutMs }) {
+  const username = formField("database.DB_USERNAME")?.value || state.config?.database?.DB_USERNAME || "";
+  const password = formField("database.DB_PASSWORD")?.value || "";
+  const database = formField("database.DB_DATABASE")?.value || state.config?.database?.DB_DATABASE || "";
+  const query = new URLSearchParams();
+  query.set("directConnection", String(Boolean(directConnection)));
+  query.set("serverSelectionTimeoutMS", String(timeoutMs || 2000));
+  query.set("authSource", authSource || "admin");
+  const credentials = username
+    ? `${encodeURIComponent(username)}${password && password !== MASKED_SECRET ? `:${encodeURIComponent(password)}` : ""}@`
+    : "";
+  const databasePath = database ? `/${encodeURIComponent(database)}` : "/";
+  return `mongodb://${credentials}${host || "127.0.0.1"}:${port || DB_PORT_DEFAULTS.mongodb}${databasePath}?${query.toString()}`;
+}
+
+function formField(name) {
+  return $("#config-form")?.elements?.[name] || null;
+}
+
+function parseMongoURI(value) {
+  try {
+    const uri = new URL(value);
+    if (uri.protocol !== "mongodb:") {
+      return null;
+    }
+    return {
+      host: uri.hostname || "",
+      port: uri.port || DB_PORT_DEFAULTS.mongodb,
+      database: decodeURIComponent((uri.pathname || "").replace(/^\/+/, "")) || "",
+      username: decodeURIComponent(uri.username || ""),
+      password: decodeURIComponent(uri.password || ""),
+      authSource: uri.searchParams.get("authSource") || "admin",
+      directConnection: uri.searchParams.get("directConnection") === null
+        ? true
+        : uri.searchParams.get("directConnection") === "true",
+      serverSelectionTimeoutMS: Number.parseInt(uri.searchParams.get("serverSelectionTimeoutMS") || "2000", 10) || 2000,
+    };
+  } catch (error) {
+    return null;
+  }
+}
+
+function updateMongoURIPreview() {
+  const preview = $("#mongo-uri-preview");
+  const connection = formField("database.DB_CONNECTION");
+  if (!preview || normalizedDBEngine(connection?.value || "local") !== "mongodb") return;
+  if (state.mongoURIEdited) return;
+  const mongo = state.config?.database?.mongodb || {};
+
+  preview.value = buildMongoURI({
+    host: formField("database.DB_HOST")?.value || "127.0.0.1",
+    port: formField("database.DB_PORT")?.value || DB_PORT_DEFAULTS.mongodb,
+    authSource: mongo.auth_source || "admin",
+    directConnection: mongo.direct_connection !== undefined ? Boolean(mongo.direct_connection) : true,
+    timeoutMs: mongo.server_selection_timeout_ms || 2000,
+  });
 }
 
 function fieldset(title, fields) {

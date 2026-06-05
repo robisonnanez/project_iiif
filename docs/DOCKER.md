@@ -1,10 +1,18 @@
 # Docker para Project IIIF
 
-Esta guia muestra como construir una imagen Docker del backend Go y levantarla con MySQL. La imagen incluye el dashboard estatico en `backend/frontend` y usa `config.yaml` montado como volumen.
+Esta guía explica cómo ejecutar Project IIIF con Docker y Docker Compose en tres escenarios:
+
+- modo local
+- modo MySQL / PostgreSQL
+- modo MongoDB
+
+La imagen incluye el backend Go, el dashboard en `backend/frontend` y las migraciones SQL del proyecto.
 
 ## 1. Archivos recomendados
 
-Crea un `Dockerfile` en la raiz del proyecto:
+### Dockerfile
+
+Crea un `Dockerfile` en la raíz del proyecto:
 
 ```dockerfile
 # syntax=docker/dockerfile:1
@@ -45,14 +53,14 @@ EXPOSE 8080
 CMD ["/app/iiif-server"]
 ```
 
-Si prefieres construir CSS en la imagen, agrega antes de `go build` en el stage builder:
+Si quieres compilar CSS dentro de la imagen, agrega antes del `go build`:
 
 ```dockerfile
 RUN apt-get update && apt-get install -y --no-install-recommends nodejs npm
 RUN cd /src/backend/frontend && npm install && npm run build:css
 ```
 
-Crea un `.dockerignore` en la raiz:
+### .dockerignore
 
 ```gitignore
 .git
@@ -63,16 +71,50 @@ backend/tmp
 **/*.log
 ```
 
-## 2. Configuracion para contenedor
-
-Crea `docker/config.yaml` desde `backend/config.yaml.example`:
+## 2. Crear la configuración del contenedor
 
 ```bash
 mkdir -p docker
 cp backend/config.yaml.example docker/config.yaml
 ```
 
-Ejemplo para MySQL dentro de `docker compose`:
+## 3. Ejemplo de configuración por motor
+
+### Opción A: modo local
+
+```yaml
+STORAGE_BACKEND: "local"
+DB_CONNECTION: "local"
+
+server:
+  port: "8080"
+  mode: "release"
+
+storage:
+  backend: "local"
+  data_path: "/data"
+  pdfs_path: "/data/pdfs"
+  images_path: "/data/images"
+  documents_path: "/data/documents"
+  thumbnails_path: "/data/thumbnails"
+  manifests_path: "/data/manifests"
+
+binary_storage:
+  mode: "local"
+  temp_path: "/data/temp"
+
+pdf:
+  temp_path: "/data/temp"
+
+frontend:
+  enabled: true
+  path: "./frontend"
+  require_auth: true
+  username: "admin"
+  password: "CAMBIAR_PASSWORD"
+```
+
+### Opción B: modo MySQL
 
 ```yaml
 STORAGE_BACKEND: "mysql"
@@ -103,9 +145,55 @@ binary_storage:
 pdf:
   temp_path: "/data/temp"
 
-iiif:
-  base_url: "http://localhost:8080"
-  api_version: "3"
+frontend:
+  enabled: true
+  path: "./frontend"
+  require_auth: true
+  username: "admin"
+  password: "CAMBIAR_PASSWORD"
+```
+
+### Opción C: modo MongoDB
+
+```yaml
+STORAGE_BACKEND: "mongodb"
+DB_CONNECTION: "mongodb"
+DB_HOST: "mongo"
+DB_PORT: "27017"
+DB_DATABASE: "project_iiif"
+DB_USERNAME: ""
+DB_PASSWORD: ""
+
+server:
+  port: "8080"
+  mode: "release"
+
+storage:
+  backend: "mongodb"
+  data_path: "/data"
+  pdfs_path: "/data/pdfs"
+  images_path: "/data/images"
+  documents_path: "/data/documents"
+  thumbnails_path: "/data/thumbnails"
+  manifests_path: "/data/manifests"
+
+database:
+  mongodb:
+    host: "mongo"
+    port: "27017"
+    user: ""
+    password: ""
+    database: "project_iiif"
+    auth_source: "admin"
+    direct_connection: true
+    server_selection_timeout_ms: 2000
+
+binary_storage:
+  mode: "database"
+  temp_path: "/data/temp"
+
+pdf:
+  temp_path: "/data/temp"
 
 frontend:
   enabled: true
@@ -113,22 +201,18 @@ frontend:
   require_auth: true
   username: "admin"
   password: "CAMBIAR_PASSWORD"
-
-migration:
-  enabled: true
-  allowed_local_roots:
-    - "/data"
-  max_log_lines: 1000
-  ssh:
-    connect_timeout_sec: 15
-    allowed_hosts: []
 ```
 
-En modo `mysql`, PDFs e imagenes quedan en BLOB dentro de MySQL; `/data/temp` solo se usa para temporales de procesamiento.
+Notas para MongoDB:
 
-## 3. docker-compose.yml
+- Si el contenedor Mongo no tiene autenticación, deja usuario y contraseña vacíos.
+- Si usas autenticación, completa `DB_USERNAME`, `DB_PASSWORD` y `auth_source`.
+- El dashboard está pensado para URIs `mongodb://...`.
+- El backend todavía no soporta `mongodb+srv://...`.
 
-Crea `docker-compose.yml` en la raiz:
+## 4. docker-compose.yml
+
+### Compose para MySQL
 
 ```yaml
 services:
@@ -171,9 +255,58 @@ volumes:
   project_iiif_data:
 ```
 
-Las migraciones se ejecutan automaticamente la primera vez que se crea el volumen de MySQL. Si ya existe el volumen, MySQL no vuelve a ejecutar `/docker-entrypoint-initdb.d`.
+### Compose para MongoDB
 
-## 4. Build y ejecucion
+```yaml
+services:
+  mongo:
+    image: mongo:8
+    container_name: project-iiif-mongo
+    ports:
+      - "27017:27017"
+    volumes:
+      - project_iiif_mongo:/data/db
+
+  iiif:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: project-iiif
+    depends_on:
+      - mongo
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./docker/config.yaml:/app/config.yaml:ro
+      - project_iiif_data:/data
+    restart: unless-stopped
+
+volumes:
+  project_iiif_mongo:
+  project_iiif_data:
+```
+
+### Compose para modo local
+
+```yaml
+services:
+  iiif:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: project-iiif
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./docker/config.yaml:/app/config.yaml:ro
+      - project_iiif_data:/data
+    restart: unless-stopped
+
+volumes:
+  project_iiif_data:
+```
+
+## 5. Construcción y arranque
 
 ```bash
 docker compose build
@@ -181,73 +314,56 @@ docker compose up -d
 docker compose logs -f iiif
 ```
 
-Para migrar historico local a MySQL BLOB dentro del contenedor:
+Pruebas rápidas:
+
+```bash
+curl http://localhost:8080/health
+curl http://localhost:8080/api/v1/documents
+```
+
+## 6. Migración de histórico dentro del contenedor
+
+El binario del migrador conserva el nombre histórico `migrate-local-to-mysql`, pero hoy funciona con el motor activo, incluido MongoDB.
 
 ```bash
 docker compose exec iiif /app/migrate-local-to-mysql
 ```
 
-Pruebas:
+Si la configuración activa apunta a MongoDB:
 
-```bash
-curl http://localhost:8080/health
-curl http://localhost:8080/api/documents
-open http://localhost:8080/
-```
+- migra metadatos a colecciones Mongo
+- guarda PDFs en GridFS `pdfs`
+- guarda imágenes en GridFS `images`
 
-Para detener:
+## 7. Reinicio y limpieza
+
+Detener:
 
 ```bash
 docker compose down
 ```
 
-Para borrar datos y recrear desde cero:
+Borrar datos y recrear:
 
 ```bash
 docker compose down -v
 docker compose up -d --build
 ```
 
-## 5. Migraciones manuales
+## 8. Migraciones SQL manuales
 
-Si no quieres usar `/docker-entrypoint-initdb.d`, ejecuta:
+Solo aplica para MySQL:
 
 ```bash
 docker compose exec -T mysql mysql -u project_iiif -p project_iiif < backend/migrations/001_create_documents.sql
 docker compose exec -T mysql mysql -u project_iiif -p project_iiif < backend/migrations/002_add_blob_storage.sql
-docker compose exec -T mysql mysql -u project_iiif -p project_iiif < backend/migrations/003_add_projects_multitenant.sql
+docker compose exec -T mysql mysql -p project_iiif < backend/migrations/003_add_projects_multitenant.sql
 ```
 
-Docker pedira el password configurado para `MYSQL_PASSWORD`.
+## 9. Recomendaciones de producción
 
-## 6. Modo local en Docker
-
-Para guardar PDFs e imagenes en filesystem dentro del volumen `/data`:
-
-```yaml
-STORAGE_BACKEND: "local"
-DB_CONNECTION: "local"
-
-storage:
-  backend: "local"
-  data_path: "/data"
-  pdfs_path: "/data/pdfs"
-  images_path: "/data/images"
-  documents_path: "/data/documents"
-  thumbnails_path: "/data/thumbnails"
-  manifests_path: "/data/manifests"
-
-binary_storage:
-  mode: "local"
-  temp_path: "/data/temp"
-```
-
-En este modo puedes quitar el servicio `mysql` del compose si no lo necesitas.
-
-## 7. Notas de produccion
-
-- Cambia todos los passwords antes de desplegar.
-- Ajusta `iiif.base_url` al dominio publico real.
-- Usa un volumen persistente para MySQL y otro para `/data`.
-- Si expones el dashboard, deja `frontend.require_auth: true`.
-- Para actualizar version: `docker compose build iiif && docker compose up -d iiif`.
+- Cambia todos los passwords antes de publicar.
+- Ajusta `iiif.base_url` al dominio real.
+- Usa volúmenes persistentes para `/data` y para la base de datos.
+- Mantén `frontend.require_auth: true` si expones el dashboard.
+- En MongoDB con autenticación, valida que el usuario tenga permisos sobre la base configurada.

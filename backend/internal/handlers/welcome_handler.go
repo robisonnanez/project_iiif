@@ -22,6 +22,7 @@ func NewWelcomeHandler(config *config.Config) *WelcomeHandler {
 
 func (h *WelcomeHandler) Welcome(c *gin.Context) {
 	loginButton := ""
+	docsButton := `<a class="button secondary" href="/swagger/index.html">Documentacion API</a>`
 	if h.config.Frontend.Enabled {
 		loginButton = `<button class="button" id="login-open" type="button">Iniciar sesion</button>`
 	}
@@ -88,6 +89,11 @@ func (h *WelcomeHandler) Welcome(c *gin.Context) {
             white-space: nowrap;
             border: 0;
             cursor: pointer;
+        }
+        .actions {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
         }
         .modal-backdrop {
             position: fixed;
@@ -182,7 +188,7 @@ func (h *WelcomeHandler) Welcome(c *gin.Context) {
                     <p class="subtitle">Servidor de conversion PDF a IIIF en <strong>%s</strong>.</p>
                 </div>
             </div>
-            %s
+            <div class="actions">%s%s</div>
         </section>
         <section class="grid">
             <article class="panel">
@@ -265,6 +271,7 @@ func (h *WelcomeHandler) Welcome(c *gin.Context) {
 </body>
 </html>`,
 		html.EscapeString(h.config.IIIF.BaseURL),
+		docsButton,
 		loginButton,
 		html.EscapeString(h.config.Server.Port),
 		html.EscapeString(h.config.Server.Mode),
@@ -290,8 +297,8 @@ func (h *WelcomeHandler) HealthCheck(c *gin.Context) {
 			"require_auth": h.config.Frontend.RequireAuth,
 		},
 		"endpoints": map[string]string{
-			"upload":    "/api/upload",
-			"documents": "/api/documents",
+			"upload":    "/api/v1/documents/upload",
+			"documents": "/api/v1/documents",
 			"manifest":  "/api/iiif/{id}/manifest",
 			"image":     "/iiif/3/{identifier}/full/max/0/default.jpg",
 			"info":      "/iiif/3/{identifier}/info.json",

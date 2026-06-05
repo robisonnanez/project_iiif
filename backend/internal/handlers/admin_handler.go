@@ -15,16 +15,20 @@ import (
 
 	"iiif-pdf-server/internal/config"
 	"iiif-pdf-server/internal/services"
+	"iiif-pdf-server/internal/storage"
 
 	"github.com/gin-gonic/gin"
 )
 
 type AdminHandler struct {
-	config          *config.Config
-	documentService *services.DocumentService
-	migrationRunner *migrationRunner
-	restartMu       sync.Mutex
-	lastRestartByIP map[string]time.Time
+	config           *config.Config
+	documentService  *services.DocumentService
+	migrationRunner  *migrationRunner
+	dbMigrateMu      sync.Mutex
+	dbMigrateRunning bool
+	dbMigrateStatus  storage.MigrationRunResult
+	restartMu        sync.Mutex
+	lastRestartByIP  map[string]time.Time
 }
 
 func NewAdminHandler(config *config.Config, documentService *services.DocumentService) *AdminHandler {
@@ -32,14 +36,83 @@ func NewAdminHandler(config *config.Config, documentService *services.DocumentSe
 		config:          config,
 		documentService: documentService,
 		migrationRunner: newMigrationRunner(config.Migration.MaxLogLines),
+		dbMigrateStatus: storage.MigrationRunResult{Engine: config.Storage.Backend, Message: "sin ejecutar"},
 		lastRestartByIP: map[string]time.Time{},
 	}
 }
 
+// GetConfig godoc
+// @Summary Obtener configuracion saneada
+// @Tags Admin
+// @Security SessionCookie
+// @Produce json
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 {object} errorResponse
+// @Router /api/v1/admin/config [get]
 func (h *AdminHandler) GetConfig(c *gin.Context) {
 	c.JSON(http.StatusOK, h.sanitizedConfig())
 }
 
+// GetDBMigrationsStatus godoc
+// @Summary Estado de migraciones de base de datos
+// @Tags Admin
+// @Security SessionCookie
+// @Produce json
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 {object} errorResponse
+// @Router /api/v1/admin/db/migrations/status [get]
+func (h *AdminHandler) GetDBMigrationsStatus(c *gin.Context) {
+	h.dbMigrateMu.Lock()
+	defer h.dbMigrateMu.Unlock()
+	c.JSON(http.StatusOK, gin.H{
+		"running": h.dbMigrateRunning,
+		"result":  h.dbMigrateStatus,
+	})
+}
+
+// RunDBMigrations godoc
+// @Summary Ejecutar migraciones pendientes del motor activo
+// @Tags Admin
+// @Security SessionCookie
+// @Produce json
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 {object} errorResponse
+// @Failure 409 {object} errorResponse
+// @Failure 500 {object} errorResponse
+// @Router /api/v1/admin/db/migrations/run [post]
+func (h *AdminHandler) RunDBMigrations(c *gin.Context) {
+	h.dbMigrateMu.Lock()
+	if h.dbMigrateRunning {
+		h.dbMigrateMu.Unlock()
+		c.JSON(http.StatusConflict, gin.H{"error": "ya hay una ejecucion de migraciones en curso"})
+		return
+	}
+	h.dbMigrateRunning = true
+	h.dbMigrateMu.Unlock()
+
+	result, err := storage.RunDBMigrations(h.config, ".")
+	h.dbMigrateMu.Lock()
+	h.dbMigrateStatus = result
+	h.dbMigrateRunning = false
+	h.dbMigrateMu.Unlock()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error":  "no se pudieron ejecutar migraciones",
+			"result": result,
+		})
+		return
+	}
+	c.JSON(http.StatusOK, result)
+}
+
+// GetProjects godoc
+// @Summary Listar proyectos y tenants
+// @Tags Admin
+// @Security SessionCookie
+// @Produce json
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 {object} errorResponse
+// @Router /api/v1/admin/projects [get]
 func (h *AdminHandler) GetProjects(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"enabled":               h.config.Projects.Enabled,
@@ -50,8 +123,22 @@ func (h *AdminHandler) GetProjects(c *gin.Context) {
 	})
 }
 
+// RestartService godoc
+// @Summary Programar reinicio del servicio
+// @Description Valida password sudo y programa reinicio asincrono de project-iiif.
+// @Tags Admin
+// @Security SessionCookie
+// @Accept json
+// @Produce json
+// @Param request body restartServiceRequest true "Password sudo"
+// @Success 200 {object} restartServiceResponse
+// @Failure 400 {object} errorResponse
+// @Failure 401 {object} errorResponse
+// @Failure 429 {object} errorResponse
+// @Failure 500 {object} errorResponse
+// @Router /api/v1/admin/service/restart [post]
 func (h *AdminHandler) RestartService(c *gin.Context) {
-	// Reinicia el servicio systemd project-iiif con password enviada desde modal de confirmacion.
+	// Programa un reinicio asíncrono de project-iiif para evitar cortar la respuesta HTTP al frontend.
 	var payload struct {
 		Password string `json:"password"`
 	}
@@ -78,35 +165,48 @@ func (h *AdminHandler) RestartService(c *gin.Context) {
 	ctx, cancel := context.WithTimeout(c.Request.Context(), 20*time.Second)
 	defer cancel()
 
-	if err := runSudoSystemctl(ctx, payload.Password, "restart", "project-iiif"); err != nil {
-		log.Printf("ERROR service restart failed: %v", err)
+	// Valida credenciales sudo antes de programar el reinicio.
+	if err := runSudoSystemctl(ctx, payload.Password, "-k", "true"); err != nil {
+		log.Printf("ERROR service restart precheck failed: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"ok":      false,
-			"error":   "no se pudo reiniciar el servicio",
+			"error":   "no se pudo validar permisos para reiniciar",
 			"details": sanitizeCommandError(err.Error()),
 		})
 		return
 	}
 
-	active, err := isServiceActive(ctx, payload.Password, "project-iiif")
-	if err != nil {
-		log.Printf("WARN service restarted but status check failed: %v", err)
-		c.JSON(http.StatusOK, gin.H{
-			"ok":      true,
-			"message": "servicio reiniciado, pero no se pudo validar estado",
-			"active":  false,
-		})
-		return
-	}
+	// Ejecuta restart después de responder para que el fetch no pierda conexión.
+	password := payload.Password
+	time.AfterFunc(1500*time.Millisecond, func() {
+		bgCtx, bgCancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer bgCancel()
+		if err := runSudoSystemctl(bgCtx, password, "-k", "systemctl", "restart", "project-iiif"); err != nil {
+			log.Printf("ERROR deferred service restart failed: %v", err)
+			return
+		}
+		log.Printf("INFO service project-iiif restart scheduled and executed")
+	})
 
-	log.Printf("INFO service project-iiif restarted successfully active=%t", active)
 	c.JSON(http.StatusOK, gin.H{
 		"ok":      true,
-		"message": "servicio reiniciado correctamente",
-		"active":  active,
+		"message": "reinicio programado; el servicio se reiniciara en breve",
+		"active":  true,
 	})
 }
 
+// UpdateConfig godoc
+// @Summary Guardar configuracion editable
+// @Tags Admin
+// @Security SessionCookie
+// @Accept json
+// @Produce json
+// @Param request body editableConfigPayload true "Configuracion editable"
+// @Success 200 {object} map[string]interface{}
+// @Failure 400 {object} errorResponse
+// @Failure 401 {object} errorResponse
+// @Failure 500 {object} errorResponse
+// @Router /api/v1/admin/config [put]
 func (h *AdminHandler) UpdateConfig(c *gin.Context) {
 	// Guarda solo campos permitidos del formulario para evitar sobrescribir secretos o YAML arbitrario.
 	var payload editableConfigPayload
@@ -140,8 +240,9 @@ func (h *AdminHandler) UpdateConfig(c *gin.Context) {
 	})
 }
 
-func runSudoSystemctl(ctx context.Context, password, action, service string) error {
-	cmd := exec.CommandContext(ctx, "sudo", "-S", "systemctl", action, service)
+func runSudoSystemctl(ctx context.Context, password string, args ...string) error {
+	cmdArgs := append([]string{"-S"}, args...)
+	cmd := exec.CommandContext(ctx, "sudo", cmdArgs...)
 	cmd.Stdin = strings.NewReader(password + "\n")
 	var out bytes.Buffer
 	var stderr bytes.Buffer
@@ -151,19 +252,6 @@ func runSudoSystemctl(ctx context.Context, password, action, service string) err
 		return &configError{message: strings.TrimSpace(stderr.String() + " " + out.String() + " " + err.Error())}
 	}
 	return nil
-}
-
-func isServiceActive(ctx context.Context, password, service string) (bool, error) {
-	cmd := exec.CommandContext(ctx, "sudo", "-S", "systemctl", "is-active", service)
-	cmd.Stdin = strings.NewReader(password + "\n")
-	var out bytes.Buffer
-	var stderr bytes.Buffer
-	cmd.Stdout = &out
-	cmd.Stderr = &stderr
-	if err := cmd.Run(); err != nil {
-		return false, &configError{message: strings.TrimSpace(stderr.String() + " " + out.String() + " " + err.Error())}
-	}
-	return strings.TrimSpace(out.String()) == "active", nil
 }
 
 func sanitizeCommandError(message string) string {
@@ -179,6 +267,17 @@ func sanitizeCommandError(message string) string {
 	return clean
 }
 
+// GetDocumentImages godoc
+// @Summary Listar imagenes IIIF por documento
+// @Tags Admin
+// @Security SessionCookie
+// @Produce json
+// @Param id path string true "ID documento"
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 {object} errorResponse
+// @Failure 404 {object} errorResponse
+// @Failure 500 {object} errorResponse
+// @Router /api/v1/admin/documents/{id}/images [get]
 func (h *AdminHandler) GetDocumentImages(c *gin.Context) {
 	// Expone identificadores IIIF seguros para la galeria sin revelar rutas internas ni BLOBs.
 	documentID := c.Param("id")
@@ -224,7 +323,19 @@ func (h *AdminHandler) GetDocumentImages(c *gin.Context) {
 	})
 }
 
-func (h *AdminHandler) StartLocalToMySQLMigration(c *gin.Context) {
+// StartLocalToDBMigration godoc
+// @Summary Iniciar migracion local/ssh a base de datos activa (MySQL/Postgres/MongoDB)
+// @Tags Admin
+// @Security SessionCookie
+// @Accept json
+// @Produce json
+// @Param request body migrationStartPayload true "Origen y scope"
+// @Success 202 {object} map[string]interface{}
+// @Failure 400 {object} errorResponse
+// @Failure 401 {object} errorResponse
+// @Failure 409 {object} errorResponse
+// @Router /api/v1/admin/migrations/local-to-db/start [post]
+func (h *AdminHandler) StartLocalToDBMigration(c *gin.Context) {
 	// Ejecuta la migracion en background y devuelve estado inicial.
 	var payload migrationStartRequest
 	if err := c.ShouldBindJSON(&payload); err != nil {
@@ -245,11 +356,40 @@ func (h *AdminHandler) StartLocalToMySQLMigration(c *gin.Context) {
 	})
 }
 
-func (h *AdminHandler) GetLocalToMySQLMigrationStatus(c *gin.Context) {
+// GetLocalToDBMigrationStatus godoc
+// @Summary Estado de migracion local/ssh a base de datos activa (MySQL/Postgres/MongoDB)
+// @Tags Admin
+// @Security SessionCookie
+// @Produce json
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 {object} errorResponse
+// @Router /api/v1/admin/migrations/local-to-db/status [get]
+func (h *AdminHandler) GetLocalToDBMigrationStatus(c *gin.Context) {
 	// Devuelve estado y logs acumulados de la ultima migracion.
 	c.JSON(http.StatusOK, h.migrationRunner.Status())
 }
 
+// StartLocalToMySQLMigration mantiene compatibilidad con clientes antiguos.
+func (h *AdminHandler) StartLocalToMySQLMigration(c *gin.Context) {
+	h.StartLocalToDBMigration(c)
+}
+
+// GetLocalToMySQLMigrationStatus mantiene compatibilidad con clientes antiguos.
+func (h *AdminHandler) GetLocalToMySQLMigrationStatus(c *gin.Context) {
+	h.GetLocalToDBMigrationStatus(c)
+}
+
+// BrowseLocalMigrationSource godoc
+// @Summary Explorar directorios locales permitidos para migracion
+// @Tags Admin
+// @Security SessionCookie
+// @Produce json
+// @Param path query string false "Ruta base a explorar"
+// @Success 200 {object} map[string]interface{}
+// @Failure 400 {object} errorResponse
+// @Failure 401 {object} errorResponse
+// @Failure 403 {object} errorResponse
+// @Router /api/v1/admin/migrations/sources/local/browse [get]
 func (h *AdminHandler) BrowseLocalMigrationSource(c *gin.Context) {
 	// Lista directorios hijos para ayudar a seleccionar ruta local de migracion.
 	path := strings.TrimSpace(c.Query("path"))
@@ -402,6 +542,25 @@ func (h *AdminHandler) sanitizedConfig() gin.H {
 				"charset":    h.config.Database.MySQL.Charset,
 				"parse_time": h.config.Database.MySQL.ParseTime,
 			},
+			"postgres": gin.H{
+				"host":     h.config.Database.Postgres.Host,
+				"port":     h.config.Database.Postgres.Port,
+				"user":     h.config.Database.Postgres.User,
+				"password": maskedSecret(h.config.Database.Postgres.Password),
+				"database": h.config.Database.Postgres.Database,
+				"sslmode":  h.config.Database.Postgres.SSLMode,
+				"schema":   h.config.Database.Postgres.Schema,
+			},
+			"mongodb": gin.H{
+				"host":                        h.config.Database.MongoDB.Host,
+				"port":                        h.config.Database.MongoDB.Port,
+				"user":                        h.config.Database.MongoDB.User,
+				"password":                    maskedSecret(h.config.Database.MongoDB.Password),
+				"database":                    h.config.Database.MongoDB.Database,
+				"auth_source":                 h.config.Database.MongoDB.AuthSource,
+				"direct_connection":           h.config.Database.MongoDB.DirectConnection,
+				"server_selection_timeout_ms": h.config.Database.MongoDB.ServerSelectionTimeoutMS,
+			},
 		},
 		"frontend": gin.H{
 			"enabled":      h.config.Frontend.Enabled,
@@ -427,6 +586,12 @@ func (h *AdminHandler) sanitizedConfig() gin.H {
 			"max_width":   h.config.IIIF.MaxWidth,
 			"max_height":  h.config.IIIF.MaxHeight,
 			"cache":       h.config.IIIF.CacheEnabled,
+		},
+		"security": gin.H{
+			"enable_auth":            h.config.Security.EnableAuth,
+			"log_level":              h.config.Security.LogLevel,
+			"cors_origins":           h.config.Security.CorsOrigins,
+			"max_concurrent_uploads": h.config.Security.MaxConcurrentUploads,
 		},
 	}
 }
@@ -468,6 +633,25 @@ type editableConfigPayload struct {
 			Charset   string `json:"charset"`
 			ParseTime bool   `json:"parse_time"`
 		} `json:"mysql"`
+		Postgres struct {
+			Host     string `json:"host"`
+			Port     string `json:"port"`
+			User     string `json:"user"`
+			Password string `json:"password"`
+			Database string `json:"database"`
+			SSLMode  string `json:"sslmode"`
+			Schema   string `json:"schema"`
+		} `json:"postgres"`
+		MongoDB struct {
+			Host                     string `json:"host"`
+			Port                     string `json:"port"`
+			User                     string `json:"user"`
+			Password                 string `json:"password"`
+			Database                 string `json:"database"`
+			AuthSource               string `json:"auth_source"`
+			DirectConnection         bool   `json:"direct_connection"`
+			ServerSelectionTimeoutMS int    `json:"server_selection_timeout_ms"`
+		} `json:"mongodb"`
 	} `json:"database"`
 	Frontend struct {
 		Enabled     bool   `json:"enabled"`
@@ -495,6 +679,12 @@ type editableConfigPayload struct {
 		AllowDynamicTenants bool                   `json:"allow_dynamic_tenants"`
 		Items               []config.ProjectConfig `json:"items"`
 	} `json:"projects"`
+	Security struct {
+		EnableAuth           bool     `json:"enable_auth"`
+		LogLevel             string   `json:"log_level"`
+		CorsOrigins          []string `json:"cors_origins"`
+		MaxConcurrentUploads int      `json:"max_concurrent_uploads"`
+	} `json:"security"`
 }
 
 func applyEditableConfig(next, current *config.Config, payload editableConfigPayload) error {
@@ -507,14 +697,26 @@ func applyEditableConfig(next, current *config.Config, payload editableConfigPay
 	if err := validatePort(payload.Database.MySQL.Port, "database.mysql.port"); err != nil {
 		return err
 	}
+	if err := validatePort(payload.Database.Postgres.Port, "database.postgres.port"); err != nil {
+		return err
+	}
+	if err := validatePort(payload.Database.MongoDB.Port, "database.mongodb.port"); err != nil {
+		return err
+	}
 	if !allowedValue(payload.Storage.Backend, "local", "mysql", "postgres", "postgresql", "mongo", "mongodb") {
 		return &configError{"storage.backend debe ser local, mysql, postgres, postgresql, mongo o mongodb"}
+	}
+	if !allowedValue(payload.Database.DBConnection, "local", "mysql", "postgres", "postgresql", "mongo", "mongodb") {
+		return &configError{"database.DB_CONNECTION debe ser local, mysql, postgres, postgresql, mongo o mongodb"}
 	}
 	if !allowedValue(payload.BinaryStorage.Mode, "local", "database") {
 		return &configError{"binary_storage.mode debe ser local o database"}
 	}
 	if payload.IIIF.MaxWidth <= 0 || payload.IIIF.MaxHeight <= 0 {
 		return &configError{"iiif.max_width y iiif.max_height deben ser mayores que cero"}
+	}
+	if payload.Security.MaxConcurrentUploads <= 0 {
+		return &configError{"security.max_concurrent_uploads debe ser mayor que cero"}
 	}
 
 	next.Server.Port = payload.Server.Port
@@ -534,6 +736,21 @@ func applyEditableConfig(next, current *config.Config, payload editableConfigPay
 	next.Database.MySQL.Database = payload.Database.MySQL.Database
 	next.Database.MySQL.Charset = payload.Database.MySQL.Charset
 	next.Database.MySQL.ParseTime = payload.Database.MySQL.ParseTime
+	next.Database.Postgres.Host = payload.Database.Postgres.Host
+	next.Database.Postgres.Port = payload.Database.Postgres.Port
+	next.Database.Postgres.User = payload.Database.Postgres.User
+	next.Database.Postgres.Password = secretOrCurrent(payload.Database.Postgres.Password, current.Database.Postgres.Password)
+	next.Database.Postgres.Database = payload.Database.Postgres.Database
+	next.Database.Postgres.SSLMode = payload.Database.Postgres.SSLMode
+	next.Database.Postgres.Schema = payload.Database.Postgres.Schema
+	next.Database.MongoDB.Host = payload.Database.MongoDB.Host
+	next.Database.MongoDB.Port = payload.Database.MongoDB.Port
+	next.Database.MongoDB.User = payload.Database.MongoDB.User
+	next.Database.MongoDB.Password = secretOrCurrent(payload.Database.MongoDB.Password, current.Database.MongoDB.Password)
+	next.Database.MongoDB.Database = payload.Database.MongoDB.Database
+	next.Database.MongoDB.AuthSource = payload.Database.MongoDB.AuthSource
+	next.Database.MongoDB.DirectConnection = payload.Database.MongoDB.DirectConnection
+	next.Database.MongoDB.ServerSelectionTimeoutMS = payload.Database.MongoDB.ServerSelectionTimeoutMS
 
 	next.DBConnection = payload.Database.DBConnection
 	next.DBHost = payload.Database.DBHost
@@ -541,6 +758,25 @@ func applyEditableConfig(next, current *config.Config, payload editableConfigPay
 	next.DBDatabase = payload.Database.DBDatabase
 	next.DBUsername = payload.Database.DBUsername
 	next.DBPassword = secretOrCurrent(payload.Database.DBPassword, current.DBPassword)
+	if strings.EqualFold(next.Storage.Backend, "postgres") || strings.EqualFold(next.DBConnection, "postgres") {
+		next.DBHost = next.Database.Postgres.Host
+		next.DBPort = next.Database.Postgres.Port
+		next.DBDatabase = next.Database.Postgres.Database
+		next.DBUsername = next.Database.Postgres.User
+		next.DBPassword = next.Database.Postgres.Password
+	} else if strings.EqualFold(next.Storage.Backend, "mongodb") || strings.EqualFold(next.Storage.Backend, "mongo") || strings.EqualFold(next.DBConnection, "mongodb") || strings.EqualFold(next.DBConnection, "mongo") {
+		next.DBHost = next.Database.MongoDB.Host
+		next.DBPort = next.Database.MongoDB.Port
+		next.DBDatabase = next.Database.MongoDB.Database
+		next.DBUsername = next.Database.MongoDB.User
+		next.DBPassword = next.Database.MongoDB.Password
+	} else {
+		next.DBHost = next.Database.MySQL.Host
+		next.DBPort = next.Database.MySQL.Port
+		next.DBDatabase = next.Database.MySQL.Database
+		next.DBUsername = next.Database.MySQL.User
+		next.DBPassword = next.Database.MySQL.Password
+	}
 
 	next.Frontend.Enabled = payload.Frontend.Enabled
 	next.Frontend.Path = payload.Frontend.Path
@@ -560,6 +796,10 @@ func applyEditableConfig(next, current *config.Config, payload editableConfigPay
 	next.Projects.RequireProject = payload.Projects.RequireProject
 	next.Projects.AllowDynamicTenants = payload.Projects.AllowDynamicTenants
 	next.Projects.Items = payload.Projects.Items
+	next.Security.EnableAuth = payload.Security.EnableAuth
+	next.Security.LogLevel = payload.Security.LogLevel
+	next.Security.CorsOrigins = payload.Security.CorsOrigins
+	next.Security.MaxConcurrentUploads = payload.Security.MaxConcurrentUploads
 	if next.Projects.DefaultProject == "" {
 		next.Projects.DefaultProject = "default"
 	}

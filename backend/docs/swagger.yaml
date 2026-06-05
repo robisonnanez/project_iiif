@@ -1,0 +1,874 @@
+basePath: /
+definitions:
+  config.ProjectConfig:
+    properties:
+      key:
+        type: string
+      multitenant:
+        type: boolean
+      name:
+        type: string
+      tenants:
+        items:
+          type: string
+        type: array
+    type: object
+  handlers.editableConfigPayload:
+    properties:
+      binary_storage:
+        properties:
+          mode:
+            type: string
+          temp_path:
+            type: string
+        type: object
+      database:
+        properties:
+          DB_CONNECTION:
+            type: string
+          DB_DATABASE:
+            type: string
+          DB_HOST:
+            type: string
+          DB_PASSWORD:
+            type: string
+          DB_PORT:
+            type: string
+          DB_USERNAME:
+            type: string
+          mongodb:
+            properties:
+              auth_source:
+                type: string
+              database:
+                type: string
+              direct_connection:
+                type: boolean
+              host:
+                type: string
+              password:
+                type: string
+              port:
+                type: string
+              server_selection_timeout_ms:
+                type: integer
+              user:
+                type: string
+            type: object
+          mysql:
+            properties:
+              charset:
+                type: string
+              database:
+                type: string
+              host:
+                type: string
+              parse_time:
+                type: boolean
+              password:
+                type: string
+              port:
+                type: string
+              user:
+                type: string
+            type: object
+          postgres:
+            properties:
+              database:
+                type: string
+              host:
+                type: string
+              password:
+                type: string
+              port:
+                type: string
+              schema:
+                type: string
+              sslmode:
+                type: string
+              user:
+                type: string
+            type: object
+        type: object
+      frontend:
+        properties:
+          enabled:
+            type: boolean
+          password:
+            type: string
+          path:
+            type: string
+          require_auth:
+            type: boolean
+          username:
+            type: string
+        type: object
+      iiif:
+        properties:
+          api_version:
+            type: string
+          base_url:
+            type: string
+          cache:
+            type: boolean
+          cache_ttl:
+            type: integer
+          max_height:
+            type: integer
+          max_width:
+            type: integer
+        type: object
+      projects:
+        properties:
+          allow_dynamic_tenants:
+            type: boolean
+          default_project:
+            type: string
+          enabled:
+            type: boolean
+          items:
+            items:
+              $ref: '#/definitions/config.ProjectConfig'
+            type: array
+          require_project:
+            type: boolean
+        type: object
+      security:
+        properties:
+          cors_origins:
+            items:
+              type: string
+            type: array
+          enable_auth:
+            type: boolean
+          log_level:
+            type: string
+          max_concurrent_uploads:
+            type: integer
+        type: object
+      server:
+        properties:
+          mode:
+            type: string
+          port:
+            type: string
+        type: object
+      storage:
+        properties:
+          backend:
+            type: string
+          data_path:
+            type: string
+          documents_path:
+            type: string
+          images_path:
+            type: string
+          manifests_path:
+            type: string
+          pdfs_path:
+            type: string
+          thumbnails_path:
+            type: string
+        type: object
+    type: object
+  handlers.errorResponse:
+    properties:
+      details:
+        example: detalle interno
+        type: string
+      error:
+        example: login requerido
+        type: string
+    type: object
+  handlers.loginRequest:
+    properties:
+      password:
+        example: CAMBIAR_PASSWORD
+        type: string
+      username:
+        example: admin
+        type: string
+    type: object
+  handlers.migrationStartPayload:
+    properties:
+      scope:
+        $ref: '#/definitions/handlers.migrationStartScope'
+      source:
+        $ref: '#/definitions/handlers.migrationStartSource'
+    type: object
+  handlers.migrationStartScope:
+    properties:
+      project_key:
+        example: metavisor
+        type: string
+      tenant_key:
+        example: sunat
+        type: string
+    type: object
+  handlers.migrationStartSource:
+    properties:
+      local:
+        $ref: '#/definitions/handlers.migrationStartSourceLocal'
+      ssh:
+        $ref: '#/definitions/handlers.migrationStartSourceSSH'
+      type:
+        example: local
+        type: string
+    type: object
+  handlers.migrationStartSourceLocal:
+    properties:
+      path:
+        example: /var/lib/project_iiif
+        type: string
+    type: object
+  handlers.migrationStartSourceSSH:
+    properties:
+      host:
+        example: 172.21.227.83
+        type: string
+      path:
+        example: /var/lib/project_iiif
+        type: string
+      port:
+        example: 2230
+        type: integer
+      private_key:
+        example: '-----BEGIN OPENSSH PRIVATE KEY-----'
+        type: string
+      user:
+        example: robison
+        type: string
+    type: object
+  handlers.okMessageResponse:
+    properties:
+      message:
+        example: ok
+        type: string
+    type: object
+  handlers.restartServiceRequest:
+    properties:
+      password:
+        example: tu_password_sudo
+        type: string
+    type: object
+  handlers.restartServiceResponse:
+    properties:
+      active:
+        example: true
+        type: boolean
+      message:
+        example: reinicio programado; el servicio se reiniciara en breve
+        type: string
+      ok:
+        example: true
+        type: boolean
+    type: object
+  handlers.sessionResponse:
+    properties:
+      authenticated:
+        example: true
+        type: boolean
+      username:
+        example: admin
+        type: string
+    type: object
+  models.IIIFImageInfo:
+    properties:
+      '@context':
+        type: string
+      height:
+        type: integer
+      id:
+        type: string
+      profile:
+        type: string
+      protocol:
+        type: string
+      sizes:
+        items:
+          $ref: '#/definitions/models.IIIFSize'
+        type: array
+      tiles:
+        items:
+          $ref: '#/definitions/models.IIIFTile'
+        type: array
+      type:
+        type: string
+      width:
+        type: integer
+    type: object
+  models.IIIFSize:
+    properties:
+      height:
+        type: integer
+      width:
+        type: integer
+    type: object
+  models.IIIFTile:
+    properties:
+      height:
+        type: integer
+      scaleFactors:
+        items:
+          type: integer
+        type: array
+      width:
+        type: integer
+    type: object
+  models.PDFDocument:
+    properties:
+      convertedPages:
+        type: integer
+      id:
+        type: string
+      manifestUrl:
+        type: string
+      migratedFromLocal:
+        type: boolean
+      name:
+        type: string
+      projectKey:
+        type: string
+      status:
+        description: processing, completed, error
+        type: string
+      tenantKey:
+        type: string
+      thumbnailUrl:
+        type: string
+      totalPages:
+        type: integer
+      uploadDate:
+        type: string
+    type: object
+info:
+  contact: {}
+  description: API para conversion de PDF a imagenes IIIF v3, administracion y migracion.
+    Las rutas recomendadas usan /api/v1 y los endpoints legacy se mantienen por compatibilidad
+    temporal.
+  title: IIIF PDF Server API
+  version: "2.1"
+paths:
+  /api/v1/admin/config:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.errorResponse'
+      security:
+      - SessionCookie: []
+      summary: Obtener configuracion saneada
+      tags:
+      - Admin
+    put:
+      consumes:
+      - application/json
+      parameters:
+      - description: Configuracion editable
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/handlers.editableConfigPayload'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.errorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.errorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.errorResponse'
+      security:
+      - SessionCookie: []
+      summary: Guardar configuracion editable
+      tags:
+      - Admin
+  /api/v1/admin/db/migrations/run:
+    post:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.errorResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/handlers.errorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.errorResponse'
+      security:
+      - SessionCookie: []
+      summary: Ejecutar migraciones pendientes del motor activo
+      tags:
+      - Admin
+  /api/v1/admin/db/migrations/status:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.errorResponse'
+      security:
+      - SessionCookie: []
+      summary: Estado de migraciones de base de datos
+      tags:
+      - Admin
+  /api/v1/admin/documents/{id}/images:
+    get:
+      parameters:
+      - description: ID documento
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.errorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.errorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.errorResponse'
+      security:
+      - SessionCookie: []
+      summary: Listar imagenes IIIF por documento
+      tags:
+      - Admin
+  /api/v1/admin/migrations/local-to-db/start:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Origen y scope
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/handlers.migrationStartPayload'
+      produces:
+      - application/json
+      responses:
+        "202":
+          description: Accepted
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.errorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.errorResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/handlers.errorResponse'
+      security:
+      - SessionCookie: []
+      summary: Iniciar migracion local/ssh a base de datos activa (MySQL/Postgres/MongoDB)
+      tags:
+      - Admin
+  /api/v1/admin/migrations/local-to-db/status:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.errorResponse'
+      security:
+      - SessionCookie: []
+      summary: Estado de migracion local/ssh a base de datos activa (MySQL/Postgres/MongoDB)
+      tags:
+      - Admin
+  /api/v1/admin/migrations/sources/local/browse:
+    get:
+      parameters:
+      - description: Ruta base a explorar
+        in: query
+        name: path
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.errorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.errorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.errorResponse'
+      security:
+      - SessionCookie: []
+      summary: Explorar directorios locales permitidos para migracion
+      tags:
+      - Admin
+  /api/v1/admin/projects:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.errorResponse'
+      security:
+      - SessionCookie: []
+      summary: Listar proyectos y tenants
+      tags:
+      - Admin
+  /api/v1/admin/service/restart:
+    post:
+      consumes:
+      - application/json
+      description: Valida password sudo y programa reinicio asincrono de project-iiif.
+      parameters:
+      - description: Password sudo
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/handlers.restartServiceRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.restartServiceResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.errorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.errorResponse'
+        "429":
+          description: Too Many Requests
+          schema:
+            $ref: '#/definitions/handlers.errorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.errorResponse'
+      security:
+      - SessionCookie: []
+      summary: Programar reinicio del servicio
+      tags:
+      - Admin
+  /api/v1/documents:
+    get:
+      description: Lista documentos con filtros opcionales por proyecto y tenant.
+      parameters:
+      - description: Proyecto
+        in: query
+        name: project
+        type: string
+      - description: Tenant
+        in: query
+        name: tenant
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/models.PDFDocument'
+            type: array
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.errorResponse'
+      summary: Listar documentos
+      tags:
+      - Documentos
+  /api/v1/documents/{id}:
+    delete:
+      parameters:
+      - description: ID documento
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.okMessageResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.errorResponse'
+      summary: Eliminar documento
+      tags:
+      - Documentos
+    get:
+      parameters:
+      - description: ID documento
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/models.PDFDocument'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.errorResponse'
+      summary: Obtener documento por ID
+      tags:
+      - Documentos
+  /api/v1/documents/upload:
+    post:
+      consumes:
+      - multipart/form-data
+      description: Recibe archivo PDF y crea documento con paginas convertidas.
+      parameters:
+      - description: Archivo PDF
+        in: formData
+        name: pdf
+        required: true
+        type: file
+      - description: Proyecto
+        in: formData
+        name: project
+        type: string
+      - description: Tenant
+        in: formData
+        name: tenant
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/models.PDFDocument'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.errorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.errorResponse'
+      summary: Subir y convertir PDF
+      tags:
+      - Documentos
+  /auth/login:
+    post:
+      consumes:
+      - application/json
+      description: Crea cookie de sesion para rutas administrativas.
+      parameters:
+      - description: Credenciales
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/handlers.loginRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.sessionResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.errorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.errorResponse'
+      summary: Iniciar sesion de dashboard
+      tags:
+      - Auth
+  /auth/logout:
+    post:
+      description: Elimina cookie de sesion activa.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.sessionResponse'
+      summary: Cerrar sesion
+      tags:
+      - Auth
+  /auth/me:
+    get:
+      description: Devuelve estado de autenticacion actual.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.sessionResponse'
+      summary: Verificar sesion
+      tags:
+      - Auth
+  /iiif/3/{identifier}/{region}/{size}/{rotation}/{quality_format}:
+    get:
+      parameters:
+      - description: Identificador IIIF
+        in: path
+        name: identifier
+        required: true
+        type: string
+      - description: Region
+        in: path
+        name: region
+        required: true
+        type: string
+      - description: Tamano
+        in: path
+        name: size
+        required: true
+        type: string
+      - description: Rotacion
+        in: path
+        name: rotation
+        required: true
+        type: string
+      - description: quality.format
+        in: path
+        name: quality_format
+        required: true
+        type: string
+      produces:
+      - image/jpeg
+      - image/png
+      - image/webp
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: file
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.errorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.errorResponse'
+      summary: Obtener imagen IIIF transformada
+      tags:
+      - IIIF
+  /iiif/3/{identifier}/info.json:
+    get:
+      parameters:
+      - description: Identificador IIIF
+        in: path
+        name: identifier
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/models.IIIFImageInfo'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.errorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.errorResponse'
+      summary: Obtener info IIIF
+      tags:
+      - IIIF
+securityDefinitions:
+  SessionCookie:
+    in: cookie
+    name: project_iiif_session
+    type: apiKey
+swagger: "2.0"
