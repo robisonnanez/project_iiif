@@ -36,6 +36,25 @@ definitions:
             type: string
           DB_USERNAME:
             type: string
+          mongodb:
+            properties:
+              auth_source:
+                type: string
+              database:
+                type: string
+              direct_connection:
+                type: boolean
+              host:
+                type: string
+              password:
+                type: string
+              port:
+                type: string
+              server_selection_timeout_ms:
+                type: integer
+              user:
+                type: string
+            type: object
           mysql:
             properties:
               charset:
@@ -49,6 +68,23 @@ definitions:
               password:
                 type: string
               port:
+                type: string
+              user:
+                type: string
+            type: object
+          postgres:
+            properties:
+              database:
+                type: string
+              host:
+                type: string
+              password:
+                type: string
+              port:
+                type: string
+              schema:
+                type: string
+              sslmode:
                 type: string
               user:
                 type: string
@@ -96,6 +132,19 @@ definitions:
             type: array
           require_project:
             type: boolean
+        type: object
+      security:
+        properties:
+          cors_origins:
+            items:
+              type: string
+            type: array
+          enable_auth:
+            type: boolean
+          log_level:
+            type: string
+          max_concurrent_uploads:
+            type: integer
         type: object
       server:
         properties:
@@ -295,10 +344,12 @@ definitions:
 info:
   contact: {}
   description: API para conversion de PDF a imagenes IIIF v3, administracion y migracion.
+    Las rutas recomendadas usan /api/v1 y los endpoints legacy se mantienen por compatibilidad
+    temporal.
   title: IIIF PDF Server API
   version: "2.1"
 paths:
-  /admin/api/config:
+  /api/v1/admin/config:
     get:
       produces:
       - application/json
@@ -352,7 +403,53 @@ paths:
       summary: Guardar configuracion editable
       tags:
       - Admin
-  /admin/api/documents/{id}/images:
+  /api/v1/admin/db/migrations/run:
+    post:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.errorResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/handlers.errorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.errorResponse'
+      security:
+      - SessionCookie: []
+      summary: Ejecutar migraciones pendientes del motor activo
+      tags:
+      - Admin
+  /api/v1/admin/db/migrations/status:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.errorResponse'
+      security:
+      - SessionCookie: []
+      summary: Estado de migraciones de base de datos
+      tags:
+      - Admin
+  /api/v1/admin/documents/{id}/images:
     get:
       parameters:
       - description: ID documento
@@ -385,7 +482,7 @@ paths:
       summary: Listar imagenes IIIF por documento
       tags:
       - Admin
-  /admin/api/migrations/local-to-mysql/start:
+  /api/v1/admin/migrations/local-to-db/start:
     post:
       consumes:
       - application/json
@@ -418,10 +515,10 @@ paths:
             $ref: '#/definitions/handlers.errorResponse'
       security:
       - SessionCookie: []
-      summary: Iniciar migracion local/ssh a MySQL BLOB
+      summary: Iniciar migracion local/ssh a base de datos activa (MySQL/Postgres/MongoDB)
       tags:
       - Admin
-  /admin/api/migrations/local-to-mysql/status:
+  /api/v1/admin/migrations/local-to-db/status:
     get:
       produces:
       - application/json
@@ -437,10 +534,10 @@ paths:
             $ref: '#/definitions/handlers.errorResponse'
       security:
       - SessionCookie: []
-      summary: Estado de migracion local/ssh a MySQL
+      summary: Estado de migracion local/ssh a base de datos activa (MySQL/Postgres/MongoDB)
       tags:
       - Admin
-  /admin/api/migrations/sources/local/browse:
+  /api/v1/admin/migrations/sources/local/browse:
     get:
       parameters:
       - description: Ruta base a explorar
@@ -472,7 +569,7 @@ paths:
       summary: Explorar directorios locales permitidos para migracion
       tags:
       - Admin
-  /admin/api/projects:
+  /api/v1/admin/projects:
     get:
       produces:
       - application/json
@@ -491,7 +588,7 @@ paths:
       summary: Listar proyectos y tenants
       tags:
       - Admin
-  /admin/api/service/restart:
+  /api/v1/admin/service/restart:
     post:
       consumes:
       - application/json
@@ -531,7 +628,7 @@ paths:
       summary: Programar reinicio del servicio
       tags:
       - Admin
-  /api/documents:
+  /api/v1/documents:
     get:
       description: Lista documentos con filtros opcionales por proyecto y tenant.
       parameters:
@@ -559,7 +656,7 @@ paths:
       summary: Listar documentos
       tags:
       - Documentos
-  /api/documents/{id}:
+  /api/v1/documents/{id}:
     delete:
       parameters:
       - description: ID documento
@@ -602,7 +699,7 @@ paths:
       summary: Obtener documento por ID
       tags:
       - Documentos
-  /api/upload:
+  /api/v1/documents/upload:
     post:
       consumes:
       - multipart/form-data

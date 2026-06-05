@@ -15,7 +15,7 @@ const docTemplate = `{
     "host": "{{.Host}}",
     "basePath": "{{.BasePath}}",
     "paths": {
-        "/admin/api/config": {
+        "/api/v1/admin/config": {
             "get": {
                 "security": [
                     {
@@ -101,7 +101,81 @@ const docTemplate = `{
                 }
             }
         },
-        "/admin/api/documents/{id}/images": {
+        "/api/v1/admin/db/migrations/run": {
+            "post": {
+                "security": [
+                    {
+                        "SessionCookie": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Admin"
+                ],
+                "summary": "Ejecutar migraciones pendientes del motor activo",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.errorResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.errorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.errorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/admin/db/migrations/status": {
+            "get": {
+                "security": [
+                    {
+                        "SessionCookie": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Admin"
+                ],
+                "summary": "Estado de migraciones de base de datos",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.errorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/admin/documents/{id}/images": {
             "get": {
                 "security": [
                     {
@@ -153,7 +227,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/admin/api/migrations/local-to-mysql/start": {
+        "/api/v1/admin/migrations/local-to-db/start": {
             "post": {
                 "security": [
                     {
@@ -169,7 +243,7 @@ const docTemplate = `{
                 "tags": [
                     "Admin"
                 ],
-                "summary": "Iniciar migracion local/ssh a MySQL BLOB",
+                "summary": "Iniciar migracion local/ssh a base de datos activa (MySQL/Postgres/MongoDB)",
                 "parameters": [
                     {
                         "description": "Origen y scope",
@@ -210,7 +284,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/admin/api/migrations/local-to-mysql/status": {
+        "/api/v1/admin/migrations/local-to-db/status": {
             "get": {
                 "security": [
                     {
@@ -223,7 +297,7 @@ const docTemplate = `{
                 "tags": [
                     "Admin"
                 ],
-                "summary": "Estado de migracion local/ssh a MySQL",
+                "summary": "Estado de migracion local/ssh a base de datos activa (MySQL/Postgres/MongoDB)",
                 "responses": {
                     "200": {
                         "description": "OK",
@@ -241,7 +315,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/admin/api/migrations/sources/local/browse": {
+        "/api/v1/admin/migrations/sources/local/browse": {
             "get": {
                 "security": [
                     {
@@ -292,7 +366,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/admin/api/projects": {
+        "/api/v1/admin/projects": {
             "get": {
                 "security": [
                     {
@@ -323,7 +397,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/admin/api/service/restart": {
+        "/api/v1/admin/service/restart": {
             "post": {
                 "security": [
                     {
@@ -386,7 +460,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/documents": {
+        "/api/v1/documents": {
             "get": {
                 "description": "Lista documentos con filtros opcionales por proyecto y tenant.",
                 "produces": [
@@ -429,7 +503,63 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/documents/{id}": {
+        "/api/v1/documents/upload": {
+            "post": {
+                "description": "Recibe archivo PDF y crea documento con paginas convertidas.",
+                "consumes": [
+                    "multipart/form-data"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Documentos"
+                ],
+                "summary": "Subir y convertir PDF",
+                "parameters": [
+                    {
+                        "type": "file",
+                        "description": "Archivo PDF",
+                        "name": "pdf",
+                        "in": "formData",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Proyecto",
+                        "name": "project",
+                        "in": "formData"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Tenant",
+                        "name": "tenant",
+                        "in": "formData"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/models.PDFDocument"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.errorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.errorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/documents/{id}": {
             "get": {
                 "produces": [
                     "application/json"
@@ -484,62 +614,6 @@ const docTemplate = `{
                         "description": "OK",
                         "schema": {
                             "$ref": "#/definitions/handlers.okMessageResponse"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.errorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/api/upload": {
-            "post": {
-                "description": "Recibe archivo PDF y crea documento con paginas convertidas.",
-                "consumes": [
-                    "multipart/form-data"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "Documentos"
-                ],
-                "summary": "Subir y convertir PDF",
-                "parameters": [
-                    {
-                        "type": "file",
-                        "description": "Archivo PDF",
-                        "name": "pdf",
-                        "in": "formData",
-                        "required": true
-                    },
-                    {
-                        "type": "string",
-                        "description": "Proyecto",
-                        "name": "project",
-                        "in": "formData"
-                    },
-                    {
-                        "type": "string",
-                        "description": "Tenant",
-                        "name": "tenant",
-                        "in": "formData"
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/models.PDFDocument"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.errorResponse"
                         }
                     },
                     "500": {
@@ -804,6 +878,35 @@ const docTemplate = `{
                         "DB_USERNAME": {
                             "type": "string"
                         },
+                        "mongodb": {
+                            "type": "object",
+                            "properties": {
+                                "auth_source": {
+                                    "type": "string"
+                                },
+                                "database": {
+                                    "type": "string"
+                                },
+                                "direct_connection": {
+                                    "type": "boolean"
+                                },
+                                "host": {
+                                    "type": "string"
+                                },
+                                "password": {
+                                    "type": "string"
+                                },
+                                "port": {
+                                    "type": "string"
+                                },
+                                "server_selection_timeout_ms": {
+                                    "type": "integer"
+                                },
+                                "user": {
+                                    "type": "string"
+                                }
+                            }
+                        },
                         "mysql": {
                             "type": "object",
                             "properties": {
@@ -823,6 +926,32 @@ const docTemplate = `{
                                     "type": "string"
                                 },
                                 "port": {
+                                    "type": "string"
+                                },
+                                "user": {
+                                    "type": "string"
+                                }
+                            }
+                        },
+                        "postgres": {
+                            "type": "object",
+                            "properties": {
+                                "database": {
+                                    "type": "string"
+                                },
+                                "host": {
+                                    "type": "string"
+                                },
+                                "password": {
+                                    "type": "string"
+                                },
+                                "port": {
+                                    "type": "string"
+                                },
+                                "schema": {
+                                    "type": "string"
+                                },
+                                "sslmode": {
                                     "type": "string"
                                 },
                                 "user": {
@@ -895,6 +1024,26 @@ const docTemplate = `{
                         },
                         "require_project": {
                             "type": "boolean"
+                        }
+                    }
+                },
+                "security": {
+                    "type": "object",
+                    "properties": {
+                        "cors_origins": {
+                            "type": "array",
+                            "items": {
+                                "type": "string"
+                            }
+                        },
+                        "enable_auth": {
+                            "type": "boolean"
+                        },
+                        "log_level": {
+                            "type": "string"
+                        },
+                        "max_concurrent_uploads": {
+                            "type": "integer"
                         }
                     }
                 },
@@ -1206,7 +1355,7 @@ var SwaggerInfo = &swag.Spec{
 	BasePath:         "/",
 	Schemes:          []string{},
 	Title:            "IIIF PDF Server API",
-	Description:      "API para conversion de PDF a imagenes IIIF v3, administracion y migracion.",
+	Description:      "API para conversion de PDF a imagenes IIIF v3, administracion y migracion. Las rutas recomendadas usan /api/v1 y los endpoints legacy se mantienen por compatibilidad temporal.",
 	InfoInstanceName: "swagger",
 	SwaggerTemplate:  docTemplate,
 	LeftDelim:        "{{",

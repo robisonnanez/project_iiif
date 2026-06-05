@@ -1,26 +1,40 @@
-# Instalacion del servicio Project IIIF
+# Instalación del servicio Project IIIF
 
-Esta guia instala Project IIIF como servicio `systemd` global. El servidor convierte PDFs a imagenes, sirve IIIF v3, incluye dashboard opcional y puede trabajar en modo `local` o `mysql`.
+Esta guía explica cómo instalar Project IIIF como servicio `systemd` en Linux. Cubre los tres modos principales:
+
+- local
+- MySQL / PostgreSQL
+- MongoDB
 
 ## 1. Dependencias
 
-En Ubuntu/Debian:
+En Ubuntu o Debian:
 
 ```bash
 sudo apt-get update
-sudo apt-get install -y build-essential libmupdf-dev mysql-server mysql-client git curl
+sudo apt-get install -y build-essential libmupdf-dev git curl
+```
+
+Si vas a usar MySQL:
+
+```bash
+sudo apt-get install -y mysql-server mysql-client
+```
+
+Si vas a usar MongoDB, instala tu versión objetivo y verifica que el servicio responda:
+
+```bash
+sudo systemctl status mongod
+```
+
+Instala Go y asegúrate de tenerlo en el `PATH`:
+
+```bash
 export PATH=$PATH:/usr/local/go/bin
 go version
 ```
 
-Si `go version` no responde, instala Go en `/usr/local/go` y agrega esta linea a `~/.bashrc`:
-
-```bash
-export PATH=$PATH:/usr/local/go/bin
-source ~/.bashrc
-```
-
-Instala CLI de Swagger:
+Si necesitas Swagger:
 
 ```bash
 go install github.com/swaggo/swag/cmd/swag@latest
@@ -36,21 +50,21 @@ sudo mkdir -p /var/lib/project_iiif/{pdfs,images,documents,thumbnails,manifests,
 sudo chown -R robison:robison /opt/project_iiif /var/lib/project_iiif
 ```
 
-Copia o clona el proyecto en:
+Clona o copia el proyecto en:
 
-```bash
+```text
 /opt/project_iiif
 ```
 
 El backend debe quedar en:
 
-```bash
+```text
 /opt/project_iiif/backend
 ```
 
-## 3. Base de datos MySQL
+## 3. Base de datos según el motor
 
-Crea una base y usuario dedicado. Cambia `PASSWORD_SEGURO` por una clave real.
+### MySQL
 
 ```bash
 sudo mysql
@@ -64,7 +78,7 @@ FLUSH PRIVILEGES;
 EXIT;
 ```
 
-Ejecuta todas las migraciones en orden:
+Ejecuta las migraciones SQL:
 
 ```bash
 cd /opt/project_iiif/backend
@@ -73,43 +87,38 @@ mysql -u project_iiif -p project_iiif < migrations/002_add_blob_storage.sql
 mysql -u project_iiif -p project_iiif < migrations/003_add_projects_multitenant.sql
 ```
 
-## 4. Configuracion
+### PostgreSQL
 
-Crea el archivo activo desde el ejemplo:
+Crea la base, el usuario y los permisos equivalentes según tu instalación. Luego aplica las migraciones que correspondan si tu flujo las requiere.
+
+### MongoDB
+
+Si usas MongoDB sin autenticación, basta con tener el servicio activo y la base accesible:
+
+```bash
+sudo systemctl status mongod
+mongosh --eval 'db.runCommand({ ping: 1 })'
+```
+
+Si usas autenticación, crea un usuario con permisos sobre la base `project_iiif` o la que definas en la configuración.
+
+Importante:
+
+- si MongoDB no usa autenticación, deja usuario y contraseña vacíos
+- si MongoDB usa autenticación, completa `DB_USERNAME`, `DB_PASSWORD` y `auth_source`
+- el backend actual soporta URIs `mongodb://...`
+- el backend actual no soporta `mongodb+srv://...`
+
+## 4. Configuración
+
+Crea el archivo activo:
 
 ```bash
 sudo cp /opt/project_iiif/backend/config.yaml.example /etc/project_iiif/config.yaml
 sudo nano /etc/project_iiif/config.yaml
 ```
 
-Para modo MySQL con PDFs e imagenes en BLOB:
-
-```yaml
-STORAGE_BACKEND: "mysql"
-DB_CONNECTION: "mysql"
-DB_HOST: "127.0.0.1"
-DB_PORT: "3306"
-DB_DATABASE: "project_iiif"
-DB_USERNAME: "project_iiif"
-DB_PASSWORD: "PASSWORD_SEGURO"
-
-storage:
-  backend: "mysql"
-  data_path: "/var/lib/project_iiif"
-
-binary_storage:
-  mode: "database"
-  temp_path: "/var/lib/project_iiif/temp"
-
-frontend:
-  enabled: true
-  path: "./frontend"
-  require_auth: true
-  username: "admin"
-  password: "CAMBIAR_PASSWORD"
-```
-
-Para modo local:
+### Modo local
 
 ```yaml
 STORAGE_BACKEND: "local"
@@ -129,7 +138,82 @@ binary_storage:
   temp_path: "/var/lib/project_iiif/temp"
 ```
 
-Para proyectos y multitenant:
+### Modo MySQL
+
+```yaml
+STORAGE_BACKEND: "mysql"
+DB_CONNECTION: "mysql"
+DB_HOST: "127.0.0.1"
+DB_PORT: "3306"
+DB_DATABASE: "project_iiif"
+DB_USERNAME: "project_iiif"
+DB_PASSWORD: "PASSWORD_SEGURO"
+
+storage:
+  backend: "mysql"
+  data_path: "/var/lib/project_iiif"
+
+binary_storage:
+  mode: "database"
+  temp_path: "/var/lib/project_iiif/temp"
+```
+
+### Modo MongoDB
+
+```yaml
+STORAGE_BACKEND: "mongodb"
+DB_CONNECTION: "mongodb"
+DB_HOST: "127.0.0.1"
+DB_PORT: "27017"
+DB_DATABASE: "project_iiif"
+DB_USERNAME: ""
+DB_PASSWORD: ""
+
+storage:
+  backend: "mongodb"
+  data_path: "/var/lib/project_iiif"
+
+database:
+  mongodb:
+    host: "127.0.0.1"
+    port: "27017"
+    user: ""
+    password: ""
+    database: "project_iiif"
+    auth_source: "admin"
+    direct_connection: true
+    server_selection_timeout_ms: 2000
+
+binary_storage:
+  mode: "database"
+  temp_path: "/var/lib/project_iiif/temp"
+```
+
+Si usas autenticación en MongoDB:
+
+```yaml
+DB_USERNAME: "usuario_mongo"
+DB_PASSWORD: "PASSWORD_SEGURA"
+
+database:
+  mongodb:
+    user: "usuario_mongo"
+    password: "PASSWORD_SEGURA"
+    auth_source: "admin"
+```
+
+### Dashboard
+
+```yaml
+frontend:
+  enabled: true
+  path: "./frontend"
+  require_auth: true
+  username: "admin"
+  password: "CAMBIAR_PASSWORD"
+```
+
+### Proyectos y tenants
 
 ```yaml
 projects:
@@ -151,9 +235,7 @@ projects:
         - "uniguajira"
 ```
 
-No guardes claves reales en el repositorio.
-
-Para habilitar migracion con seleccion de directorio local y SSH remoto:
+### Migración desde dashboard
 
 ```yaml
 migration:
@@ -167,25 +249,24 @@ migration:
     allowed_hosts: []
 ```
 
-Si `allowed_hosts` tiene valores, la UI solo permitira migrar a esos hosts SSH.
-
-## 5. Build de produccion
+## 5. Compilación de producción
 
 ```bash
 cd /opt/project_iiif/backend
 export PATH=$PATH:/usr/local/go/bin
 go mod download
 CGO_ENABLED=1 go build -ldflags="-s -w" -o iiif-server main.go
+CGO_ENABLED=1 go build -ldflags="-s -w" -o migrate-local-to-mysql ./cmd/migrate-local-to-mysql
 ```
 
-Genera documentacion Swagger antes de compilar/desplegar:
+Genera Swagger antes de desplegar:
 
 ```bash
 cd /opt/project_iiif/backend
 swag init -g main.go -o docs
 ```
 
-Build de estilos del dashboard (Tailwind CLI):
+Si vas a compilar estilos:
 
 ```bash
 cd /opt/project_iiif/backend/frontend
@@ -193,28 +274,29 @@ npm install
 npm run build:css
 ```
 
-El binario busca `config.yaml` en el `WorkingDirectory`. Para usar `/etc/project_iiif/config.yaml`, crea un enlace:
+## 6. Enlace al archivo de configuración
+
+El binario busca `config.yaml` dentro del `WorkingDirectory`. Crea el enlace:
 
 ```bash
 ln -sf /etc/project_iiif/config.yaml /opt/project_iiif/backend/config.yaml
 sudo chown -R robison:robison /var/lib/project_iiif /opt/project_iiif/backend/config.yaml
 ```
 
-## 6. Servicio systemd
+## 7. Servicio systemd
 
-Copia el unit file incluido:
+Copia el unit file:
 
 ```bash
 sudo cp /opt/project_iiif/deploy/project-iiif.service /etc/systemd/system/project-iiif.service
 ```
 
-Contenido esperado:
+Ejemplo:
 
 ```ini
 [Unit]
 Description=Project IIIF PDF Server
-After=network.target mysql.service
-Wants=mysql.service
+After=network.target
 
 [Service]
 Type=simple
@@ -230,6 +312,8 @@ RestartSec=5
 WantedBy=multi-user.target
 ```
 
+Si dependes de MySQL o MongoDB, puedes ampliar `After=` y `Wants=` según tu entorno.
+
 Activa el servicio:
 
 ```bash
@@ -239,7 +323,7 @@ sudo systemctl start project-iiif
 sudo systemctl status project-iiif
 ```
 
-Comandos de operacion:
+Comandos útiles:
 
 ```bash
 sudo systemctl stop project-iiif
@@ -247,51 +331,44 @@ sudo systemctl restart project-iiif
 journalctl -u project-iiif -f
 ```
 
-## 7. Pruebas rapidas
+## 8. Pruebas rápidas
 
 ```bash
 curl http://localhost:8080/health
-curl http://localhost:8080/api/documents
+curl http://localhost:8080/api/v1/documents
 curl -I http://localhost:8080/dashboard
 ```
 
-Con sesion admin iniciada, valida Swagger:
+Con sesión iniciada, valida Swagger:
 
 ```bash
 curl -I http://localhost:8080/swagger/index.html
 ```
 
-Si quieres migrar historico local hacia MySQL BLOB:
+## 9. Migración de histórico
+
+El ejecutable mantiene el nombre histórico `migrate-local-to-mysql`, pero actualmente funciona con el motor activo, incluido MongoDB.
 
 ```bash
 cd /opt/project_iiif/backend
-go run ./cmd/migrate-local-to-mysql
+./migrate-local-to-mysql
 ```
 
-Despues de subir un PDF en modo MySQL:
+Si el motor activo es MongoDB:
 
-```sql
-SELECT id, original_name, project_key, tenant_key, status, total_pages, converted_pages, pdf_size FROM documents;
-SELECT id, document_id, project_key, tenant_key, page_number, byte_size, media_type FROM document_images;
-```
+- los documentos se guardan en la colección `documents`
+- las imágenes se guardan en `document_images`
+- los PDFs se guardan en GridFS `pdfs`
+- las imágenes binarias se guardan en GridFS `images`
 
-Prueba IIIF con el `id` de una fila en `document_images`:
-
-```bash
-curl -I http://localhost:8080/iiif/3/IMAGE_ID/info.json
-curl -I http://localhost:8080/iiif/3/IMAGE_ID/full/max/0/default.jpg
-curl -I http://localhost:8080/iiif/3/metavisor~sunat~IMAGE_ID/full/max/0/default.jpg
-```
-
-## 8. Troubleshooting
+## 10. Troubleshooting
 
 - Si el servicio no inicia, revisa `journalctl -u project-iiif -n 100`.
-- Si falta Go, confirma `Environment=PATH=.../usr/local/go/bin...` en el servicio.
+- Si falta Go, revisa `Environment=PATH=.../usr/local/go/bin...`.
 - Si falla MuPDF, confirma `libmupdf-dev` y recompila con `CGO_ENABLED=1`.
-- Si MySQL falla, revisa usuario, password, base de datos y migraciones.
-- Si `config.yaml` no existe, copia `config.yaml.example` y ajusta rutas/credenciales.
-- Si cambias configuracion desde el dashboard, puedes usar el modal "Reiniciar ahora". El reinicio web es asíncrono: responde primero y ejecuta `systemctl restart project-iiif` en segundo plano.
-- Si el dashboard muestra demora al volver, valida estado con:
-  - `systemctl status project-iiif`
-  - `journalctl -u project-iiif -n 100`
-- Si Swagger no refleja endpoints recientes, regenera `backend/docs` con `swag init -g main.go -o docs` y recompila.
+- Si MySQL falla, valida usuario, contraseña, base y migraciones.
+- Si MongoDB falla, valida host, puerto, credenciales y `auth_source`.
+- Si MongoDB no tiene autenticación, deja usuario y contraseña vacíos.
+- Si el dashboard muestra errores por documento durante la migración, revisa el modal de progreso y los logs.
+- Si cambias configuración desde el dashboard, puedes reiniciar el servicio desde el modal o con `systemctl restart project-iiif`.
+- Si Swagger no refleja cambios recientes, regenera `backend/docs` con `swag init -g main.go -o docs`.

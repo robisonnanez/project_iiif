@@ -297,8 +297,8 @@ func (h *WelcomeHandler) HealthCheck(c *gin.Context) {
 			"require_auth": h.config.Frontend.RequireAuth,
 		},
 		"endpoints": map[string]string{
-			"upload":    "/api/upload",
-			"documents": "/api/documents",
+			"upload":    "/api/v1/documents/upload",
+			"documents": "/api/v1/documents",
 			"manifest":  "/api/iiif/{id}/manifest",
 			"image":     "/iiif/3/{identifier}/full/max/0/default.jpg",
 			"info":      "/iiif/3/{identifier}/info.json",

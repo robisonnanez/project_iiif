@@ -49,12 +49,12 @@ type migrationStatus struct {
 }
 
 type migrationDocState struct {
-	DocumentID  string `json:"document_id"`
-	PDFName     string `json:"pdf_name"`
-	ImagesDone  int    `json:"images_done"`
-	ImagesTotal int    `json:"images_total"`
-	Status      string `json:"status"`
-	Message     string `json:"message,omitempty"`
+	DocumentID string `json:"document_id"`
+	PDFName    string `json:"pdf_name"`
+	ImagesDone int    `json:"images_done"`
+	ImagesTotal int   `json:"images_total"`
+	Status     string `json:"status"`
+	Message    string `json:"message,omitempty"`
 }
 
 type migrationRunner struct {
@@ -181,6 +181,10 @@ func (r *migrationRunner) run(req migrationStartRequest) {
 	r.mu.Lock()
 	r.status.Running = false
 	r.status.FinishedAt = time.Now()
+	if exitCode == 0 && migrationItemsHaveErrors(r.status.Items) {
+		exitCode = 1
+		message = "Migracion finalizada con errores"
+	}
 	r.status.ExitCode = exitCode
 	r.status.Message = message
 	if r.status.ExitCode == 0 {
@@ -257,12 +261,12 @@ func (r *migrationRunner) updateDocProgress(payload string) {
 		}
 	}
 	r.status.Items = append(r.status.Items, migrationDocState{
-		DocumentID:  documentID,
-		PDFName:     pdfName,
-		ImagesDone:  imagesDone,
+		DocumentID: documentID,
+		PDFName:    pdfName,
+		ImagesDone: imagesDone,
 		ImagesTotal: imagesTotal,
-		Status:      status,
-		Message:     message,
+		Status:     status,
+		Message:    message,
 	})
 }
 
@@ -290,4 +294,13 @@ func (r *migrationRunner) finishWithError(message string, exitCode int) {
 	r.status.Message = message
 	r.status.ProgressPercent = 0
 	r.status.Logs = append(r.status.Logs, "ERROR "+message)
+}
+
+func migrationItemsHaveErrors(items []migrationDocState) bool {
+	for _, item := range items {
+		if strings.EqualFold(strings.TrimSpace(item.Status), "error") {
+			return true
+		}
+	}
+	return false
 }

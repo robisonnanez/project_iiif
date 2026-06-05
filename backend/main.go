@@ -21,7 +21,7 @@ import (
 
 // @title IIIF PDF Server API
 // @version 2.1
-// @description API para conversion de PDF a imagenes IIIF v3, administracion y migracion.
+// @description API para conversion de PDF a imagenes IIIF v3, administracion y migracion. Las rutas recomendadas usan /api/v1 y los endpoints legacy se mantienen por compatibilidad temporal.
 // @BasePath /
 // @securityDefinitions.apikey SessionCookie
 // @in cookie
@@ -98,22 +98,29 @@ func main() {
 			dashboard.Static("/assets", cfg.Frontend.Path+"/assets")
 		}
 
-		admin := router.Group("/admin/api")
-		admin.Use(authHandler.RequireSession())
-		{
-			admin.GET("/config", adminHandler.GetConfig)
-			admin.PUT("/config", adminHandler.UpdateConfig)
-			admin.POST("/service/restart", adminHandler.RestartService)
-			admin.GET("/projects", adminHandler.GetProjects)
-			admin.GET("/documents/:id/images", adminHandler.GetDocumentImages)
-			admin.GET("/migrations/sources/local/browse", adminHandler.BrowseLocalMigrationSource)
-			admin.POST("/migrations/local-to-db/start", adminHandler.StartLocalToDBMigration)
-			admin.GET("/migrations/local-to-db/status", adminHandler.GetLocalToDBMigrationStatus)
-			admin.POST("/migrations/local-to-mysql/start", adminHandler.StartLocalToMySQLMigration)
-			admin.GET("/migrations/local-to-mysql/status", adminHandler.GetLocalToMySQLMigrationStatus)
-			admin.POST("/db/migrations/run", adminHandler.RunDBMigrations)
-			admin.GET("/db/migrations/status", adminHandler.GetDBMigrationsStatus)
+		// Expone rutas admin versionadas y mantiene aliases legacy durante la transicion.
+		registerAdminRoutes := func(group *gin.RouterGroup) {
+			group.GET("/config", adminHandler.GetConfig)
+			group.PUT("/config", adminHandler.UpdateConfig)
+			group.POST("/service/restart", adminHandler.RestartService)
+			group.GET("/projects", adminHandler.GetProjects)
+			group.GET("/documents/:id/images", adminHandler.GetDocumentImages)
+			group.GET("/migrations/sources/local/browse", adminHandler.BrowseLocalMigrationSource)
+			group.POST("/migrations/local-to-db/start", adminHandler.StartLocalToDBMigration)
+			group.GET("/migrations/local-to-db/status", adminHandler.GetLocalToDBMigrationStatus)
+			group.POST("/migrations/local-to-mysql/start", adminHandler.StartLocalToMySQLMigration)
+			group.GET("/migrations/local-to-mysql/status", adminHandler.GetLocalToMySQLMigrationStatus)
+			group.POST("/db/migrations/run", adminHandler.RunDBMigrations)
+			group.GET("/db/migrations/status", adminHandler.GetDBMigrationsStatus)
 		}
+
+		adminV1 := router.Group("/api/v1/admin")
+		adminV1.Use(authHandler.RequireSession())
+		registerAdminRoutes(adminV1)
+
+		adminLegacy := router.Group("/admin/api")
+		adminLegacy.Use(authHandler.RequireSession())
+		registerAdminRoutes(adminLegacy)
 
 	} else {
 		router.GET("/dashboard", frontendHandler.Disabled)
@@ -121,14 +128,26 @@ func main() {
 	}
 
 	// Rutas API de gestión
-	api := router.Group("/api")
+	registerDocumentRoutes := func(group *gin.RouterGroup) {
+		group.GET("", apiHandler.GetDocuments)
+		group.GET("/:id", apiHandler.GetDocument)
+		group.DELETE("/:id", apiHandler.DeleteDocument)
+	}
+
+	documentV1 := router.Group("/api/v1/documents")
 	{
-		api.POST("/upload", apiHandler.UploadPDF)
-		api.GET("/documents", apiHandler.GetDocuments)
-		api.GET("/documents/:id", apiHandler.GetDocument)
-		api.DELETE("/documents/:id", apiHandler.DeleteDocument)
-		api.GET("/properties", apiHandler.GetProperties)
-		api.PUT("/properties", apiHandler.UpdateProperties)
+		documentV1.POST("/upload", apiHandler.UploadPDF)
+		registerDocumentRoutes(documentV1)
+	}
+
+	legacyAPI := router.Group("/api")
+	{
+		legacyAPI.POST("/upload", apiHandler.UploadPDF)
+		legacyAPI.GET("/documents", apiHandler.GetDocuments)
+		legacyAPI.GET("/documents/:id", apiHandler.GetDocument)
+		legacyAPI.DELETE("/documents/:id", apiHandler.DeleteDocument)
+		legacyAPI.GET("/properties", apiHandler.GetProperties)
+		legacyAPI.PUT("/properties", apiHandler.UpdateProperties)
 	}
 
 	// Rutas IIIF estilo Cantaloupe
@@ -150,7 +169,7 @@ func main() {
 	}
 
 	// Rutas de manifiestos (mantener compatibilidad)
-	api.GET("/iiif/:id/manifest", apiHandler.GetManifest)
+	legacyAPI.GET("/iiif/:id/manifest", apiHandler.GetManifest)
 
 	// Iniciar servidor
 	log.Printf("Servidor IIIF iniciado en puerto %s", cfg.Server.Port)
@@ -195,7 +214,7 @@ func newStorage(cfg *config.Config) (storage.Storage, error) {
 	case "postgres", "postgresql":
 		return storage.NewPostgresStorage(cfg)
 	case "mongo", "mongodb":
-		return nil, fmt.Errorf("storage backend %s reconocido pero todavia no implementado", cfg.Storage.Backend)
+		return storage.NewMongoStorage(cfg)
 	default:
 		return nil, fmt.Errorf("storage backend no soportado: %s", cfg.Storage.Backend)
 	}

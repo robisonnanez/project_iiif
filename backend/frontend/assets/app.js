@@ -8,6 +8,7 @@ const state = {
   images: { items: [], page: 1, pageSize: 10 },
   migration: { timer: null, running: false },
   polling: new Map(),
+  mongoURIEdited: false,
 };
 
 const viewMeta = {
@@ -42,7 +43,12 @@ const routeViews = {
 const DB_PORT_DEFAULTS = {
   mysql: "3306",
   postgres: "5432",
+  mongodb: "27017",
 };
+
+const API_V1_BASE = "/api/v1";
+const DOCUMENTS_API_BASE = `${API_V1_BASE}/documents`;
+const ADMIN_API_BASE = `${API_V1_BASE}/admin`;
 
 const $ = (selector) => document.querySelector(selector);
 const $$ = (selector) => Array.from(document.querySelectorAll(selector));
@@ -166,7 +172,7 @@ async function submitMigrationFromModal() {
   }
   closeMigrationModal();
   try {
-    const response = await fetch("/admin/api/migrations/local-to-db/start", {
+    const response = await fetch(`${ADMIN_API_BASE}/migrations/local-to-db/start`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
@@ -188,7 +194,7 @@ async function loadMigrationStatus() {
   if (!badge || !summary || !logs) return;
 
   try {
-    const response = await fetch("/admin/api/migrations/local-to-db/status");
+    const response = await fetch(`${ADMIN_API_BASE}/migrations/local-to-db/status`);
     const data = await response.json();
     if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);
 
@@ -377,7 +383,7 @@ async function browseMigrationLocalDirs() {
   const path = (input.value || "").trim();
   const query = path ? `?path=${encodeURIComponent(path)}` : "";
   try {
-    const response = await fetch(`/admin/api/migrations/sources/local/browse${query}`);
+    const response = await fetch(`${ADMIN_API_BASE}/migrations/sources/local/browse${query}`);
     const data = await response.json();
     if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);
     const rows = Array.isArray(data.dirs) ? data.dirs : [];
@@ -418,7 +424,7 @@ function viewFromLocation() {
 
 async function loadAllDocuments() {
   try {
-    const response = await fetch("/api/documents");
+    const response = await fetch(DOCUMENTS_API_BASE);
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     state.allDocuments = await response.json();
     renderSummary();
@@ -431,7 +437,7 @@ async function loadAllDocuments() {
 async function loadDocuments(applyFilters = true) {
   try {
     const params = applyFilters ? selectedScopeParams("documents") : "";
-    const response = await fetch(`/api/documents${params ? `?${params}` : ""}`);
+    const response = await fetch(`${DOCUMENTS_API_BASE}${params ? `?${params}` : ""}`);
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     state.filteredDocuments = await response.json();
     renderDocuments();
@@ -442,7 +448,7 @@ async function loadDocuments(applyFilters = true) {
 
 async function loadConfig() {
   try {
-    const response = await fetch("/admin/api/config");
+    const response = await fetch(`${ADMIN_API_BASE}/config`);
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     state.config = await response.json();
     updateMigrationCopy();
@@ -456,7 +462,7 @@ async function loadConfig() {
 function updateMigrationCopy() {
   // Ajusta textos de migracion segun el motor de base de datos activo.
   const backend = String(state.config?.storage?.backend || state.config?.database?.DB_CONNECTION || "base de datos").toLowerCase();
-  const dbLabel = backend === "postgres" ? "Postgres" : backend === "mysql" ? "MySQL" : "base de datos";
+  const dbLabel = backend === "postgres" ? "Postgres" : backend === "mysql" ? "MySQL" : backend === "mongodb" || backend === "mongo" ? "MongoDB" : "base de datos";
   const title = $("#migration-title");
   const subtitle = $("#migration-subtitle");
   if (title) title.textContent = `Migracion local a ${dbLabel} BLOB`;
@@ -465,7 +471,7 @@ function updateMigrationCopy() {
 
 async function loadProjects() {
   try {
-    const response = await fetch("/admin/api/projects");
+    const response = await fetch(`${ADMIN_API_BASE}/projects`);
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     state.projects = await response.json();
   } catch (error) {
@@ -492,7 +498,7 @@ async function uploadPDF(event) {
   result.textContent = "Subiendo PDF...";
 
   try {
-    const response = await fetch("/api/upload", {
+    const response = await fetch(`${DOCUMENTS_API_BASE}/upload`, {
       method: "POST",
       body: formData,
     });
@@ -518,7 +524,7 @@ function watchDocument(documentID) {
   const timer = window.setInterval(async () => {
     attempts += 1;
     try {
-      const response = await fetch(`/api/documents/${encodeURIComponent(documentID)}`);
+      const response = await fetch(`${DOCUMENTS_API_BASE}/${encodeURIComponent(documentID)}`);
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       const doc = await response.json();
 
@@ -652,7 +658,7 @@ async function loadSelectedImages() {
   gallery.textContent = "Cargando imagenes...";
 
   try {
-    const response = await fetch(`/admin/api/documents/${encodeURIComponent(documentID)}/images`);
+    const response = await fetch(`${ADMIN_API_BASE}/documents/${encodeURIComponent(documentID)}/images`);
     const data = await response.json();
     if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);
     state.images.items = data.images || [];
@@ -750,9 +756,26 @@ function bindImagesPagination(totalPages) {
   });
 }
 
+function hydrateMongoFieldsFromConfig() {
+  const database = state.config?.database || {};
+  const mongo = database.mongodb || {};
+  const setValue = (name, nextValue) => {
+    const field = formField(name);
+    if (!field) return;
+    field.value = nextValue ?? "";
+  };
+
+  setValue("database.DB_HOST", mongo.host || database.DB_HOST || "127.0.0.1");
+  setValue("database.DB_PORT", mongo.port || database.DB_PORT || DB_PORT_DEFAULTS.mongodb);
+  setValue("database.DB_DATABASE", mongo.database || database.DB_DATABASE || "");
+  setValue("database.DB_USERNAME", mongo.user || database.DB_USERNAME || "");
+  setValue("database.DB_PASSWORD", mongo.password || database.DB_PASSWORD || "");
+}
+
 function renderConfigForm() {
   const config = state.config;
   if (!config) return;
+  state.mongoURIEdited = false;
 
   $("#config-form").innerHTML = `
     <div class="form-grid">
@@ -769,14 +792,7 @@ function renderConfigForm() {
         input("storage.thumbnails_path", "Thumbnails path", config.storage?.thumbnails_path || ""),
         input("storage.manifests_path", "Manifests path", config.storage?.manifests_path || "")
       ])}
-      ${fieldset("Base de datos", [
-        select("database.DB_CONNECTION", "DB connection", config.database?.DB_CONNECTION || "local", ["local", "mysql", "postgres", "mongodb"]),
-        input("database.DB_HOST", "DB host", config.database?.DB_HOST || ""),
-        input("database.DB_PORT", "DB port", config.database?.DB_PORT || ""),
-        input("database.DB_DATABASE", "DB database", config.database?.DB_DATABASE || ""),
-        input("database.DB_USERNAME", "DB username", config.database?.DB_USERNAME || ""),
-        input("database.DB_PASSWORD", "DB password", config.database?.DB_PASSWORD || "", "password")
-      ])}
+      ${renderDatabaseFieldset(config)}
       ${fieldset("Frontend", [
         checkbox("frontend.enabled", "Frontend activo", Boolean(config.frontend?.enabled)),
         checkbox("frontend.require_auth", "Requiere login", Boolean(config.frontend?.require_auth)),
@@ -795,6 +811,12 @@ function renderConfigForm() {
         input("iiif.max_height", "Max height", config.iiif?.max_height || 2048, "number"),
         input("iiif.cache_ttl", "Cache TTL", config.iiif?.cache_ttl || 3600, "number"),
         checkbox("iiif.cache", "Cache activo", Boolean(config.iiif?.cache))
+      ])}
+      ${fieldset("Security", [
+        checkbox("security.enable_auth", "Enable auth", Boolean(config.security?.enable_auth)),
+        input("security.log_level", "Log level", config.security?.log_level || "info"),
+        input("security.max_concurrent_uploads", "Max concurrent uploads", config.security?.max_concurrent_uploads || 5, "number"),
+        textarea("security.cors_origins", "CORS origins (una URL por linea)", (config.security?.cors_origins || []).join("\n"))
       ])}
       ${fieldset("Proyectos", [
         checkbox("projects.enabled", "Proyectos activos", Boolean(config.projects?.enabled)),
@@ -828,17 +850,33 @@ function renderConfigForm() {
 }
 
 function bindDBConnectionAutofill() {
-  // Sincroniza puerto por defecto al cambiar motor para simplificar configuracion.
+  // Sincroniza puerto por defecto, backend y visibilidad de campos al cambiar motor.
   const connection = $("#config-form select[name='database.DB_CONNECTION']");
   const port = $("#config-form input[name='database.DB_PORT']");
   const storageBackend = $("#config-form select[name='storage.backend']");
   if (!connection || !port) return;
 
+  const syncDatabaseUI = () => {
+    const engine = normalizedDBEngine(connection.value || "local");
+    const sqlBlocks = $$("#sql-db-fields");
+    const mongoBlocks = $$("#mongo-db-fields");
+    sqlBlocks.forEach((block) => {
+      block.hidden = engine === "mongodb";
+    });
+    mongoBlocks.forEach((block) => {
+      block.hidden = engine !== "mongodb";
+    });
+    if (engine === "mongodb" && !state.mongoURIEdited) {
+      hydrateMongoFieldsFromConfig();
+    }
+    updateMongoURIPreview();
+  };
+
   let lastEngine = String(connection.value || "local").toLowerCase();
   connection.addEventListener("change", () => {
-    const nextEngine = String(connection.value || "local").toLowerCase();
+    const nextEngine = normalizedDBEngine(connection.value || "local");
     const nextDefaultPort = DB_PORT_DEFAULTS[nextEngine] || "";
-    const previousDefaultPort = DB_PORT_DEFAULTS[lastEngine] || "";
+    const previousDefaultPort = DB_PORT_DEFAULTS[normalizedDBEngine(lastEngine)] || "";
 
     // Cambia puerto automaticamente cuando coincide con el default anterior o esta vacio.
     if (nextDefaultPort && (!port.value || port.value === previousDefaultPort)) {
@@ -846,19 +884,43 @@ function bindDBConnectionAutofill() {
     }
 
     // Mantiene storage.backend alineado con el motor de DB cuando aplica.
-    if (storageBackend && (nextEngine === "mysql" || nextEngine === "postgres" || nextEngine === "local")) {
+    if (storageBackend && (nextEngine === "mysql" || nextEngine === "postgres" || nextEngine === "mongodb" || nextEngine === "local")) {
       storageBackend.value = nextEngine;
     }
     lastEngine = nextEngine;
+    syncDatabaseUI();
   });
+
+  [
+    "database.DB_HOST",
+    "database.DB_PORT",
+    "database.DB_DATABASE",
+    "database.DB_USERNAME",
+    "database.DB_PASSWORD",
+  ].forEach((name) => {
+    const field = formField(name);
+    if (!field) return;
+    field.addEventListener("input", updateMongoURIPreview);
+    field.addEventListener("change", updateMongoURIPreview);
+  });
+
+  const mongoURIField = $("#mongo-uri-preview");
+  if (mongoURIField) {
+    mongoURIField.addEventListener("input", () => {
+      state.mongoURIEdited = true;
+    });
+  }
+
+  syncDatabaseUI();
 }
 
 async function saveConfig(event) {
   // Envia solo el formulario permitido y deja que el backend valide antes de escribir config.yaml.
   event.preventDefault();
   const payload = collectConfigPayload();
+  if (!payload) return;
   try {
-    const response = await fetch("/admin/api/config", {
+    const response = await fetch(`${ADMIN_API_BASE}/config`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
@@ -911,7 +973,7 @@ async function restartServiceNow() {
   if (status) status.textContent = "Programando reinicio...";
 
   try {
-    const response = await fetch("/admin/api/service/restart", {
+    const response = await fetch(`${ADMIN_API_BASE}/service/restart`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ password }),
@@ -981,15 +1043,19 @@ function collectConfigPayload() {
   const checked = (name) => Boolean(form.elements[name]?.checked);
   const intValue = (name) => Number.parseInt(value(name), 10) || 0;
 
-  const dbConnection = value("database.DB_CONNECTION");
-  const dbHost = value("database.DB_HOST");
-  const dbPort = value("database.DB_PORT");
-  const dbName = value("database.DB_DATABASE");
-  const dbUser = value("database.DB_USERNAME");
-  const dbPassword = value("database.DB_PASSWORD");
+  const dbConnection = normalizedDBEngine(value("database.DB_CONNECTION"));
+  let dbHost = value("database.DB_HOST");
+  let dbPort = value("database.DB_PORT");
+  let dbName = value("database.DB_DATABASE");
+  let dbUser = value("database.DB_USERNAME");
+  let dbPassword = value("database.DB_PASSWORD");
+  let mongoAuthSource = value("database.mongodb.auth_source");
+  let mongoTimeout = intValue("database.mongodb.server_selection_timeout_ms");
+  let mongoDirectConnection = checked("database.mongodb.direct_connection");
 
   const mysqlCurrent = state.config?.database?.mysql || {};
   const postgresCurrent = state.config?.database?.postgres || {};
+  const mongoCurrent = state.config?.database?.mongodb || {};
   const mysqlPayload = {
     host: mysqlCurrent.host || dbHost,
     port: mysqlCurrent.port || DB_PORT_DEFAULTS.mysql,
@@ -1008,6 +1074,16 @@ function collectConfigPayload() {
     sslmode: postgresCurrent.sslmode || "disable",
     schema: postgresCurrent.schema || "public",
   };
+  const mongoPayload = {
+    host: mongoCurrent.host || dbHost,
+    port: mongoCurrent.port || DB_PORT_DEFAULTS.mongodb,
+    user: mongoCurrent.user || dbUser,
+    password: mongoCurrent.password || dbPassword,
+    database: mongoCurrent.database || dbName,
+    auth_source: mongoCurrent.auth_source || "admin",
+    direct_connection: mongoCurrent.direct_connection !== undefined ? Boolean(mongoCurrent.direct_connection) : true,
+    server_selection_timeout_ms: Number.parseInt(mongoCurrent.server_selection_timeout_ms, 10) || mongoCurrent.server_selection_timeout_ms || 2000,
+  };
 
   if (dbConnection === "mysql") {
     mysqlPayload.host = dbHost;
@@ -1021,6 +1097,36 @@ function collectConfigPayload() {
     postgresPayload.user = dbUser;
     postgresPayload.password = dbPassword;
     postgresPayload.database = dbName;
+  } else if (dbConnection === "mongodb" || dbConnection === "mongo") {
+    const mongoURI = ($("#mongo-uri-preview")?.value || "").trim();
+    if (mongoURI) {
+      if (/^mongodb\+srv:\/\//i.test(mongoURI)) {
+        showToast("Este proyecto aun no soporta Mongo URI tipo mongodb+srv://. Usa mongodb:// con host y puerto.", "error");
+        return null;
+      }
+      const parsedMongoURI = parseMongoURI(mongoURI);
+      if (parsedMongoURI) {
+        dbHost = parsedMongoURI.host || dbHost;
+        dbPort = parsedMongoURI.port || dbPort || DB_PORT_DEFAULTS.mongodb;
+        dbName = parsedMongoURI.database || dbName;
+        dbUser = parsedMongoURI.username || dbUser;
+        dbPassword = parsedMongoURI.password || dbPassword;
+        mongoAuthSource = parsedMongoURI.authSource || mongoAuthSource || "admin";
+        mongoDirectConnection = parsedMongoURI.directConnection ?? mongoDirectConnection;
+        mongoTimeout = parsedMongoURI.serverSelectionTimeoutMS || mongoTimeout || 2000;
+      } else {
+        showToast("El Mongo URI no es valido. Usa el formato mongodb://...", "error");
+        return null;
+      }
+    }
+    mongoPayload.host = dbHost;
+    mongoPayload.port = dbPort || DB_PORT_DEFAULTS.mongodb;
+    mongoPayload.user = dbUser;
+    mongoPayload.password = dbPassword;
+    mongoPayload.database = dbName;
+    mongoPayload.auth_source = mongoAuthSource || "admin";
+    mongoPayload.direct_connection = mongoDirectConnection;
+    mongoPayload.server_selection_timeout_ms = mongoTimeout || 2000;
   }
 
   return {
@@ -1043,6 +1149,7 @@ function collectConfigPayload() {
       DB_PASSWORD: dbPassword,
       mysql: mysqlPayload,
       postgres: postgresPayload,
+      mongodb: mongoPayload,
     },
     frontend: {
       enabled: checked("frontend.enabled"),
@@ -1070,6 +1177,12 @@ function collectConfigPayload() {
       allow_dynamic_tenants: checked("projects.allow_dynamic_tenants"),
       items: parseProjectsItems(value("projects.items")),
     },
+    security: {
+      enable_auth: checked("security.enable_auth"),
+      log_level: value("security.log_level"),
+      cors_origins: parseCorsOrigins(value("security.cors_origins")),
+      max_concurrent_uploads: intValue("security.max_concurrent_uploads"),
+    },
   };
 }
 
@@ -1077,7 +1190,7 @@ async function loadDBMigrationStatus() {
   const box = $("#db-migration-status");
   if (!box) return;
   try {
-    const response = await fetch("/admin/api/db/migrations/status");
+    const response = await fetch(`${ADMIN_API_BASE}/db/migrations/status`);
     const data = await response.json();
     if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);
     box.textContent = formatDBMigrationStatus(data.result || {}, Boolean(data.running));
@@ -1090,7 +1203,7 @@ async function runDBMigrations() {
   const box = $("#db-migration-status");
   if (box) box.textContent = "Ejecutando migraciones pendientes...";
   try {
-    const response = await fetch("/admin/api/db/migrations/run", { method: "POST" });
+    const response = await fetch(`${ADMIN_API_BASE}/db/migrations/run`, { method: "POST" });
     const data = await response.json();
     if (!response.ok) {
       throw new Error(data.error || data?.result?.message || `HTTP ${response.status}`);
@@ -1118,6 +1231,9 @@ function formatDBMigrationStatus(data, running = false) {
 }
 
 function exampleMigrationSQL(engine) {
+  if (String(engine).toLowerCase().startsWith("mongo")) {
+    return `// 006_add_example_index.js\n// Ejecutar desde el runner interno de Mongo\nawait db.collection("documents").createIndex(\n  { status: 1, created_at: -1 },\n  { name: "documents_status_created_at" }\n);`;
+  }
   if (String(engine).toLowerCase().startsWith("post")) {
     return "BEGIN;\n-- 005_add_example_table.sql\nCREATE TABLE IF NOT EXISTS example_table (\n  id UUID PRIMARY KEY,\n  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()\n);\nCOMMIT;";
   }
@@ -1196,6 +1312,112 @@ function parseProjectsItems(value) {
     showToast("El JSON de proyectos no es valido.", "error");
     return state.config?.projects?.items || [];
   }
+}
+
+function parseCorsOrigins(value) {
+  return String(value || "")
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0);
+}
+
+function normalizedDBEngine(value) {
+  const engine = String(value || "local").toLowerCase();
+  if (engine === "mongo") return "mongodb";
+  if (engine === "postgresql") return "postgres";
+  return engine;
+}
+
+function renderDatabaseFieldset(config) {
+  const database = config.database || {};
+  const mongo = database.mongodb || {};
+  const engine = normalizedDBEngine(database.DB_CONNECTION || "local");
+  const mongoURI = buildMongoURI({
+    host: database.DB_HOST || mongo.host || "127.0.0.1",
+    port: database.DB_PORT || mongo.port || DB_PORT_DEFAULTS.mongodb,
+    authSource: mongo.auth_source || "admin",
+    directConnection: mongo.direct_connection !== undefined ? Boolean(mongo.direct_connection) : true,
+    timeoutMs: mongo.server_selection_timeout_ms || 2000,
+  });
+
+  return `
+    <fieldset class="config-card">
+      <legend>Base de datos</legend>
+      ${select("database.DB_CONNECTION", "DB connection", engine, ["local", "mysql", "postgres", "mongodb"])}
+      <div id="sql-db-fields" ${engine === "mongodb" ? "hidden" : ""}>
+        ${input("database.DB_HOST", "DB host", database.DB_HOST || "")}
+        ${input("database.DB_PORT", "DB port", database.DB_PORT || "")}
+        ${input("database.DB_DATABASE", "DB database", database.DB_DATABASE || "")}
+        ${input("database.DB_USERNAME", "DB username", database.DB_USERNAME || "")}
+        ${input("database.DB_PASSWORD", "DB password", database.DB_PASSWORD || "", "password")}
+      </div>
+      <div id="mongo-db-fields" ${engine === "mongodb" ? "" : "hidden"}>
+        <label class="field">
+          <span>Mongo URI</span>
+          <textarea id="mongo-uri-preview" rows="4" placeholder="mongodb://usuario:password@127.0.0.1:27017/project_iiif?directConnection=true&serverSelectionTimeoutMS=2000&authSource=admin">${escapeHTML(mongoURI)}</textarea>
+        </label>
+        <p class="field-help">Pega la misma URI que usas en MongoDB Compass. Esta version soporta formato <code>mongodb://</code> con host y puerto; <code>mongodb+srv://</code> aun no esta soportado.</p>
+      </div>
+    </fieldset>
+  `;
+}
+
+function buildMongoURI({ host, port, authSource, directConnection, timeoutMs }) {
+  const username = formField("database.DB_USERNAME")?.value || state.config?.database?.DB_USERNAME || "";
+  const password = formField("database.DB_PASSWORD")?.value || "";
+  const database = formField("database.DB_DATABASE")?.value || state.config?.database?.DB_DATABASE || "";
+  const query = new URLSearchParams();
+  query.set("directConnection", String(Boolean(directConnection)));
+  query.set("serverSelectionTimeoutMS", String(timeoutMs || 2000));
+  query.set("authSource", authSource || "admin");
+  const credentials = username
+    ? `${encodeURIComponent(username)}${password && password !== MASKED_SECRET ? `:${encodeURIComponent(password)}` : ""}@`
+    : "";
+  const databasePath = database ? `/${encodeURIComponent(database)}` : "/";
+  return `mongodb://${credentials}${host || "127.0.0.1"}:${port || DB_PORT_DEFAULTS.mongodb}${databasePath}?${query.toString()}`;
+}
+
+function formField(name) {
+  return $("#config-form")?.elements?.[name] || null;
+}
+
+function parseMongoURI(value) {
+  try {
+    const uri = new URL(value);
+    if (uri.protocol !== "mongodb:") {
+      return null;
+    }
+    return {
+      host: uri.hostname || "",
+      port: uri.port || DB_PORT_DEFAULTS.mongodb,
+      database: decodeURIComponent((uri.pathname || "").replace(/^\/+/, "")) || "",
+      username: decodeURIComponent(uri.username || ""),
+      password: decodeURIComponent(uri.password || ""),
+      authSource: uri.searchParams.get("authSource") || "admin",
+      directConnection: uri.searchParams.get("directConnection") === null
+        ? true
+        : uri.searchParams.get("directConnection") === "true",
+      serverSelectionTimeoutMS: Number.parseInt(uri.searchParams.get("serverSelectionTimeoutMS") || "2000", 10) || 2000,
+    };
+  } catch (error) {
+    return null;
+  }
+}
+
+function updateMongoURIPreview() {
+  const preview = $("#mongo-uri-preview");
+  const connection = formField("database.DB_CONNECTION");
+  if (!preview || normalizedDBEngine(connection?.value || "local") !== "mongodb") return;
+  if (state.mongoURIEdited) return;
+  const mongo = state.config?.database?.mongodb || {};
+
+  preview.value = buildMongoURI({
+    host: formField("database.DB_HOST")?.value || "127.0.0.1",
+    port: formField("database.DB_PORT")?.value || DB_PORT_DEFAULTS.mongodb,
+    authSource: mongo.auth_source || "admin",
+    directConnection: mongo.direct_connection !== undefined ? Boolean(mongo.direct_connection) : true,
+    timeoutMs: mongo.server_selection_timeout_ms || 2000,
+  });
 }
 
 function fieldset(title, fields) {

@@ -56,6 +56,16 @@ type Config struct {
 			SSLMode  string `yaml:"sslmode"`
 			Schema   string `yaml:"schema"`
 		} `yaml:"postgres"`
+		MongoDB struct {
+			Host                     string `yaml:"host"`
+			Port                     string `yaml:"port"`
+			User                     string `yaml:"user"`
+			Password                 string `yaml:"password"`
+			Database                 string `yaml:"database"`
+			AuthSource               string `yaml:"auth_source"`
+			DirectConnection         bool   `yaml:"direct_connection"`
+			ServerSelectionTimeoutMS int    `yaml:"server_selection_timeout_ms"`
+		} `yaml:"mongodb"`
 	} `yaml:"database"`
 
 	PDF struct {
@@ -205,39 +215,57 @@ func applyDefaults(config *Config) {
 	if config.DBConnection != "" {
 		config.Storage.Backend = config.DBConnection
 	}
-	isPostgres := strings.EqualFold(config.Storage.Backend, "postgres") || strings.EqualFold(config.DBConnection, "postgres")
+	engine := normalizedEngine(config.Storage.Backend)
+	if engine == "local" {
+		engine = normalizedEngine(config.DBConnection)
+	}
 	if config.DBHost != "" {
-		if isPostgres {
+		switch engine {
+		case "postgres":
 			config.Database.Postgres.Host = config.DBHost
-		} else {
+		case "mongodb":
+			config.Database.MongoDB.Host = config.DBHost
+		default:
 			config.Database.MySQL.Host = config.DBHost
 		}
 	}
 	if config.DBPort != "" {
-		if isPostgres {
+		switch engine {
+		case "postgres":
 			config.Database.Postgres.Port = config.DBPort
-		} else {
+		case "mongodb":
+			config.Database.MongoDB.Port = config.DBPort
+		default:
 			config.Database.MySQL.Port = config.DBPort
 		}
 	}
 	if config.DBUsername != "" {
-		if isPostgres {
+		switch engine {
+		case "postgres":
 			config.Database.Postgres.User = config.DBUsername
-		} else {
+		case "mongodb":
+			config.Database.MongoDB.User = config.DBUsername
+		default:
 			config.Database.MySQL.User = config.DBUsername
 		}
 	}
 	if config.DBPassword != "" {
-		if isPostgres {
+		switch engine {
+		case "postgres":
 			config.Database.Postgres.Password = config.DBPassword
-		} else {
+		case "mongodb":
+			config.Database.MongoDB.Password = config.DBPassword
+		default:
 			config.Database.MySQL.Password = config.DBPassword
 		}
 	}
 	if config.DBDatabase != "" {
-		if isPostgres {
+		switch engine {
+		case "postgres":
 			config.Database.Postgres.Database = config.DBDatabase
-		} else {
+		case "mongodb":
+			config.Database.MongoDB.Database = config.DBDatabase
+		default:
 			config.Database.MySQL.Database = config.DBDatabase
 		}
 	}
@@ -292,6 +320,27 @@ func applyDefaults(config *Config) {
 	if config.Database.Postgres.SSLMode == "" {
 		config.Database.Postgres.SSLMode = defaults.Database.Postgres.SSLMode
 	}
+	if config.Database.MongoDB.Host == "" {
+		config.Database.MongoDB.Host = defaults.Database.MongoDB.Host
+	}
+	if config.Database.MongoDB.Port == "" {
+		config.Database.MongoDB.Port = defaults.Database.MongoDB.Port
+	}
+	if config.Database.MongoDB.User == "" {
+		config.Database.MongoDB.User = defaults.Database.MongoDB.User
+	}
+	if config.Database.MongoDB.Database == "" {
+		config.Database.MongoDB.Database = defaults.Database.MongoDB.Database
+	}
+	if config.Database.MongoDB.AuthSource == "" {
+		config.Database.MongoDB.AuthSource = defaults.Database.MongoDB.AuthSource
+	}
+	if config.Database.MongoDB.ServerSelectionTimeoutMS == 0 {
+		config.Database.MongoDB.ServerSelectionTimeoutMS = defaults.Database.MongoDB.ServerSelectionTimeoutMS
+	}
+	if !config.Database.MongoDB.DirectConnection {
+		config.Database.MongoDB.DirectConnection = defaults.Database.MongoDB.DirectConnection
+	}
 	if config.BinaryStorage.Mode == "" {
 		if config.Storage.Backend == "local" {
 			config.BinaryStorage.Mode = "local"
@@ -328,13 +377,20 @@ func applyDefaults(config *Config) {
 	}
 	config.StorageBackend = config.Storage.Backend
 	config.DBConnection = config.Storage.Backend
-	if strings.EqualFold(config.Storage.Backend, "postgres") {
+	switch engine {
+	case "postgres":
 		config.DBHost = config.Database.Postgres.Host
 		config.DBPort = config.Database.Postgres.Port
 		config.DBUsername = config.Database.Postgres.User
 		config.DBPassword = config.Database.Postgres.Password
 		config.DBDatabase = config.Database.Postgres.Database
-	} else {
+	case "mongodb":
+		config.DBHost = config.Database.MongoDB.Host
+		config.DBPort = config.Database.MongoDB.Port
+		config.DBUsername = config.Database.MongoDB.User
+		config.DBPassword = config.Database.MongoDB.Password
+		config.DBDatabase = config.Database.MongoDB.Database
+	default:
 		config.DBHost = config.Database.MySQL.Host
 		config.DBPort = config.Database.MySQL.Port
 		config.DBUsername = config.Database.MySQL.User
@@ -388,6 +444,16 @@ func Default() *Config {
 				SSLMode  string `yaml:"sslmode"`
 				Schema   string `yaml:"schema"`
 			} `yaml:"postgres"`
+			MongoDB struct {
+				Host                     string `yaml:"host"`
+				Port                     string `yaml:"port"`
+				User                     string `yaml:"user"`
+				Password                 string `yaml:"password"`
+				Database                 string `yaml:"database"`
+				AuthSource               string `yaml:"auth_source"`
+				DirectConnection         bool   `yaml:"direct_connection"`
+				ServerSelectionTimeoutMS int    `yaml:"server_selection_timeout_ms"`
+			} `yaml:"mongodb"`
 		}{
 			MySQL: struct {
 				Host      string `yaml:"host"`
@@ -422,6 +488,25 @@ func Default() *Config {
 				Database: "project_iiif",
 				SSLMode:  "disable",
 				Schema:   "public",
+			},
+			MongoDB: struct {
+				Host                     string `yaml:"host"`
+				Port                     string `yaml:"port"`
+				User                     string `yaml:"user"`
+				Password                 string `yaml:"password"`
+				Database                 string `yaml:"database"`
+				AuthSource               string `yaml:"auth_source"`
+				DirectConnection         bool   `yaml:"direct_connection"`
+				ServerSelectionTimeoutMS int    `yaml:"server_selection_timeout_ms"`
+			}{
+				Host:                     "127.0.0.1",
+				Port:                     "27017",
+				User:                     "",
+				Password:                 "",
+				Database:                 "project_iiif",
+				AuthSource:               "admin",
+				DirectConnection:         true,
+				ServerSelectionTimeoutMS: 2000,
 			},
 		},
 		PDF: struct {
@@ -602,4 +687,17 @@ func hasTenant(project ProjectConfig, tenant string) bool {
 		}
 	}
 	return false
+}
+
+func normalizedEngine(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "postgresql":
+		return "postgres"
+	case "mongo":
+		return "mongodb"
+	case "":
+		return "local"
+	default:
+		return strings.ToLower(strings.TrimSpace(value))
+	}
 }

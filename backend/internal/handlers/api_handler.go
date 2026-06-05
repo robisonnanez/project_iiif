@@ -49,7 +49,7 @@ func NewAPIHandler(
 // @Success 200 {object} models.PDFDocument
 // @Failure 400 {object} errorResponse
 // @Failure 500 {object} errorResponse
-// @Router /api/upload [post]
+// @Router /api/v1/documents/upload [post]
 func (h *APIHandler) UploadPDF(c *gin.Context) {
 	// Obtener archivo
 	file, header, err := c.Request.FormFile("pdf")
@@ -119,7 +119,7 @@ func (h *APIHandler) UploadPDF(c *gin.Context) {
 // @Param tenant query string false "Tenant"
 // @Success 200 {array} models.PDFDocument
 // @Failure 500 {object} errorResponse
-// @Router /api/documents [get]
+// @Router /api/v1/documents [get]
 func (h *APIHandler) GetDocuments(c *gin.Context) {
 	project := strings.TrimSpace(c.Query("project"))
 	tenant := strings.TrimSpace(c.Query("tenant"))
@@ -145,7 +145,7 @@ func (h *APIHandler) GetDocuments(c *gin.Context) {
 // @Param id path string true "ID documento"
 // @Success 200 {object} models.PDFDocument
 // @Failure 404 {object} errorResponse
-// @Router /api/documents/{id} [get]
+// @Router /api/v1/documents/{id} [get]
 func (h *APIHandler) GetDocument(c *gin.Context) {
 	id := c.Param("id")
 	doc, err := h.documentService.GetDocument(id)
@@ -164,7 +164,7 @@ func (h *APIHandler) GetDocument(c *gin.Context) {
 // @Param id path string true "ID documento"
 // @Success 200 {object} okMessageResponse
 // @Failure 500 {object} errorResponse
-// @Router /api/documents/{id} [delete]
+// @Router /api/v1/documents/{id} [delete]
 func (h *APIHandler) DeleteDocument(c *gin.Context) {
 	id := c.Param("id")
 	if err := h.documentService.DeleteDocument(id); err != nil {

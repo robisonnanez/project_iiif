@@ -1,6 +1,7 @@
 package storage
 
 import (
+	"context"
 	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
@@ -13,6 +14,10 @@ import (
 	"time"
 
 	"iiif-pdf-server/internal/config"
+
+	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/mongo"
+	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
 type MigrationRunResult struct {
@@ -40,7 +45,17 @@ func RunDBMigrations(cfg *config.Config, baseDir string) (MigrationRunResult, er
 	if engine == "postgresql" {
 		engine = "postgres"
 	}
+	if engine == "mongo" {
+		engine = "mongodb"
+	}
 	result := MigrationRunResult{Engine: engine}
+	if engine == "mongodb" {
+		result, err := runMongoMigrations(cfg, start)
+		if err != nil {
+			return result, err
+		}
+		return result, nil
+	}
 	if engine != "mysql" && engine != "postgres" {
 		result.Message = "motor no soportado para migraciones"
 		return result, errors.New(result.Message)
@@ -239,4 +254,223 @@ func loadAppliedMigrations(db *sql.DB) (map[string]struct{}, error) {
 		res[v] = struct{}{}
 	}
 	return res, rows.Err()
+}
+
+type mongoMigration struct {
+	Version  string
+	Name     string
+	Checksum string
+	Apply    func(context mongoMigrationContext) error
+}
+
+type mongoMigrationContext struct {
+	db *mongo.Database
+}
+
+func runMongoMigrations(cfg *config.Config, start time.Time) (MigrationRunResult, error) {
+	result := MigrationRunResult{Engine: "mongodb"}
+
+	storage, err := NewMongoStorage(cfg)
+	if err != nil {
+		result.Message = "no se pudo abrir conexion de migraciones"
+		result.Errors = []string{err.Error()}
+		return result, err
+	}
+	defer storage.client.Disconnect(contextBackground())
+
+	ctx, cancel := mongoTimeout()
+	defer cancel()
+
+	collection := storage.db.Collection("schema_migrations")
+	appliedMap, err := loadAppliedMongoMigrations(ctx, collection)
+	if err != nil {
+		result.Message = "no se pudo consultar schema_migrations"
+		result.Errors = []string{err.Error()}
+		return result, err
+	}
+
+	migrations := mongoMigrations()
+	pending := make([]mongoMigration, 0, len(migrations))
+	for _, migration := range migrations {
+		if _, ok := appliedMap[migration.Version]; ok {
+			result.Skipped++
+			continue
+		}
+		pending = append(pending, migration)
+	}
+	result.PendingBefore = len(pending)
+
+	for _, migration := range pending {
+		if err := migration.Apply(mongoMigrationContext{db: storage.db}); err != nil {
+			result.Message = "error ejecutando migraciones"
+			result.Errors = []string{fmt.Sprintf("%s: %v", migration.Name, err)}
+			result.DurationMS = time.Since(start).Milliseconds()
+			return result, err
+		}
+		if _, err := collection.UpdateOne(ctx,
+			bson.M{"version": migration.Version},
+			bson.M{"$set": bson.M{
+				"version":    migration.Version,
+				"name":       migration.Name,
+				"checksum":   migration.Checksum,
+				"applied_at": time.Now(),
+			}},
+			options.Update().SetUpsert(true),
+		); err != nil {
+			result.Message = "error registrando migracion aplicada"
+			result.Errors = []string{fmt.Sprintf("%s: %v", migration.Name, err)}
+			result.DurationMS = time.Since(start).Milliseconds()
+			return result, err
+		}
+		result.Applied++
+		result.AppliedFiles = append(result.AppliedFiles, migration.Name)
+	}
+
+	result.DurationMS = time.Since(start).Milliseconds()
+	if result.Applied == 0 {
+		result.Message = "sin migraciones pendientes"
+	} else {
+		result.Message = fmt.Sprintf("migraciones aplicadas: %d", result.Applied)
+	}
+	return result, nil
+}
+
+func loadAppliedMongoMigrations(ctx context.Context, collection *mongo.Collection) (map[string]struct{}, error) {
+	cursor, err := collection.Find(ctx, bson.M{})
+	if err != nil {
+		if strings.Contains(err.Error(), "NamespaceNotFound") {
+			return map[string]struct{}{}, nil
+		}
+		return nil, err
+	}
+	defer cursor.Close(ctx)
+
+	res := map[string]struct{}{}
+	for cursor.Next(ctx) {
+		var raw bson.M
+		if err := cursor.Decode(&raw); err != nil {
+			return nil, err
+		}
+		if version, ok := raw["version"].(string); ok && version != "" {
+			res[version] = struct{}{}
+		}
+	}
+	return res, cursor.Err()
+}
+
+func mongoMigrations() []mongoMigration {
+	return []mongoMigration{
+		{
+			Version:  "001",
+			Name:     "001_create_documents",
+			Checksum: checksumString("mongodb:001:create_documents"),
+			Apply: func(context mongoMigrationContext) error {
+				return ensureMongoCollection(context.db, "documents")
+			},
+		},
+		{
+			Version:  "002",
+			Name:     "002_create_document_images",
+			Checksum: checksumString("mongodb:002:create_document_images"),
+			Apply: func(context mongoMigrationContext) error {
+				return ensureMongoCollection(context.db, "document_images")
+			},
+		},
+		{
+			Version:  "003",
+			Name:     "003_create_gridfs_buckets_metadata",
+			Checksum: checksumString("mongodb:003:create_gridfs_buckets_metadata"),
+			Apply: func(context mongoMigrationContext) error {
+				if err := ensureMongoCollection(context.db, "pdfs.files"); err != nil {
+					return err
+				}
+				if err := ensureMongoCollection(context.db, "pdfs.chunks"); err != nil {
+					return err
+				}
+				if err := ensureMongoCollection(context.db, "images.files"); err != nil {
+					return err
+				}
+				return ensureMongoCollection(context.db, "images.chunks")
+			},
+		},
+		{
+			Version:  "004",
+			Name:     "004_add_projects_multitenant_indexes",
+			Checksum: checksumString("mongodb:004:add_projects_multitenant_indexes"),
+			Apply: func(context mongoMigrationContext) error {
+				if err := createMongoIndex(context.db.Collection("documents"), mongo.IndexModel{
+					Keys:    bson.D{{Key: "id", Value: 1}},
+					Options: options.Index().SetUnique(true).SetName("documents_id_unique"),
+				}); err != nil {
+					return err
+				}
+				if err := createMongoIndex(context.db.Collection("documents"), mongo.IndexModel{
+					Keys:    bson.D{{Key: "project_key", Value: 1}, {Key: "tenant_key", Value: 1}, {Key: "created_at", Value: -1}},
+					Options: options.Index().SetName("documents_scope_created_at"),
+				}); err != nil {
+					return err
+				}
+				if err := createMongoIndex(context.db.Collection("document_images"), mongo.IndexModel{
+					Keys:    bson.D{{Key: "id", Value: 1}},
+					Options: options.Index().SetUnique(true).SetName("document_images_id_unique"),
+				}); err != nil {
+					return err
+				}
+				return createMongoIndex(context.db.Collection("document_images"), mongo.IndexModel{
+					Keys:    bson.D{{Key: "document_id", Value: 1}, {Key: "page_number", Value: 1}},
+					Options: options.Index().SetUnique(true).SetName("document_images_document_page_unique"),
+				})
+			},
+		},
+		{
+			Version:  "005",
+			Name:     "005_add_migrated_flags_indexes",
+			Checksum: checksumString("mongodb:005:add_migrated_flags_indexes"),
+			Apply: func(context mongoMigrationContext) error {
+				if err := createMongoIndex(context.db.Collection("document_images"), mongo.IndexModel{
+					Keys:    bson.D{{Key: "project_key", Value: 1}, {Key: "tenant_key", Value: 1}, {Key: "document_id", Value: 1}, {Key: "page_number", Value: 1}},
+					Options: options.Index().SetName("document_images_scope_document_page"),
+				}); err != nil {
+					return err
+				}
+				return createMongoIndex(context.db.Collection("documents"), mongo.IndexModel{
+					Keys:    bson.D{{Key: "migrated_from_local", Value: 1}, {Key: "created_at", Value: -1}},
+					Options: options.Index().SetName("documents_migrated_created_at"),
+				})
+			},
+		},
+	}
+}
+
+func ensureMongoCollection(db *mongo.Database, name string) error {
+	ctx, cancel := mongoTimeout()
+	defer cancel()
+	collections, err := db.ListCollectionNames(ctx, bson.M{"name": name})
+	if err != nil {
+		return err
+	}
+	if len(collections) > 0 {
+		return nil
+	}
+	return db.CreateCollection(ctx, name)
+}
+
+func createMongoIndex(collection *mongo.Collection, model mongo.IndexModel) error {
+	ctx, cancel := mongoTimeout()
+	defer cancel()
+	_, err := collection.Indexes().CreateOne(ctx, model)
+	return err
+}
+
+func checksumString(value string) string {
+	sum := sha256.Sum256([]byte(value))
+	return hex.EncodeToString(sum[:])
+}
+
+func mongoTimeout() (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.Background(), 20*time.Second)
+}
+
+func contextBackground() context.Context {
+	return context.Background()
 }

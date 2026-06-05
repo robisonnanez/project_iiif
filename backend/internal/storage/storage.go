@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
+	"time"
 
 	"iiif-pdf-server/internal/config"
 	"iiif-pdf-server/internal/models"
@@ -25,6 +27,14 @@ type Storage interface {
 	GetDocumentImageByPage(documentID string, page int) (*models.DocumentImage, error)
 	GetDocumentImages(documentID string) ([]*models.DocumentImage, error)
 	GetDocumentImageData(id string) (*models.BinaryAsset, error)
+}
+
+type DocumentPDFBlobChecker interface {
+	HasDocumentPDFBlob(documentID string) (bool, error)
+}
+
+type ImageBlobChecker interface {
+	HasImageBlob(imageID string) (bool, error)
 }
 
 type FileStorage struct {
@@ -89,6 +99,7 @@ func (fs *FileStorage) GetDocumentsByScope(projectKey, tenantKey string) ([]*mod
 	searchRoots := fs.documentSearchRoots(projectKey, tenantKey)
 
 	var documents []*models.PDFDocument
+	seen := map[string]struct{}{}
 	for _, docsDir := range searchRoots {
 		files, err := os.ReadDir(docsDir)
 		if err != nil {
@@ -108,10 +119,23 @@ func (fs *FileStorage) GetDocumentsByScope(projectKey, tenantKey string) ([]*mod
 					continue
 				}
 				documents = append(documents, doc)
+				seen[doc.ID] = struct{}{}
 			}
 		}
 	}
 
+	// Fallback para layout filesystem (pdfs/images) cuando no existe metadata JSON.
+	fallback, _ := fs.discoverDocumentsFromFilesystem(projectKey, tenantKey)
+	for _, doc := range fallback {
+		if _, ok := seen[doc.ID]; ok {
+			continue
+		}
+		documents = append(documents, doc)
+	}
+
+	sort.Slice(documents, func(i, j int) bool {
+		return documents[i].UploadDate.After(documents[j].UploadDate)
+	})
 	return documents, nil
 }
 
@@ -292,6 +316,17 @@ func (fs *FileStorage) findImageMetadata(id string) (string, error) {
 
 func (fs *FileStorage) findDocumentPath(id string) (string, error) {
 	candidates := []string{filepath.Join(fs.basePath, "documents", id+".json")}
+	// Compatibilidad con layout por tenant: /documents/{tenant}/{id}.json
+	_ = filepath.WalkDir(filepath.Join(fs.basePath, "documents"), func(path string, d os.DirEntry, err error) error {
+		if err != nil || d == nil || d.IsDir() {
+			return nil
+		}
+		if d.Name() == id+".json" {
+			candidates = append(candidates, path)
+			return filepath.SkipAll
+		}
+		return nil
+	})
 	if fs.projectsEnabled {
 		projectsRoot := filepath.Join(fs.basePath, "projects")
 		_ = filepath.WalkDir(projectsRoot, func(path string, d os.DirEntry, err error) error {
@@ -312,7 +347,18 @@ func (fs *FileStorage) findDocumentPath(id string) (string, error) {
 
 func (fs *FileStorage) documentSearchRoots(projectKey, tenantKey string) []string {
 	if !fs.projectsEnabled {
-		return []string{filepath.Join(fs.basePath, "documents")}
+		roots := []string{filepath.Join(fs.basePath, "documents")}
+		// Compatibilidad con layout por tenant: /documents/{tenant}
+		entries, err := os.ReadDir(filepath.Join(fs.basePath, "documents"))
+		if err == nil {
+			for _, entry := range entries {
+				if !entry.IsDir() {
+					continue
+				}
+				roots = append(roots, filepath.Join(fs.basePath, "documents", entry.Name()))
+			}
+		}
+		return roots
 	}
 	if projectKey != "" {
 		return []string{filepath.Join(fs.scopeBase(projectKey, tenantKey), "documents")}
@@ -337,6 +383,96 @@ func (fs *FileStorage) scopeBase(projectKey, tenantKey string) string {
 		return filepath.Join(fs.basePath, "projects", projectKey, "tenants", tenantKey)
 	}
 	return filepath.Join(fs.basePath, "projects", projectKey)
+}
+
+func (fs *FileStorage) discoverDocumentsFromFilesystem(projectKey, tenantKey string) ([]*models.PDFDocument, error) {
+	pdfsRoot := filepath.Join(fs.basePath, "pdfs")
+	out := []*models.PDFDocument{}
+	err := filepath.WalkDir(pdfsRoot, func(path string, d os.DirEntry, err error) error {
+		if err != nil || d == nil || d.IsDir() {
+			return nil
+		}
+		if !strings.EqualFold(filepath.Ext(d.Name()), ".pdf") {
+			return nil
+		}
+
+		id := strings.TrimSuffix(d.Name(), filepath.Ext(d.Name()))
+		tenant := inferTenantFromPDFPath(path, fs.basePath)
+		project := "default"
+		if strings.TrimSpace(projectKey) != "" && project != projectKey {
+			return nil
+		}
+		if strings.TrimSpace(tenantKey) != "" && tenant != tenantKey {
+			return nil
+		}
+
+		modTime := time.Now()
+		if info, statErr := os.Stat(path); statErr == nil {
+			modTime = info.ModTime()
+		}
+		images := fs.findImagesForLocalDocument(id, tenant)
+		status := "uploaded"
+		if len(images) > 0 {
+			status = "completed"
+		}
+		out = append(out, &models.PDFDocument{
+			ID:             id,
+			Name:           d.Name(),
+			FilePath:       path,
+			Status:         status,
+			TotalPages:     len(images),
+			ConvertedPages: len(images),
+			ImagePaths:     images,
+			UploadDate:     modTime,
+			ProjectKey:     project,
+			TenantKey:      tenant,
+		})
+		return nil
+	})
+	return out, err
+}
+
+func (fs *FileStorage) findImagesForLocalDocument(documentID, tenant string) []string {
+	candidates := []string{
+		filepath.Join(fs.basePath, "images", documentID),
+	}
+	if strings.TrimSpace(tenant) != "" {
+		candidates = append(candidates, filepath.Join(fs.basePath, "images", tenant, documentID))
+	}
+
+	paths := []string{}
+	for _, dir := range candidates {
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			continue
+		}
+		for _, entry := range entries {
+			if entry.IsDir() {
+				continue
+			}
+			ext := strings.ToLower(filepath.Ext(entry.Name()))
+			if ext != ".jpg" && ext != ".jpeg" && ext != ".png" && ext != ".webp" {
+				continue
+			}
+			paths = append(paths, filepath.Join(dir, entry.Name()))
+		}
+	}
+	sort.Strings(paths)
+	return paths
+}
+
+func inferTenantFromPDFPath(pdfPath, basePath string) string {
+	normalized := filepath.ToSlash(pdfPath)
+	root := filepath.ToSlash(filepath.Join(basePath, "pdfs")) + "/"
+	if !strings.HasPrefix(normalized, root) {
+		return ""
+	}
+	relative := strings.TrimPrefix(normalized, root)
+	parts := strings.Split(relative, "/")
+	if len(parts) > 1 {
+		return strings.TrimSpace(parts[0])
+	}
+	return ""
 }
 
 func mediaTypeForFormat(format string) string {

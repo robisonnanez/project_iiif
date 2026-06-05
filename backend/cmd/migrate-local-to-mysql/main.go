@@ -75,6 +75,8 @@ func newDatabaseStore(cfg *config.Config, engine string) (storage.Storage, error
 		return storage.NewMySQLStorage(cfg)
 	case "postgres":
 		return storage.NewPostgresStorage(cfg)
+	case "mongodb":
+		return storage.NewMongoStorage(cfg)
 	default:
 		return nil, fmt.Errorf("motor no soportado para migracion: %s", engine)
 	}
@@ -91,8 +93,11 @@ func main() {
 	if engine == "postgresql" {
 		engine = "postgres"
 	}
-	if engine != "mysql" && engine != "postgres" {
-		log.Fatalf("ERROR storage.backend debe ser mysql o postgres para migrar a BLOB. valor actual: %s", cfg.Storage.Backend)
+	if engine == "mongo" {
+		engine = "mongodb"
+	}
+	if engine != "mysql" && engine != "postgres" && engine != "mongodb" {
+		log.Fatalf("ERROR storage.backend debe ser mysql, postgres o mongodb para migrar a BLOB. valor actual: %s", cfg.Storage.Backend)
 	}
 
 	src := readSourceConfig(cfg)
@@ -367,17 +372,8 @@ func migrateDocument(item sourceDocument, dbStore storage.Storage, s *stats) err
 }
 
 func migratePDFBlob(doc *models.PDFDocument, pdfData []byte, dbStore storage.Storage, s *stats) error {
-	if ms, ok := dbStore.(*storage.MySQLStorage); ok {
-		exists, err := ms.HasDocumentPDFBlob(doc.ID)
-		if err != nil {
-			log.Printf("WARN no se pudo verificar pdf_blob para %s: %v", doc.ID, err)
-		} else if exists {
-			s.SkippedPDFs++
-			return nil
-		}
-	}
-	if ps, ok := dbStore.(*storage.PostgresStorage); ok {
-		exists, err := ps.HasDocumentPDFBlob(doc.ID)
+	if checker, ok := dbStore.(storage.DocumentPDFBlobChecker); ok {
+		exists, err := checker.HasDocumentPDFBlob(doc.ID)
 		if err != nil {
 			log.Printf("WARN no se pudo verificar pdf_blob para %s: %v", doc.ID, err)
 		} else if exists {
@@ -397,16 +393,8 @@ func migratePDFBlob(doc *models.PDFDocument, pdfData []byte, dbStore storage.Sto
 }
 
 func migrateImageBlob(img *models.DocumentImage, data []byte, dbStore storage.Storage) error {
-	if ms, ok := dbStore.(*storage.MySQLStorage); ok {
-		exists, err := ms.HasImageBlob(img.ID)
-		if err != nil {
-			log.Printf("WARN no se pudo verificar image_blob para %s: %v", img.ID, err)
-		} else if exists {
-			return errSkipImageBlob
-		}
-	}
-	if ps, ok := dbStore.(*storage.PostgresStorage); ok {
-		exists, err := ps.HasImageBlob(img.ID)
+	if checker, ok := dbStore.(storage.ImageBlobChecker); ok {
+		exists, err := checker.HasImageBlob(img.ID)
 		if err != nil {
 			log.Printf("WARN no se pudo verificar image_blob para %s: %v", img.ID, err)
 		} else if exists {
