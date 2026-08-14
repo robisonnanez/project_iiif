@@ -1,7 +1,6 @@
 package main
 
 import (
-	"fmt"
 	"log"
 	"os"
 	"regexp"
@@ -206,18 +205,7 @@ func createDirectories(cfg *config.Config) {
 }
 
 func newStorage(cfg *config.Config) (storage.Storage, error) {
-	switch strings.ToLower(cfg.Storage.Backend) {
-	case "", "local":
-		return storage.NewFileStorageFromConfig(cfg), nil
-	case "mysql":
-		return storage.NewMySQLStorage(cfg)
-	case "postgres", "postgresql":
-		return storage.NewPostgresStorage(cfg)
-	case "mongo", "mongodb":
-		return storage.NewMongoStorage(cfg)
-	default:
-		return nil, fmt.Errorf("storage backend no soportado: %s", cfg.Storage.Backend)
-	}
+	return storage.NewConfiguredStorage(cfg)
 }
 
 // isOriginAllowed verifica si un origen está permitido, incluyendo wildcards

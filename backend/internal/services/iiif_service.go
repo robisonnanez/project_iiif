@@ -5,8 +5,10 @@ import (
 	"fmt"
 	"image"
 	"image/jpeg"
+	"net/url"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -37,14 +39,16 @@ func NewIIIFService(config *config.Config, storage storage.Storage) *IIIFService
 	}
 }
 
-func (s *IIIFService) GetManifest(documentID string) (*models.IIIFManifest, error) {
-	// Verificar caché
-	if s.cache != nil {
-		if cached, found := s.cache.Get("manifest_" + documentID); found {
-			return cached.(*models.IIIFManifest), nil
-		}
-	}
+type InvalidPageSelectionError struct {
+	Selection string
+	Reason    string
+}
 
+func (e *InvalidPageSelectionError) Error() string {
+	return fmt.Sprintf("seleccion de paginas invalida %q: %s", e.Selection, e.Reason)
+}
+
+func (s *IIIFService) GetManifest(documentID, pageSelection string) (*models.IIIFManifest, error) {
 	doc, err := s.storage.GetDocument(documentID)
 	if err != nil {
 		return nil, fmt.Errorf("document not found: %w", err)
@@ -53,31 +57,99 @@ func (s *IIIFService) GetManifest(documentID string) (*models.IIIFManifest, erro
 	if doc.Status != "completed" {
 		return nil, fmt.Errorf("document not ready")
 	}
+	pages, normalizedSelection, err := manifestPages(pageSelection, doc.TotalPages)
+	if err != nil {
+		return nil, err
+	}
+	cacheKey := "manifest_" + documentID + "_" + normalizedSelection
+	if s.cache != nil {
+		if cached, found := s.cache.Get(cacheKey); found {
+			return cached.(*models.IIIFManifest), nil
+		}
+	}
+
+	manifestID := fmt.Sprintf("%s/api/iiif/%s/manifest", s.config.IIIF.BaseURL, documentID)
+	if normalizedSelection != "all" {
+		manifestID += "?pages=" + url.QueryEscape(normalizedSelection)
+	}
 
 	manifest := &models.IIIFManifest{
 		Context: []string{
 			"http://iiif.io/api/presentation/3/context.json",
 		},
-		ID:   fmt.Sprintf("%s/api/iiif/%s/manifest", s.config.IIIF.BaseURL, documentID),
+		ID:   manifestID,
 		Type: "Manifest",
 		Label: map[string][]string{
 			"es": {doc.Name},
 		},
-		Items: make([]models.IIIFCanvas, 0, doc.TotalPages),
+		Items: make([]models.IIIFCanvas, 0, len(pages)),
 	}
 
-	// Crear canvas para cada página
-	for i := 1; i <= doc.TotalPages; i++ {
-		canvas := s.createCanvas(documentID, i, doc.Name)
+	for _, page := range pages {
+		canvas := s.createCanvas(documentID, page, doc.Name)
 		manifest.Items = append(manifest.Items, canvas)
 	}
 
 	// Guardar en caché
 	if s.cache != nil {
-		s.cache.Set("manifest_"+documentID, manifest, cache.DefaultExpiration)
+		s.cache.Set(cacheKey, manifest, cache.DefaultExpiration)
 	}
 
 	return manifest, nil
+}
+
+func manifestPages(selection string, totalPages int) ([]int, string, error) {
+	selection = strings.TrimSpace(selection)
+	if selection == "" || strings.EqualFold(selection, "all") {
+		pages := make([]int, totalPages)
+		for i := range pages {
+			pages[i] = i + 1
+		}
+		return pages, "all", nil
+	}
+
+	selected := make(map[int]struct{})
+	for _, rawPart := range strings.Split(selection, ",") {
+		part := strings.TrimSpace(rawPart)
+		if part == "" {
+			return nil, "", &InvalidPageSelectionError{Selection: selection, Reason: "segmento vacio"}
+		}
+		bounds := strings.Split(part, "-")
+		if len(bounds) > 2 {
+			return nil, "", &InvalidPageSelectionError{Selection: selection, Reason: "rango no valido"}
+		}
+		start, err := strconv.Atoi(strings.TrimSpace(bounds[0]))
+		if err != nil {
+			return nil, "", &InvalidPageSelectionError{Selection: selection, Reason: "se esperaba un numero"}
+		}
+		end := start
+		if len(bounds) == 2 {
+			end, err = strconv.Atoi(strings.TrimSpace(bounds[1]))
+			if err != nil {
+				return nil, "", &InvalidPageSelectionError{Selection: selection, Reason: "fin de rango no valido"}
+			}
+		}
+		if start < 1 || end < 1 || start > totalPages || end > totalPages {
+			return nil, "", &InvalidPageSelectionError{Selection: selection, Reason: fmt.Sprintf("las paginas deben estar entre 1 y %d", totalPages)}
+		}
+		if start > end {
+			return nil, "", &InvalidPageSelectionError{Selection: selection, Reason: "el inicio del rango supera el final"}
+		}
+		for page := start; page <= end; page++ {
+			selected[page] = struct{}{}
+		}
+	}
+
+	pages := make([]int, 0, len(selected))
+	for page := range selected {
+		pages = append(pages, page)
+	}
+	sort.Ints(pages)
+	normalized := make([]string, len(pages))
+	for i, page := range pages {
+		normalized[i] = strconv.Itoa(page)
+	}
+	return pages, strings.Join(normalized, ","), nil
 }
 
 func (s *IIIFService) createCanvas(documentID string, page int, title string) models.IIIFCanvas {

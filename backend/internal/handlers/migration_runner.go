@@ -49,12 +49,12 @@ type migrationStatus struct {
 }
 
 type migrationDocState struct {
-	DocumentID string `json:"document_id"`
-	PDFName    string `json:"pdf_name"`
-	ImagesDone int    `json:"images_done"`
-	ImagesTotal int   `json:"images_total"`
-	Status     string `json:"status"`
-	Message    string `json:"message,omitempty"`
+	DocumentID  string `json:"document_id"`
+	PDFName     string `json:"pdf_name"`
+	ImagesDone  int    `json:"images_done"`
+	ImagesTotal int    `json:"images_total"`
+	Status      string `json:"status"`
+	Message     string `json:"message,omitempty"`
 }
 
 type migrationRunner struct {
@@ -194,6 +194,9 @@ func (r *migrationRunner) run(req migrationStartRequest) {
 }
 
 func normalizeSourceSummary(req migrationStartRequest) string {
+	if strings.EqualFold(req.Source.Type, "database") {
+		return "base de datos activa -> S3/RustFS"
+	}
 	if strings.EqualFold(req.Source.Type, "ssh") {
 		port := req.Source.SSH.Port
 		if port <= 0 {
@@ -261,12 +264,12 @@ func (r *migrationRunner) updateDocProgress(payload string) {
 		}
 	}
 	r.status.Items = append(r.status.Items, migrationDocState{
-		DocumentID: documentID,
-		PDFName:    pdfName,
-		ImagesDone: imagesDone,
+		DocumentID:  documentID,
+		PDFName:     pdfName,
+		ImagesDone:  imagesDone,
 		ImagesTotal: imagesTotal,
-		Status:     status,
-		Message:    message,
+		Status:      status,
+		Message:     message,
 	})
 }
 

@@ -2,7 +2,9 @@ package main
 
 import (
 	"bytes"
+	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"image"
 	"image/jpeg"
@@ -23,6 +25,7 @@ import (
 
 	"github.com/gen2brain/go-fitz"
 	"github.com/google/uuid"
+	"go.mongodb.org/mongo-driver/mongo"
 	"golang.org/x/crypto/ssh"
 )
 
@@ -60,13 +63,14 @@ type sourceConfig struct {
 }
 
 type sourceDocument struct {
-	Doc       *models.PDFDocument
-	PDFPath   string
-	PDFBytes  []byte
-	Images    []*models.DocumentImage
-	ImageData map[string][]byte
-	FromJSON  bool
-	SourceKey string
+	Doc          *models.PDFDocument
+	PDFPath      string
+	PDFBytes     []byte
+	Images       []*models.DocumentImage
+	ImageData    map[string][]byte
+	FromJSON     bool
+	SourceKey    string
+	FromDatabase bool
 }
 
 func newDatabaseStore(cfg *config.Config, engine string) (storage.Storage, error) {
@@ -101,15 +105,24 @@ func main() {
 	}
 
 	src := readSourceConfig(cfg)
-	dbStore, err := newDatabaseStore(cfg, engine)
+	metadataStore, err := newDatabaseStore(cfg, engine)
 	if err != nil {
 		log.Fatalf("ERROR no se pudo conectar a %s: %v", engine, err)
+	}
+	dbStore := metadataStore
+	if strings.EqualFold(cfg.FilesystemDisk, "s3") || strings.EqualFold(cfg.BinaryStorage.Mode, "s3") {
+		dbStore, err = storage.NewS3Storage(cfg, metadataStore)
+		if err != nil {
+			log.Fatalf("ERROR no se pudo conectar a S3/RustFS: %v", err)
+		}
 	}
 
 	var docs []sourceDocument
 	switch src.Type {
 	case "ssh":
 		docs, err = discoverSSHDocuments(cfg, src)
+	case "database":
+		docs, err = discoverDatabaseDocuments(metadataStore)
 	default:
 		docs, err = discoverLocalDocuments(cfg, src.LocalPath)
 	}
@@ -156,6 +169,46 @@ func main() {
 	log.Printf("METRIC images_fallback_converted=%d", s.ImagesFallback)
 	log.Printf("METRIC images_skipped_existing_blob=%d", s.SkippedImgs)
 	log.Printf("METRIC docs_total=%d", s.TotalDocuments)
+}
+
+func discoverDatabaseDocuments(source storage.Storage) ([]sourceDocument, error) {
+	project := strings.TrimSpace(os.Getenv("MIGRATION_SCOPE_PROJECT"))
+	tenant := strings.TrimSpace(os.Getenv("MIGRATION_SCOPE_TENANT"))
+	documents, err := source.GetDocumentsByScope(project, tenant)
+	if err != nil {
+		return nil, err
+	}
+	pdfReader, ok := source.(storage.DocumentPDFReader)
+	if !ok {
+		return nil, fmt.Errorf("el backend activo no permite leer PDFs para migrarlos a S3")
+	}
+	out := make([]sourceDocument, 0, len(documents))
+	for _, doc := range documents {
+		pdfAsset, pdfErr := pdfReader.GetDocumentPDFData(doc.ID)
+		if pdfErr != nil {
+			log.Printf("WARN PDF %s no disponible en la base: %v", doc.ID, pdfErr)
+		}
+		images, err := source.GetDocumentImages(doc.ID)
+		if err != nil {
+			log.Printf("WARN imagenes de %s no disponibles: %v", doc.ID, err)
+			images = nil
+		}
+		imageData := make(map[string][]byte, len(images))
+		for _, image := range images {
+			asset, err := source.GetDocumentImageData(image.ID)
+			if err != nil {
+				log.Printf("WARN imagen %s no disponible en la base: %v", image.ID, err)
+				continue
+			}
+			imageData[image.ID] = asset.Data
+		}
+		var pdfData []byte
+		if pdfAsset != nil {
+			pdfData = pdfAsset.Data
+		}
+		out = append(out, sourceDocument{Doc: doc, PDFBytes: pdfData, Images: images, ImageData: imageData, FromDatabase: true})
+	}
+	return out, nil
 }
 
 func readSourceConfig(cfg *config.Config) sourceConfig {
@@ -299,21 +352,23 @@ func discoverSSHDocuments(cfg *config.Config, src sourceConfig) ([]sourceDocumen
 func migrateDocument(item sourceDocument, dbStore storage.Storage, s *stats) error {
 	doc := item.Doc
 	originalImageData := item.ImageData
-	if strings.TrimSpace(item.SourceKey) == "" {
-		item.SourceKey = normalizeSourcePath(doc.FilePath)
-	}
-	doc.ID = stableDocumentID(doc.ProjectKey, doc.TenantKey, item.SourceKey, doc.Name)
-	doc.MigratedFromLocal = true
-	for _, img := range item.Images {
-		oldID := img.ID
-		img.ID = stableImageID(doc.ID, img.PageNumber)
-		img.DocumentID = doc.ID
-		img.MigratedFromLocal = true
-		if data, ok := originalImageData[oldID]; ok {
-			if item.ImageData == nil {
-				item.ImageData = map[string][]byte{}
+	if !item.FromDatabase {
+		if strings.TrimSpace(item.SourceKey) == "" {
+			item.SourceKey = normalizeSourcePath(doc.FilePath)
+		}
+		doc.ID = stableDocumentID(doc.ProjectKey, doc.TenantKey, item.SourceKey, doc.Name)
+		doc.MigratedFromLocal = true
+		for _, img := range item.Images {
+			oldID := img.ID
+			img.ID = stableImageID(doc.ID, img.PageNumber)
+			img.DocumentID = doc.ID
+			img.MigratedFromLocal = true
+			if data, ok := originalImageData[oldID]; ok {
+				if item.ImageData == nil {
+					item.ImageData = map[string][]byte{}
+				}
+				item.ImageData[img.ID] = data
 			}
-			item.ImageData[img.ID] = data
 		}
 	}
 
@@ -338,9 +393,13 @@ func migrateDocument(item sourceDocument, dbStore storage.Storage, s *stats) err
 	for _, img := range item.Images {
 		s.TotalImages++
 		oldID := img.ID
-		img.ID = stableImageID(doc.ID, img.PageNumber)
+		if !item.FromDatabase {
+			img.ID = stableImageID(doc.ID, img.PageNumber)
+		}
 		img.DocumentID = doc.ID
-		img.MigratedFromLocal = true
+		if !item.FromDatabase {
+			img.MigratedFromLocal = true
+		}
 		if strings.TrimSpace(img.ProjectKey) == "" {
 			img.ProjectKey = doc.ProjectKey
 		}
@@ -395,7 +454,7 @@ func migratePDFBlob(doc *models.PDFDocument, pdfData []byte, dbStore storage.Sto
 func migrateImageBlob(img *models.DocumentImage, data []byte, dbStore storage.Storage) error {
 	if checker, ok := dbStore.(storage.ImageBlobChecker); ok {
 		exists, err := checker.HasImageBlob(img.ID)
-		if err != nil {
+		if err != nil && !isMissingImageMetadata(err) {
 			log.Printf("WARN no se pudo verificar image_blob para %s: %v", img.ID, err)
 		} else if exists {
 			return errSkipImageBlob
@@ -421,6 +480,10 @@ func migrateImageBlob(img *models.DocumentImage, data []byte, dbStore storage.St
 		return fmt.Errorf("fallo al guardar image_blob: %w", err)
 	}
 	return nil
+}
+
+func isMissingImageMetadata(err error) bool {
+	return errors.Is(err, sql.ErrNoRows) || errors.Is(err, mongo.ErrNoDocuments)
 }
 
 var errSkipImageBlob = fmt.Errorf("image_blob ya existe")

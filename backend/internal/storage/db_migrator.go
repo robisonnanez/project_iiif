@@ -94,6 +94,21 @@ func RunDBMigrations(cfg *config.Config, baseDir string) (MigrationRunResult, er
 			result.Skipped++
 			continue
 		}
+		reflected, err := migrationReflectedInSchema(db, engine, f.Version)
+		if err != nil {
+			result.Message = "no se pudo verificar el esquema existente"
+			result.Errors = []string{err.Error()}
+			return result, err
+		}
+		if reflected {
+			if err := recordAppliedMigration(db, engine, f); err != nil {
+				result.Message = "no se pudo registrar el esquema existente"
+				result.Errors = []string{err.Error()}
+				return result, err
+			}
+			result.Skipped++
+			continue
+		}
 		pending = append(pending, f)
 	}
 	result.PendingBefore = len(pending)
@@ -107,27 +122,19 @@ func RunDBMigrations(cfg *config.Config, baseDir string) (MigrationRunResult, er
 	defer tx.Rollback()
 
 	for _, m := range pending {
-		if _, err := tx.Exec(m.SQL); err != nil {
-			result.Message = "error ejecutando migraciones"
-			result.Errors = []string{fmt.Sprintf("%s: %v", m.Name, err)}
-			result.DurationMS = time.Since(start).Milliseconds()
-			return result, err
-		}
-		if _, err := tx.Exec("INSERT INTO schema_migrations (version, name, checksum, applied_at) VALUES ($1,$2,$3,NOW())", m.Version, m.Name, m.Checksum); err != nil {
-			// mysql placeholders
-			if engine == "mysql" {
-				if _, err2 := tx.Exec("INSERT INTO schema_migrations (version, name, checksum, applied_at) VALUES (?,?,?,NOW())", m.Version, m.Name, m.Checksum); err2 != nil {
-					result.Message = "error registrando migracion aplicada"
-					result.Errors = []string{fmt.Sprintf("%s: %v", m.Name, err2)}
-					result.DurationMS = time.Since(start).Milliseconds()
-					return result, err2
-				}
-			} else {
-				result.Message = "error registrando migracion aplicada"
+		for _, statement := range splitSQLStatements(m.SQL) {
+			if _, err := tx.Exec(statement); err != nil {
+				result.Message = "error ejecutando migraciones"
 				result.Errors = []string{fmt.Sprintf("%s: %v", m.Name, err)}
 				result.DurationMS = time.Since(start).Milliseconds()
 				return result, err
 			}
+		}
+		if err := recordAppliedMigration(tx, engine, m); err != nil {
+			result.Message = "error registrando migracion aplicada"
+			result.Errors = []string{fmt.Sprintf("%s: %v", m.Name, err)}
+			result.DurationMS = time.Since(start).Milliseconds()
+			return result, err
 		}
 		result.Applied++
 		result.AppliedFiles = append(result.AppliedFiles, m.Name)
@@ -147,6 +154,64 @@ func RunDBMigrations(cfg *config.Config, baseDir string) (MigrationRunResult, er
 		result.Message = fmt.Sprintf("migraciones aplicadas: %d", result.Applied)
 	}
 	return result, nil
+}
+
+type migrationExecutor interface {
+	Exec(query string, args ...interface{}) (sql.Result, error)
+}
+
+func recordAppliedMigration(executor migrationExecutor, engine string, migration migrationFile) error {
+	query := "INSERT INTO schema_migrations (version, name, checksum, applied_at) VALUES ($1,$2,$3,NOW())"
+	if engine == "mysql" {
+		query = "INSERT INTO schema_migrations (version, name, checksum, applied_at) VALUES (?,?,?,NOW())"
+	}
+	_, err := executor.Exec(query, migration.Version, migration.Name, migration.Checksum)
+	return err
+}
+
+func splitSQLStatements(contents string) []string {
+	parts := strings.Split(contents, ";")
+	statements := make([]string, 0, len(parts))
+	for _, part := range parts {
+		statement := strings.TrimSpace(part)
+		if statement != "" {
+			statements = append(statements, statement)
+		}
+	}
+	return statements
+}
+
+func migrationReflectedInSchema(db *sql.DB, engine, version string) (bool, error) {
+	required := map[string][][2]string{
+		"001": {{"documents", "status"}, {"document_images", "page_number"}},
+		"002": {{"documents", "pdf_blob"}, {"document_images", "image_blob"}},
+		"003": {{"documents", "project_key"}, {"document_images", "project_key"}},
+		"004": {{"documents", "migrated_from_local"}, {"document_images", "migrated_from_local"}},
+		"005": {{"documents", "conversion_width"}, {"documents", "conversion_quality"}},
+	}
+	checks, known := required[version]
+	if !known {
+		return false, nil
+	}
+	for _, check := range checks {
+		exists, err := schemaColumnExists(db, engine, check[0], check[1])
+		if err != nil || !exists {
+			return false, err
+		}
+	}
+	return true, nil
+}
+
+func schemaColumnExists(db *sql.DB, engine, table, column string) (bool, error) {
+	query := "SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = current_schema() AND table_name = $1 AND column_name = $2"
+	if engine == "mysql" {
+		query = "SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = ? AND column_name = ?"
+	}
+	var count int
+	if err := db.QueryRow(query, table, column).Scan(&count); err != nil {
+		return false, err
+	}
+	return count > 0, nil
 }
 
 func openMigrationDB(cfg *config.Config, engine string) (*sql.DB, error) {

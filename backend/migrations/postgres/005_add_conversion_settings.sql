@@ -1,0 +1,6 @@
+ALTER TABLE documents
+  ADD COLUMN IF NOT EXISTS conversion_width INTEGER,
+  ADD COLUMN IF NOT EXISTS conversion_height INTEGER,
+  ADD COLUMN IF NOT EXISTS conversion_dpi INTEGER,
+  ADD COLUMN IF NOT EXISTS conversion_format VARCHAR(16),
+  ADD COLUMN IF NOT EXISTS conversion_quality INTEGER;

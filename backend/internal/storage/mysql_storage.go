@@ -64,7 +64,9 @@ func (ms *MySQLStorage) UpdateDocument(doc *models.PDFDocument) error {
 
 func (ms *MySQLStorage) GetDocument(id string) (*models.PDFDocument, error) {
 	row := ms.db.QueryRow(`
-		SELECT id, original_name, COALESCE(project_key, 'default'), COALESCE(tenant_key, ''), COALESCE(migrated_from_local, 0), status, total_pages, converted_pages, pdf_path, thumbnail_path, manifest_url, created_at
+		SELECT id, original_name, COALESCE(project_key, 'default'), COALESCE(tenant_key, ''), COALESCE(migrated_from_local, 0), status, total_pages, converted_pages,
+		       COALESCE(conversion_width, 1241), COALESCE(conversion_height, 1754), COALESCE(conversion_dpi, 150), COALESCE(conversion_format, 'jpg'), COALESCE(conversion_quality, 85),
+		       pdf_path, thumbnail_path, manifest_url, created_at
 		FROM documents
 		WHERE id = ?
 	`, id)
@@ -80,6 +82,11 @@ func (ms *MySQLStorage) GetDocument(id string) (*models.PDFDocument, error) {
 		&doc.Status,
 		&doc.TotalPages,
 		&doc.ConvertedPages,
+		&doc.ConversionWidth,
+		&doc.ConversionHeight,
+		&doc.ConversionDPI,
+		&doc.ConversionFormat,
+		&doc.ConversionQuality,
 		&pdfPath,
 		&thumbnailPath,
 		&manifestURL,
@@ -101,7 +108,9 @@ func (ms *MySQLStorage) GetAllDocuments() ([]*models.PDFDocument, error) {
 
 func (ms *MySQLStorage) GetDocumentsByScope(projectKey, tenantKey string) ([]*models.PDFDocument, error) {
 	query := `
-		SELECT id, original_name, COALESCE(project_key, 'default'), COALESCE(tenant_key, ''), COALESCE(migrated_from_local, 0), status, total_pages, converted_pages, pdf_path, thumbnail_path, manifest_url, created_at
+		SELECT id, original_name, COALESCE(project_key, 'default'), COALESCE(tenant_key, ''), COALESCE(migrated_from_local, 0), status, total_pages, converted_pages,
+		       COALESCE(conversion_width, 1241), COALESCE(conversion_height, 1754), COALESCE(conversion_dpi, 150), COALESCE(conversion_format, 'jpg'), COALESCE(conversion_quality, 85),
+		       pdf_path, thumbnail_path, manifest_url, created_at
 		FROM documents`
 	var args []interface{}
 	var conditions []string
@@ -137,6 +146,11 @@ func (ms *MySQLStorage) GetDocumentsByScope(projectKey, tenantKey string) ([]*mo
 			&doc.Status,
 			&doc.TotalPages,
 			&doc.ConvertedPages,
+			&doc.ConversionWidth,
+			&doc.ConversionHeight,
+			&doc.ConversionDPI,
+			&doc.ConversionFormat,
+			&doc.ConversionQuality,
 			&pdfPath,
 			&thumbnailPath,
 			&manifestURL,
@@ -179,6 +193,27 @@ func (ms *MySQLStorage) SaveDocumentPDF(documentID string, data []byte, mediaTyp
 		WHERE id = ?
 	`, data, mediaType, len(data), documentID)
 	return err
+}
+
+func (ms *MySQLStorage) GetDocumentPDFData(documentID string) (*models.BinaryAsset, error) {
+	row := ms.db.QueryRow(`SELECT id, pdf_blob, pdf_media_type, pdf_size FROM documents WHERE id = ?`, documentID)
+	asset := &models.BinaryAsset{}
+	var data []byte
+	var mediaType sql.NullString
+	var byteSize sql.NullInt64
+	if err := row.Scan(&asset.ID, &data, &mediaType, &byteSize); err != nil {
+		return nil, fmt.Errorf("pdf blob not found: %w", err)
+	}
+	if len(data) == 0 {
+		return nil, fmt.Errorf("pdf blob is empty")
+	}
+	asset.Data = data
+	asset.MediaType = mediaType.String
+	asset.ByteSize = byteSize.Int64
+	if asset.ByteSize == 0 {
+		asset.ByteSize = int64(len(data))
+	}
+	return asset, nil
 }
 
 func (ms *MySQLStorage) SaveDocumentImage(image *models.DocumentImage) error {
@@ -289,8 +324,8 @@ func (ms *MySQLStorage) upsertDocument(doc *models.PDFDocument) error {
 	}
 
 	_, err := ms.db.Exec(`
-		INSERT INTO documents (id, original_name, project_key, tenant_key, migrated_from_local, status, total_pages, converted_pages, pdf_path, thumbnail_path, manifest_url, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
+		INSERT INTO documents (id, original_name, project_key, tenant_key, migrated_from_local, status, total_pages, converted_pages, conversion_width, conversion_height, conversion_dpi, conversion_format, conversion_quality, pdf_path, thumbnail_path, manifest_url, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
 		ON DUPLICATE KEY UPDATE
 			original_name = VALUES(original_name),
 			project_key = VALUES(project_key),
@@ -299,11 +334,18 @@ func (ms *MySQLStorage) upsertDocument(doc *models.PDFDocument) error {
 			status = VALUES(status),
 			total_pages = VALUES(total_pages),
 			converted_pages = VALUES(converted_pages),
+			conversion_width = VALUES(conversion_width),
+			conversion_height = VALUES(conversion_height),
+			conversion_dpi = VALUES(conversion_dpi),
+			conversion_format = VALUES(conversion_format),
+			conversion_quality = VALUES(conversion_quality),
 			pdf_path = VALUES(pdf_path),
 			thumbnail_path = VALUES(thumbnail_path),
 			manifest_url = VALUES(manifest_url),
 			updated_at = NOW()
-	`, doc.ID, doc.Name, nullString(defaultProject(doc.ProjectKey)), nullString(doc.TenantKey), doc.MigratedFromLocal, doc.Status, doc.TotalPages, doc.ConvertedPages, nullString(doc.FilePath), nullString(doc.ThumbnailURL), nullString(doc.ManifestURL), doc.UploadDate)
+	`, doc.ID, doc.Name, nullString(defaultProject(doc.ProjectKey)), nullString(doc.TenantKey), doc.MigratedFromLocal, doc.Status, doc.TotalPages, doc.ConvertedPages,
+		doc.ConversionWidth, doc.ConversionHeight, doc.ConversionDPI, nullString(doc.ConversionFormat), doc.ConversionQuality,
+		nullString(doc.FilePath), nullString(doc.ThumbnailURL), nullString(doc.ManifestURL), doc.UploadDate)
 
 	return err
 }

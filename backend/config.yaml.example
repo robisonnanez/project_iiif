@@ -14,6 +14,16 @@ DB_DATABASE: "DB_DATABASE"
 DB_USERNAME: "DB_USERNAME"
 DB_PASSWORD: "DB_PASSWORD"
 
+# Almacenamiento binario S3 compatible (RustFS, MinIO o AWS S3).
+# Para activarlo usa FILESYSTEM_DISK: "s3" y binary_storage.mode: "s3".
+FILESYSTEM_DISK: "local"
+AWS_ACCESS_KEY_ID: "TU_ACCESS_KEY_DE_RUSTFS"
+AWS_SECRET_ACCESS_KEY: "TU_SECRET_KEY_DE_RUSTFS"
+AWS_DEFAULT_REGION: "us-east-1"
+AWS_BUCKET: "mi-proyecto"
+AWS_ENDPOINT: "http://127.0.0.1:9000"
+AWS_USE_PATH_STYLE_ENDPOINT: true
+
 server:
   port: "8080"
   mode: "debug"
@@ -62,6 +72,7 @@ pdf:
   temp_path: "./data/temp"
 
 binary_storage:
+  # Valores: local, database o s3.
   mode: "local"
   temp_path: "./data/temp"
 

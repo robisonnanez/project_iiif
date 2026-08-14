@@ -451,14 +451,14 @@ func (h *AdminHandler) isAllowedLocalPath(path string) bool {
 
 func validateMigrationRequest(req migrationStartRequest, cfg *config.Config) error {
 	sourceType := strings.ToLower(strings.TrimSpace(req.Source.Type))
-	if sourceType != "local" && sourceType != "ssh" {
-		return &configError{"source.type debe ser local o ssh"}
+	if sourceType != "local" && sourceType != "ssh" && sourceType != "database" {
+		return &configError{"source.type debe ser local, ssh o database"}
 	}
 	if sourceType == "local" {
 		if strings.TrimSpace(req.Source.Local.Path) == "" {
 			return &configError{"source.local.path es obligatorio"}
 		}
-	} else {
+	} else if sourceType == "ssh" {
 		if strings.TrimSpace(req.Source.SSH.Host) == "" || strings.TrimSpace(req.Source.SSH.User) == "" {
 			return &configError{"source.ssh.host y source.ssh.user son obligatorios"}
 		}
@@ -480,6 +480,8 @@ func validateMigrationRequest(req migrationStartRequest, cfg *config.Config) err
 				return &configError{"host SSH no permitido por migration.ssh.allowed_hosts"}
 			}
 		}
+	} else if !strings.EqualFold(cfg.FilesystemDisk, "s3") && !strings.EqualFold(cfg.BinaryStorage.Mode, "s3") {
+		return &configError{"FILESYSTEM_DISK debe ser s3 para migrar binarios desde la base activa"}
 	}
 
 	project := strings.TrimSpace(req.Scope.ProjectKey)
@@ -573,6 +575,15 @@ func (h *AdminHandler) sanitizedConfig() gin.H {
 			"mode":      h.config.BinaryStorage.Mode,
 			"temp_path": h.config.BinaryStorage.TempPath,
 		},
+		"s3": gin.H{
+			"filesystem_disk":         h.config.FilesystemDisk,
+			"access_key_id":           maskedSecret(h.config.AWSAccessKeyID),
+			"secret_access_key":       maskedSecret(h.config.AWSSecretAccessKey),
+			"region":                  h.config.AWSDefaultRegion,
+			"bucket":                  h.config.AWSBucket,
+			"endpoint":                h.config.AWSEndpoint,
+			"use_path_style_endpoint": h.config.AWSUsePathStyleEndpoint,
+		},
 		"projects": gin.H{
 			"enabled":               h.config.Projects.Enabled,
 			"default_project":       h.config.Projects.DefaultProject,
@@ -664,6 +675,15 @@ type editableConfigPayload struct {
 		Mode     string `json:"mode"`
 		TempPath string `json:"temp_path"`
 	} `json:"binary_storage"`
+	S3 struct {
+		FilesystemDisk       string `json:"filesystem_disk"`
+		AccessKeyID          string `json:"access_key_id"`
+		SecretAccessKey      string `json:"secret_access_key"`
+		Region               string `json:"region"`
+		Bucket               string `json:"bucket"`
+		Endpoint             string `json:"endpoint"`
+		UsePathStyleEndpoint bool   `json:"use_path_style_endpoint"`
+	} `json:"s3"`
 	IIIF struct {
 		BaseURL      string `json:"base_url"`
 		APIVersion   string `json:"api_version"`
@@ -709,8 +729,16 @@ func applyEditableConfig(next, current *config.Config, payload editableConfigPay
 	if !allowedValue(payload.Database.DBConnection, "local", "mysql", "postgres", "postgresql", "mongo", "mongodb") {
 		return &configError{"database.DB_CONNECTION debe ser local, mysql, postgres, postgresql, mongo o mongodb"}
 	}
-	if !allowedValue(payload.BinaryStorage.Mode, "local", "database") {
-		return &configError{"binary_storage.mode debe ser local o database"}
+	if !allowedValue(payload.BinaryStorage.Mode, "local", "database", "s3") {
+		return &configError{"binary_storage.mode debe ser local, database o s3"}
+	}
+	if strings.EqualFold(payload.BinaryStorage.Mode, "s3") {
+		if strings.TrimSpace(payload.S3.Bucket) == "" || strings.TrimSpace(payload.S3.Endpoint) == "" {
+			return &configError{"S3 bucket y endpoint son obligatorios"}
+		}
+		if strings.TrimSpace(secretOrCurrent(payload.S3.AccessKeyID, current.AWSAccessKeyID)) == "" || strings.TrimSpace(secretOrCurrent(payload.S3.SecretAccessKey, current.AWSSecretAccessKey)) == "" {
+			return &configError{"S3 access key y secret key son obligatorios"}
+		}
 	}
 	if payload.IIIF.MaxWidth <= 0 || payload.IIIF.MaxHeight <= 0 {
 		return &configError{"iiif.max_width y iiif.max_height deben ser mayores que cero"}
@@ -785,6 +813,16 @@ func applyEditableConfig(next, current *config.Config, payload editableConfigPay
 	next.Frontend.Password = secretOrCurrent(payload.Frontend.Password, current.Frontend.Password)
 	next.BinaryStorage.Mode = payload.BinaryStorage.Mode
 	next.BinaryStorage.TempPath = payload.BinaryStorage.TempPath
+	next.FilesystemDisk = payload.S3.FilesystemDisk
+	if strings.EqualFold(payload.BinaryStorage.Mode, "s3") {
+		next.FilesystemDisk = "s3"
+	}
+	next.AWSAccessKeyID = secretOrCurrent(payload.S3.AccessKeyID, current.AWSAccessKeyID)
+	next.AWSSecretAccessKey = secretOrCurrent(payload.S3.SecretAccessKey, current.AWSSecretAccessKey)
+	next.AWSDefaultRegion = payload.S3.Region
+	next.AWSBucket = payload.S3.Bucket
+	next.AWSEndpoint = payload.S3.Endpoint
+	next.AWSUsePathStyleEndpoint = payload.S3.UsePathStyleEndpoint
 	next.IIIF.BaseURL = payload.IIIF.BaseURL
 	next.IIIF.APIVersion = payload.IIIF.APIVersion
 	next.IIIF.MaxWidth = payload.IIIF.MaxWidth
@@ -827,7 +865,7 @@ func allowedValue(value string, allowed ...string) bool {
 }
 
 func secretOrCurrent(value, current string) string {
-	if value == maskedSecret(current) {
+	if strings.TrimSpace(value) == "" || value == maskedSecret(current) {
 		return current
 	}
 	return value
