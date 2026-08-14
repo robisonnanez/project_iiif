@@ -535,6 +535,41 @@ const docTemplate = `{
                         "description": "Tenant",
                         "name": "tenant",
                         "in": "formData"
+                    },
+                    {
+                        "type": "integer",
+                        "default": 1241,
+                        "description": "Ancho maximo de imagen",
+                        "name": "max_width",
+                        "in": "formData"
+                    },
+                    {
+                        "type": "integer",
+                        "default": 1754,
+                        "description": "Alto maximo de imagen",
+                        "name": "max_height",
+                        "in": "formData"
+                    },
+                    {
+                        "type": "integer",
+                        "default": 150,
+                        "description": "Resolucion de render",
+                        "name": "dpi",
+                        "in": "formData"
+                    },
+                    {
+                        "type": "string",
+                        "default": "jpg",
+                        "description": "Formato de salida (jpg o png)",
+                        "name": "format",
+                        "in": "formData"
+                    },
+                    {
+                        "type": "integer",
+                        "default": 85,
+                        "description": "Calidad JPEG",
+                        "name": "quality",
+                        "in": "formData"
                     }
                 ],
                 "responses": {
@@ -1027,6 +1062,32 @@ const docTemplate = `{
                         }
                     }
                 },
+                "s3": {
+                    "type": "object",
+                    "properties": {
+                        "access_key_id": {
+                            "type": "string"
+                        },
+                        "bucket": {
+                            "type": "string"
+                        },
+                        "endpoint": {
+                            "type": "string"
+                        },
+                        "filesystem_disk": {
+                            "type": "string"
+                        },
+                        "region": {
+                            "type": "string"
+                        },
+                        "secret_access_key": {
+                            "type": "string"
+                        },
+                        "use_path_style_endpoint": {
+                            "type": "boolean"
+                        }
+                    }
+                },
                 "security": {
                     "type": "object",
                     "properties": {
@@ -1302,6 +1363,21 @@ const docTemplate = `{
         "models.PDFDocument": {
             "type": "object",
             "properties": {
+                "conversionDpi": {
+                    "type": "integer"
+                },
+                "conversionFormat": {
+                    "type": "string"
+                },
+                "conversionHeight": {
+                    "type": "integer"
+                },
+                "conversionQuality": {
+                    "type": "integer"
+                },
+                "conversionWidth": {
+                    "type": "integer"
+                },
                 "convertedPages": {
                     "type": "integer"
                 },
