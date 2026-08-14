@@ -74,6 +74,7 @@
               <span>Seleccionar PDF</span>
               <input id="pdf-file" type="file" name="pdf" accept="application/pdf,.pdf" required>
             </label>
+            <p id="upload-settings-summary" class="upload-settings-summary" hidden></p>
             <button class="primary" type="submit">Subir y convertir</button>
           </form>
           <pre id="upload-result" class="result" hidden></pre>
@@ -161,6 +162,7 @@
                 <select id="migration-source-type">
                   <option value="local">Local</option>
                   <option value="ssh">Servidor remoto (SSH)</option>
+				  <option value="database">Base de datos activa (BLOB/GridFS) a S3</option>
                 </select>
               </label>
             </div>
@@ -219,6 +221,42 @@
     </main>
   </div>
   <div class="toast-stack" id="toast-stack" aria-live="polite"></div>
+  <div class="modal-backdrop" id="upload-settings-modal" hidden>
+    <div class="modal">
+      <h3>Configuración de las imágenes</h3>
+      <p>Define la resolución antes de iniciar. La página conservará su proporción dentro del ancho y alto máximos.</p>
+      <div class="modal-fields upload-settings-grid">
+        <label class="field">
+          <span>Ancho máximo (px)</span>
+          <input id="upload-image-width" type="number" min="256" max="8192" value="1241" required>
+        </label>
+        <label class="field">
+          <span>Alto máximo (px)</span>
+          <input id="upload-image-height" type="number" min="256" max="8192" value="1754" required>
+        </label>
+        <label class="field">
+          <span>DPI</span>
+          <input id="upload-image-dpi" type="number" min="72" max="600" value="150" required>
+        </label>
+        <label class="field">
+          <span>Formato</span>
+          <select id="upload-image-format">
+            <option value="jpg">JPG</option>
+            <option value="png">PNG</option>
+          </select>
+        </label>
+        <label class="field">
+          <span>Calidad JPG</span>
+          <input id="upload-image-quality" type="number" min="1" max="100" value="85" required>
+        </label>
+      </div>
+      <p class="muted">1241 × 1754 px a 150 DPI es una configuración adecuada para consulta web e IIIF. En páginas Carta el resultado será aproximadamente 1241 × 1606 px para evitar deformación.</p>
+      <div class="modal-actions">
+        <button class="secondary" type="button" id="upload-settings-cancel">Cancelar</button>
+        <button class="primary" type="button" id="upload-settings-confirm">Usar esta configuración</button>
+      </div>
+    </div>
+  </div>
   <div class="modal-backdrop" id="migration-scope-modal" hidden>
     <div class="modal">
       <h3>Contexto de migracion</h3>
@@ -279,6 +317,6 @@
     </div>
   </div>
 
-  <script src="/dashboard/assets/app.js?v=20260521-db-engine-migration"></script>
+  <script src="/dashboard/assets/app.js?v=20260813-upload-image-settings"></script>
 </body>
 </html>

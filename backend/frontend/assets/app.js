@@ -9,6 +9,14 @@ const state = {
   migration: { timer: null, running: false },
   polling: new Map(),
   mongoURIEdited: false,
+  uploadSettings: {
+    approved: false,
+    width: 1241,
+    height: 1754,
+    dpi: 150,
+    format: "jpg",
+    quality: 85,
+  },
 };
 
 const viewMeta = {
@@ -60,6 +68,9 @@ document.addEventListener("DOMContentLoaded", () => {
 
   $("#refresh-button").addEventListener("click", refreshCurrentView);
   $("#upload-form").addEventListener("submit", uploadPDF);
+  $("#pdf-file").addEventListener("change", handlePDFSelection);
+  $("#upload-settings-cancel").addEventListener("click", closeUploadSettingsModal);
+  $("#upload-settings-confirm").addEventListener("click", confirmUploadSettings);
   $("#logout-button").addEventListener("click", logout);
   $("#load-images-button").addEventListener("click", loadSelectedImages);
   $("#filter-documents-button").addEventListener("click", loadDocuments);
@@ -297,6 +308,11 @@ function updateMigrationSourceMode() {
 function collectMigrationPayload(includeScope) {
   const sourceType = $("#migration-source-type")?.value || "local";
   const scope = includeScope ? collectMigrationScope() : null;
+	if (sourceType === "database") {
+		const payload = { source: { type: "database" } };
+		if (scope) payload.scope = scope;
+		return payload;
+	}
   if (sourceType === "local") {
     const path = ($("#migration-local-path")?.value || "").trim();
     if (!path) {
@@ -366,7 +382,9 @@ function openMigrationModal(payload) {
   updateTenantSelect("migration");
   const sourcePath = payload?.source?.type === "ssh"
     ? `${payload.source.ssh.user}@${payload.source.ssh.host}:${payload.source.ssh.path}`
-    : payload?.source?.local?.path || "";
+	: payload?.source?.type === "database"
+		? "Base de datos activa (BLOB/GridFS) -> S3/RustFS"
+		: payload?.source?.local?.path || "";
   $("#migration-source-preview").value = sourcePath;
   modal.hidden = false;
 }
@@ -463,10 +481,13 @@ function updateMigrationCopy() {
   // Ajusta textos de migracion segun el motor de base de datos activo.
   const backend = String(state.config?.storage?.backend || state.config?.database?.DB_CONNECTION || "base de datos").toLowerCase();
   const dbLabel = backend === "postgres" ? "Postgres" : backend === "mysql" ? "MySQL" : backend === "mongodb" || backend === "mongo" ? "MongoDB" : "base de datos";
+	const usesS3 = state.config?.binary_storage?.mode === "s3" || state.config?.s3?.filesystem_disk === "s3";
   const title = $("#migration-title");
   const subtitle = $("#migration-subtitle");
-  if (title) title.textContent = `Migracion local a ${dbLabel} BLOB`;
-  if (subtitle) subtitle.textContent = `Ejecuta la migracion one-shot de metadatos y binarios desde almacenamiento local hacia ${dbLabel}.`;
+	if (title) title.textContent = usesS3 ? `Migracion hacia S3 / RustFS con catalogo ${dbLabel}` : `Migracion local a ${dbLabel} BLOB`;
+	if (subtitle) subtitle.textContent = usesS3
+		? `Copia binarios locales, remotos o almacenados en ${dbLabel} hacia el bucket S3 configurado.`
+		: `Ejecuta la migracion one-shot de metadatos y binarios desde almacenamiento local hacia ${dbLabel}.`;
 }
 
 async function loadProjects() {
@@ -489,10 +510,19 @@ async function uploadPDF(event) {
   const file = fileInput.files[0];
 
   if (!file) return;
+  if (!state.uploadSettings.approved) {
+    openUploadSettingsModal();
+    return;
+  }
 
   const formData = new FormData();
   formData.append("pdf", file);
   appendScopeToFormData(formData, "upload");
+  formData.append("max_width", String(state.uploadSettings.width));
+  formData.append("max_height", String(state.uploadSettings.height));
+  formData.append("dpi", String(state.uploadSettings.dpi));
+  formData.append("format", state.uploadSettings.format);
+  formData.append("quality", String(state.uploadSettings.quality));
 
   result.hidden = false;
   result.textContent = "Subiendo PDF...";
@@ -506,6 +536,7 @@ async function uploadPDF(event) {
     if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);
     result.textContent = JSON.stringify(data, null, 2);
     fileInput.value = "";
+    resetUploadSettings();
     if (data.id) {
       showToast("PDF recibido. Conversion en proceso...");
       watchDocument(data.id);
@@ -515,6 +546,64 @@ async function uploadPDF(event) {
   } catch (error) {
     result.textContent = `Error: ${error.message}`;
   }
+}
+
+function handlePDFSelection() {
+  state.uploadSettings.approved = false;
+  const summary = $("#upload-settings-summary");
+  if (summary) summary.hidden = true;
+  if ($("#pdf-file").files[0]) openUploadSettingsModal();
+}
+
+function openUploadSettingsModal() {
+  const modal = $("#upload-settings-modal");
+  if (!modal) return;
+  $("#upload-image-width").value = state.uploadSettings.width;
+  $("#upload-image-height").value = state.uploadSettings.height;
+  $("#upload-image-dpi").value = state.uploadSettings.dpi;
+  $("#upload-image-format").value = state.uploadSettings.format;
+  $("#upload-image-quality").value = state.uploadSettings.quality;
+  modal.hidden = false;
+}
+
+function closeUploadSettingsModal() {
+  const modal = $("#upload-settings-modal");
+  if (modal) modal.hidden = true;
+}
+
+function confirmUploadSettings() {
+  const settings = {
+    width: Number.parseInt($("#upload-image-width").value, 10),
+    height: Number.parseInt($("#upload-image-height").value, 10),
+    dpi: Number.parseInt($("#upload-image-dpi").value, 10),
+    format: $("#upload-image-format").value,
+    quality: Number.parseInt($("#upload-image-quality").value, 10),
+  };
+  if (!Number.isInteger(settings.width) || settings.width < 256 || settings.width > 8192 ||
+      !Number.isInteger(settings.height) || settings.height < 256 || settings.height > 8192) {
+    showToast("El ancho y el alto deben estar entre 256 y 8192 px.", "error");
+    return;
+  }
+  if (!Number.isInteger(settings.dpi) || settings.dpi < 72 || settings.dpi > 600) {
+    showToast("El DPI debe estar entre 72 y 600.", "error");
+    return;
+  }
+  if (!Number.isInteger(settings.quality) || settings.quality < 1 || settings.quality > 100) {
+    showToast("La calidad JPG debe estar entre 1 y 100.", "error");
+    return;
+  }
+
+  state.uploadSettings = { ...settings, approved: true };
+  const summary = $("#upload-settings-summary");
+  summary.textContent = `Imágenes: máximo ${settings.width} × ${settings.height} px, ${settings.dpi} DPI, ${settings.format.toUpperCase()}${settings.format === "jpg" ? ` calidad ${settings.quality}` : ""}.`;
+  summary.hidden = false;
+  closeUploadSettingsModal();
+}
+
+function resetUploadSettings() {
+  state.uploadSettings.approved = false;
+  const summary = $("#upload-settings-summary");
+  if (summary) summary.hidden = true;
 }
 
 function watchDocument(documentID) {
@@ -604,9 +693,43 @@ function renderDocuments() {
       <td>${migratedBadge(Boolean(doc.migratedFromLocal))}</td>
       <td>${statusBadge(doc.status)}</td>
       <td>${Number(doc.convertedPages || 0)} / ${Number(doc.totalPages || 0)}</td>
-      <td>${doc.manifestUrl ? `<a href="${escapeHTML(doc.manifestUrl)}" target="_blank" rel="noreferrer">Ver</a>` : "-"}</td>
+      <td>${doc.status === "completed" ? manifestActions(doc) : "-"}</td>
     </tr>
   `).join("");
+  bindManifestActions();
+}
+
+function manifestActions(doc) {
+  const id = escapeHTML(doc.id || "");
+  return `
+    <div class="manifest-actions" data-document-id="${id}">
+      <button class="secondary manifest-all" type="button">Generar manifest</button>
+      <input type="text" inputmode="numeric" aria-label="Paginas del manifiesto" placeholder="1-5,8,10-12">
+      <button class="secondary manifest-pages" type="button">Ver páginas</button>
+    </div>
+  `;
+}
+
+function bindManifestActions() {
+  $$(".manifest-actions").forEach((container) => {
+    const allButton = container.querySelector(".manifest-all");
+    const button = container.querySelector(".manifest-pages");
+    const input = container.querySelector("input");
+    if (!allButton || !button || !input) return;
+    allButton.addEventListener("click", () => {
+      const documentID = container.dataset.documentId || "";
+      window.open(`/api/iiif/${encodeURIComponent(documentID)}/manifest`, "_blank", "noopener,noreferrer");
+    });
+    button.addEventListener("click", () => {
+      const pages = input.value.replace(/\s+/g, "");
+      if (!pages || !/^\d+(?:-\d+)?(?:,\d+(?:-\d+)?)*$/.test(pages)) {
+        showToast("Escribe paginas como 1-5,8,10-12.", "error");
+        return;
+      }
+      const documentID = container.dataset.documentId || "";
+      window.open(`/api/iiif/${encodeURIComponent(documentID)}/manifest?pages=${encodeURIComponent(pages)}`, "_blank", "noopener,noreferrer");
+    });
+  });
 }
 
 function renderImageDocumentOptions() {
@@ -784,7 +907,8 @@ function renderConfigForm() {
         input("server.mode", "Modo", config.server?.mode || "")
       ])}
       ${fieldset("Storage", [
-        select("storage.backend", "Backend", config.storage?.backend || "local", ["local", "mysql", "postgres", "mongodb"]),
+        select("storage.backend", "Backend de metadatos", config.storage?.backend || "local", ["local", "mysql", "postgres", "mongodb"]),
+        `<p class="field-help">Define donde se guardan los registros y las rutas. S3 se configura aparte en <strong>Modo binario</strong> para almacenar los PDF e imagenes.</p>`,
         input("storage.data_path", "Data path", config.storage?.data_path || ""),
         input("storage.pdfs_path", "PDFs path", config.storage?.pdfs_path || ""),
         input("storage.images_path", "Images path", config.storage?.images_path || ""),
@@ -801,9 +925,18 @@ function renderConfigForm() {
         input("frontend.password", "Password", config.frontend?.password || "", "password")
       ])}
       ${fieldset("Binarios", [
-        select("binary_storage.mode", "Modo binario", config.binary_storage?.mode || "local", ["local", "database"]),
+		select("binary_storage.mode", "Modo binario", config.binary_storage?.mode || "local", ["local", "database", "s3"]),
         input("binary_storage.temp_path", "Temp path", config.binary_storage?.temp_path || "")
       ])}
+      ${fieldset("S3 / RustFS", [
+        `<p class="field-help" id="s3-mode-help"></p>`,
+        input("s3.endpoint", "Endpoint", config.s3?.endpoint || "http://127.0.0.1:9000"),
+        input("s3.region", "Region", config.s3?.region || "us-east-1"),
+        input("s3.bucket", "Bucket", config.s3?.bucket || ""),
+        input("s3.access_key_id", "Access key", config.s3?.access_key_id || "", "password"),
+        input("s3.secret_access_key", "Secret key", config.s3?.secret_access_key || "", "password"),
+        checkbox("s3.use_path_style_endpoint", "Usar path-style endpoint", config.s3?.use_path_style_endpoint !== false)
+      ], `id="s3-config-card"`)}
       ${fieldset("IIIF", [
         input("iiif.base_url", "Base URL", config.iiif?.base_url || ""),
         input("iiif.api_version", "API version", config.iiif?.api_version || "3"),
@@ -846,7 +979,30 @@ function renderConfigForm() {
 
   $("#config-form").addEventListener("submit", saveConfig);
   bindDBConnectionAutofill();
+  bindBinaryStorageUI();
   void loadDBMigrationStatus();
+}
+
+function bindBinaryStorageUI() {
+  const mode = formField("binary_storage.mode");
+  const s3Card = $("#s3-config-card");
+  const help = $("#s3-mode-help");
+  if (!mode || !s3Card) return;
+
+  const syncS3UI = () => {
+    const enabled = String(mode.value || "").toLowerCase() === "s3";
+    s3Card.disabled = !enabled;
+    s3Card.classList.toggle("is-disabled", !enabled);
+    s3Card.setAttribute("aria-disabled", String(!enabled));
+    if (help) {
+      help.textContent = enabled
+        ? "S3 esta activo para PDF e imagenes. Completa los datos de RustFS."
+        : "Selecciona s3 en Modo binario para habilitar esta configuracion.";
+    }
+  };
+
+  mode.addEventListener("change", syncS3UI);
+  syncS3UI();
 }
 
 function bindDBConnectionAutofill() {
@@ -1162,6 +1318,15 @@ function collectConfigPayload() {
       mode: value("binary_storage.mode"),
       temp_path: value("binary_storage.temp_path"),
     },
+	s3: {
+		filesystem_disk: value("binary_storage.mode") === "s3" ? "s3" : "local",
+		access_key_id: value("s3.access_key_id"),
+		secret_access_key: value("s3.secret_access_key"),
+		region: value("s3.region"),
+		bucket: value("s3.bucket"),
+		endpoint: value("s3.endpoint"),
+		use_path_style_endpoint: checked("s3.use_path_style_endpoint"),
+	},
     iiif: {
       base_url: value("iiif.base_url"),
       api_version: value("iiif.api_version"),
@@ -1420,9 +1585,9 @@ function updateMongoURIPreview() {
   });
 }
 
-function fieldset(title, fields) {
+function fieldset(title, fields, attributes = "") {
   return `
-    <fieldset class="config-card">
+    <fieldset class="config-card" ${attributes}>
       <legend>${escapeHTML(title)}</legend>
       ${fields.join("")}
     </fieldset>
