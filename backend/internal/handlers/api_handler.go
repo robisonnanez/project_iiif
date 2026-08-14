@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -22,6 +23,12 @@ type APIHandler struct {
 	documentService *services.DocumentService
 	config          *config.Config
 }
+
+const (
+	defaultUploadWidth  = 1241
+	defaultUploadHeight = 1754
+	defaultUploadDPI    = 150
+)
 
 func NewAPIHandler(
 	pdfService *services.PDFService,
@@ -46,6 +53,11 @@ func NewAPIHandler(
 // @Param pdf formData file true "Archivo PDF"
 // @Param project formData string false "Proyecto"
 // @Param tenant formData string false "Tenant"
+// @Param max_width formData int false "Ancho maximo de imagen" default(1241)
+// @Param max_height formData int false "Alto maximo de imagen" default(1754)
+// @Param dpi formData int false "Resolucion de render" default(150)
+// @Param format formData string false "Formato de salida (jpg o png)" default(jpg)
+// @Param quality formData int false "Calidad JPEG" default(85)
 // @Success 200 {object} models.PDFDocument
 // @Failure 400 {object} errorResponse
 // @Failure 500 {object} errorResponse
@@ -66,16 +78,10 @@ func (h *APIHandler) UploadPDF(c *gin.Context) {
 	}
 
 	// Obtener configuración de conversión
-	var settings models.ConversionSettings
-	if err := c.ShouldBindJSON(&settings); err != nil {
-		// Usar valores por defecto
-		settings = models.ConversionSettings{
-			Format:    h.config.Conversion.DefaultFormat,
-			Quality:   h.config.Conversion.DefaultQuality,
-			MaxWidth:  h.config.IIIF.MaxWidth,
-			MaxHeight: h.config.IIIF.MaxHeight,
-			EnableOCR: h.config.Conversion.EnableOCR,
-		}
+	settings, err := h.conversionSettings(c)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
 	}
 
 	// Guardar archivo temporal
@@ -108,6 +114,76 @@ func (h *APIHandler) UploadPDF(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, doc)
+}
+
+func (h *APIHandler) conversionSettings(c *gin.Context) (models.ConversionSettings, error) {
+	dpi := h.config.Conversion.DPI
+	if dpi == 0 {
+		dpi = defaultUploadDPI
+	}
+	settings := models.ConversionSettings{
+		Format:    strings.ToLower(strings.TrimSpace(h.config.Conversion.DefaultFormat)),
+		Quality:   h.config.Conversion.DefaultQuality,
+		MaxWidth:  defaultUploadWidth,
+		MaxHeight: defaultUploadHeight,
+		DPI:       dpi,
+		EnableOCR: h.config.Conversion.EnableOCR,
+	}
+	if settings.Format == "" {
+		settings.Format = "jpg"
+	}
+	if settings.Quality == 0 {
+		settings.Quality = 85
+	}
+
+	var err error
+	if settings.MaxWidth, err = formInt(c, "max_width", settings.MaxWidth); err != nil {
+		return settings, err
+	}
+	if settings.MaxHeight, err = formInt(c, "max_height", settings.MaxHeight); err != nil {
+		return settings, err
+	}
+	if settings.DPI, err = formInt(c, "dpi", settings.DPI); err != nil {
+		return settings, err
+	}
+	if settings.Quality, err = formInt(c, "quality", settings.Quality); err != nil {
+		return settings, err
+	}
+	if value := strings.ToLower(strings.TrimSpace(c.PostForm("format"))); value != "" {
+		settings.Format = value
+	}
+	if settings.Format == "jpeg" {
+		settings.Format = "jpg"
+	}
+
+	if settings.MaxWidth < 256 || settings.MaxWidth > 8192 {
+		return settings, errors.New("el ancho debe estar entre 256 y 8192 pixeles")
+	}
+	if settings.MaxHeight < 256 || settings.MaxHeight > 8192 {
+		return settings, errors.New("el alto debe estar entre 256 y 8192 pixeles")
+	}
+	if settings.DPI < 72 || settings.DPI > 600 {
+		return settings, errors.New("el DPI debe estar entre 72 y 600")
+	}
+	if settings.Quality < 1 || settings.Quality > 100 {
+		return settings, errors.New("la calidad debe estar entre 1 y 100")
+	}
+	if settings.Format != "jpg" && settings.Format != "png" {
+		return settings, errors.New("el formato debe ser jpg o png")
+	}
+	return settings, nil
+}
+
+func formInt(c *gin.Context, name string, fallback int) (int, error) {
+	value := strings.TrimSpace(c.PostForm(name))
+	if value == "" {
+		return fallback, nil
+	}
+	parsed, err := strconv.Atoi(value)
+	if err != nil {
+		return fallback, fmt.Errorf("%s debe ser un numero entero", name)
+	}
+	return parsed, nil
 }
 
 // GetDocuments godoc
@@ -212,8 +288,13 @@ func (h *APIHandler) UpdateProperties(c *gin.Context) {
 
 func (h *APIHandler) GetManifest(c *gin.Context) {
 	id := c.Param("id")
-	manifest, err := h.iiifService.GetManifest(id)
+	manifest, err := h.iiifService.GetManifest(id, c.Query("pages"))
 	if err != nil {
+		var selectionError *services.InvalidPageSelectionError
+		if errors.As(err, &selectionError) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": selectionError.Error()})
+			return
+		}
 		c.JSON(http.StatusNotFound, gin.H{"error": "Manifiesto no encontrado"})
 		return
 	}

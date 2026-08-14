@@ -53,7 +53,9 @@ func (ps *PostgresStorage) UpdateDocument(doc *models.PDFDocument) error {
 
 func (ps *PostgresStorage) GetDocument(id string) (*models.PDFDocument, error) {
 	row := ps.db.QueryRow(`
-		SELECT id, original_name, COALESCE(project_key, 'default'), COALESCE(tenant_key, ''), COALESCE(migrated_from_local, false), status, total_pages, converted_pages, pdf_path, thumbnail_path, manifest_url, created_at
+		SELECT id, original_name, COALESCE(project_key, 'default'), COALESCE(tenant_key, ''), COALESCE(migrated_from_local, false), status, total_pages, converted_pages,
+		       COALESCE(conversion_width, 1241), COALESCE(conversion_height, 1754), COALESCE(conversion_dpi, 150), COALESCE(conversion_format, 'jpg'), COALESCE(conversion_quality, 85),
+		       pdf_path, thumbnail_path, manifest_url, created_at
 		FROM documents
 		WHERE id = $1
 	`, id)
@@ -61,7 +63,8 @@ func (ps *PostgresStorage) GetDocument(id string) (*models.PDFDocument, error) {
 	var pdfPath, thumbnailPath, manifestURL sql.NullString
 	if err := row.Scan(
 		&doc.ID, &doc.Name, &doc.ProjectKey, &doc.TenantKey, &doc.MigratedFromLocal, &doc.Status,
-		&doc.TotalPages, &doc.ConvertedPages, &pdfPath, &thumbnailPath, &manifestURL, &doc.UploadDate,
+		&doc.TotalPages, &doc.ConvertedPages, &doc.ConversionWidth, &doc.ConversionHeight, &doc.ConversionDPI,
+		&doc.ConversionFormat, &doc.ConversionQuality, &pdfPath, &thumbnailPath, &manifestURL, &doc.UploadDate,
 	); err != nil {
 		return nil, fmt.Errorf("document not found: %w", err)
 	}
@@ -78,7 +81,9 @@ func (ps *PostgresStorage) GetAllDocuments() ([]*models.PDFDocument, error) {
 
 func (ps *PostgresStorage) GetDocumentsByScope(projectKey, tenantKey string) ([]*models.PDFDocument, error) {
 	query := `
-		SELECT id, original_name, COALESCE(project_key, 'default'), COALESCE(tenant_key, ''), COALESCE(migrated_from_local, false), status, total_pages, converted_pages, pdf_path, thumbnail_path, manifest_url, created_at
+		SELECT id, original_name, COALESCE(project_key, 'default'), COALESCE(tenant_key, ''), COALESCE(migrated_from_local, false), status, total_pages, converted_pages,
+		       COALESCE(conversion_width, 1241), COALESCE(conversion_height, 1754), COALESCE(conversion_dpi, 150), COALESCE(conversion_format, 'jpg'), COALESCE(conversion_quality, 85),
+		       pdf_path, thumbnail_path, manifest_url, created_at
 		FROM documents`
 	var conditions []string
 	var args []interface{}
@@ -110,7 +115,8 @@ func (ps *PostgresStorage) GetDocumentsByScope(projectKey, tenantKey string) ([]
 		var pdfPath, thumbnailPath, manifestURL sql.NullString
 		if err := rows.Scan(
 			&doc.ID, &doc.Name, &doc.ProjectKey, &doc.TenantKey, &doc.MigratedFromLocal, &doc.Status,
-			&doc.TotalPages, &doc.ConvertedPages, &pdfPath, &thumbnailPath, &manifestURL, &doc.UploadDate,
+			&doc.TotalPages, &doc.ConvertedPages, &doc.ConversionWidth, &doc.ConversionHeight, &doc.ConversionDPI,
+			&doc.ConversionFormat, &doc.ConversionQuality, &pdfPath, &thumbnailPath, &manifestURL, &doc.UploadDate,
 		); err != nil {
 			return nil, err
 		}
@@ -142,6 +148,27 @@ func (ps *PostgresStorage) SaveDocumentPDF(documentID string, data []byte, media
 		UPDATE documents SET pdf_blob = $1, pdf_media_type = $2, pdf_size = $3 WHERE id = $4
 	`, data, mediaType, len(data), documentID)
 	return err
+}
+
+func (ps *PostgresStorage) GetDocumentPDFData(documentID string) (*models.BinaryAsset, error) {
+	row := ps.db.QueryRow(`SELECT id, pdf_blob, pdf_media_type, pdf_size FROM documents WHERE id = $1`, documentID)
+	asset := &models.BinaryAsset{}
+	var data []byte
+	var mediaType sql.NullString
+	var byteSize sql.NullInt64
+	if err := row.Scan(&asset.ID, &data, &mediaType, &byteSize); err != nil {
+		return nil, fmt.Errorf("pdf blob not found: %w", err)
+	}
+	if len(data) == 0 {
+		return nil, fmt.Errorf("pdf blob is empty")
+	}
+	asset.Data = data
+	asset.MediaType = mediaType.String
+	asset.ByteSize = byteSize.Int64
+	if asset.ByteSize == 0 {
+		asset.ByteSize = int64(len(data))
+	}
+	return asset, nil
 }
 
 func (ps *PostgresStorage) SaveDocumentImage(image *models.DocumentImage) error {
@@ -238,8 +265,8 @@ func (ps *PostgresStorage) upsertDocument(doc *models.PDFDocument) error {
 		doc.UploadDate = time.Now()
 	}
 	_, err := ps.db.Exec(`
-		INSERT INTO documents (id, original_name, project_key, tenant_key, migrated_from_local, status, total_pages, converted_pages, pdf_path, thumbnail_path, manifest_url, created_at, updated_at)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,NOW())
+		INSERT INTO documents (id, original_name, project_key, tenant_key, migrated_from_local, status, total_pages, converted_pages, conversion_width, conversion_height, conversion_dpi, conversion_format, conversion_quality, pdf_path, thumbnail_path, manifest_url, created_at, updated_at)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,NOW())
 		ON CONFLICT (id) DO UPDATE SET
 			original_name = EXCLUDED.original_name,
 			project_key = EXCLUDED.project_key,
@@ -248,11 +275,18 @@ func (ps *PostgresStorage) upsertDocument(doc *models.PDFDocument) error {
 			status = EXCLUDED.status,
 			total_pages = EXCLUDED.total_pages,
 			converted_pages = EXCLUDED.converted_pages,
+			conversion_width = EXCLUDED.conversion_width,
+			conversion_height = EXCLUDED.conversion_height,
+			conversion_dpi = EXCLUDED.conversion_dpi,
+			conversion_format = EXCLUDED.conversion_format,
+			conversion_quality = EXCLUDED.conversion_quality,
 			pdf_path = EXCLUDED.pdf_path,
 			thumbnail_path = EXCLUDED.thumbnail_path,
 			manifest_url = EXCLUDED.manifest_url,
 			updated_at = NOW()
-	`, doc.ID, doc.Name, nullString(defaultProject(doc.ProjectKey)), nullString(doc.TenantKey), doc.MigratedFromLocal, doc.Status, doc.TotalPages, doc.ConvertedPages, nullString(doc.FilePath), nullString(doc.ThumbnailURL), nullString(doc.ManifestURL), doc.UploadDate)
+	`, doc.ID, doc.Name, nullString(defaultProject(doc.ProjectKey)), nullString(doc.TenantKey), doc.MigratedFromLocal, doc.Status, doc.TotalPages, doc.ConvertedPages,
+		doc.ConversionWidth, doc.ConversionHeight, doc.ConversionDPI, nullString(doc.ConversionFormat), doc.ConversionQuality,
+		nullString(doc.FilePath), nullString(doc.ThumbnailURL), nullString(doc.ManifestURL), doc.UploadDate)
 	return err
 }
 

@@ -14,6 +14,11 @@ type PDFDocument struct {
 	ConvertedPages    int       `json:"convertedPages"`
 	ManifestURL       string    `json:"manifestUrl,omitempty"`
 	ThumbnailURL      string    `json:"thumbnailUrl,omitempty"`
+	ConversionWidth   int       `json:"conversionWidth,omitempty"`
+	ConversionHeight  int       `json:"conversionHeight,omitempty"`
+	ConversionDPI     int       `json:"conversionDpi,omitempty"`
+	ConversionFormat  string    `json:"conversionFormat,omitempty"`
+	ConversionQuality int       `json:"conversionQuality,omitempty"`
 	FilePath          string    `json:"-"`
 	ImagePaths        []string  `json:"-"`
 }
@@ -51,6 +56,7 @@ type ConversionSettings struct {
 	Quality   int    `json:"quality"`
 	MaxWidth  int    `json:"maxWidth"`
 	MaxHeight int    `json:"maxHeight"`
+	DPI       int    `json:"dpi"`
 	EnableOCR bool   `json:"enableOCR"`
 }
 

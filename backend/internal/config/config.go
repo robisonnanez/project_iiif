@@ -22,6 +22,14 @@ type Config struct {
 	DBUsername     string `yaml:"DB_USERNAME"`
 	DBPassword     string `yaml:"DB_PASSWORD"`
 
+	FilesystemDisk          string `yaml:"FILESYSTEM_DISK"`
+	AWSAccessKeyID          string `yaml:"AWS_ACCESS_KEY_ID"`
+	AWSSecretAccessKey      string `yaml:"AWS_SECRET_ACCESS_KEY"`
+	AWSDefaultRegion        string `yaml:"AWS_DEFAULT_REGION"`
+	AWSBucket               string `yaml:"AWS_BUCKET"`
+	AWSEndpoint             string `yaml:"AWS_ENDPOINT"`
+	AWSUsePathStyleEndpoint bool   `yaml:"AWS_USE_PATH_STYLE_ENDPOINT"`
+
 	Server struct {
 		Port string `yaml:"port"`
 		Mode string `yaml:"mode"`
@@ -158,9 +166,32 @@ func Load(filename string) (*Config, error) {
 		return nil, err
 	}
 
+	applyEnvironment(&config)
 	applyDefaults(&config)
 	config.SourcePath = resolvedPath(filename)
 	return &config, nil
+}
+
+func applyEnvironment(config *Config) {
+	stringValues := []struct {
+		name   string
+		target *string
+	}{
+		{"FILESYSTEM_DISK", &config.FilesystemDisk},
+		{"AWS_ACCESS_KEY_ID", &config.AWSAccessKeyID},
+		{"AWS_SECRET_ACCESS_KEY", &config.AWSSecretAccessKey},
+		{"AWS_DEFAULT_REGION", &config.AWSDefaultRegion},
+		{"AWS_BUCKET", &config.AWSBucket},
+		{"AWS_ENDPOINT", &config.AWSEndpoint},
+	}
+	for _, item := range stringValues {
+		if value, ok := os.LookupEnv(item.name); ok {
+			*item.target = strings.TrimSpace(value)
+		}
+	}
+	if value, ok := os.LookupEnv("AWS_USE_PATH_STYLE_ENDPOINT"); ok {
+		config.AWSUsePathStyleEndpoint = strings.EqualFold(strings.TrimSpace(value), "true") || strings.TrimSpace(value) == "1"
+	}
 }
 
 func Save(filename string, config *Config) error {
@@ -209,6 +240,13 @@ func (config *Config) ApplyDefaults() {
 
 func applyDefaults(config *Config) {
 	defaults := Default()
+	if config.FilesystemDisk == "" {
+		config.FilesystemDisk = "local"
+	}
+	config.FilesystemDisk = strings.ToLower(strings.TrimSpace(config.FilesystemDisk))
+	if config.AWSDefaultRegion == "" {
+		config.AWSDefaultRegion = "us-east-1"
+	}
 	if config.StorageBackend != "" {
 		config.Storage.Backend = config.StorageBackend
 	}
@@ -342,7 +380,9 @@ func applyDefaults(config *Config) {
 		config.Database.MongoDB.DirectConnection = defaults.Database.MongoDB.DirectConnection
 	}
 	if config.BinaryStorage.Mode == "" {
-		if config.Storage.Backend == "local" {
+		if config.FilesystemDisk == "s3" {
+			config.BinaryStorage.Mode = "s3"
+		} else if config.Storage.Backend == "local" {
 			config.BinaryStorage.Mode = "local"
 		} else {
 			config.BinaryStorage.Mode = defaults.BinaryStorage.Mode

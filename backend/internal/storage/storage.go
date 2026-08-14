@@ -33,8 +33,38 @@ type DocumentPDFBlobChecker interface {
 	HasDocumentPDFBlob(documentID string) (bool, error)
 }
 
+type DocumentPDFReader interface {
+	GetDocumentPDFData(documentID string) (*models.BinaryAsset, error)
+}
+
 type ImageBlobChecker interface {
 	HasImageBlob(imageID string) (bool, error)
+}
+
+func NewMetadataStorage(cfg *config.Config) (Storage, error) {
+	switch strings.ToLower(strings.TrimSpace(cfg.Storage.Backend)) {
+	case "", "local":
+		return NewFileStorageFromConfig(cfg), nil
+	case "mysql":
+		return NewMySQLStorage(cfg)
+	case "postgres", "postgresql":
+		return NewPostgresStorage(cfg)
+	case "mongo", "mongodb":
+		return NewMongoStorage(cfg)
+	default:
+		return nil, fmt.Errorf("storage backend no soportado: %s", cfg.Storage.Backend)
+	}
+}
+
+func NewConfiguredStorage(cfg *config.Config) (Storage, error) {
+	metadata, err := NewMetadataStorage(cfg)
+	if err != nil {
+		return nil, err
+	}
+	if strings.EqualFold(cfg.FilesystemDisk, "s3") || strings.EqualFold(cfg.BinaryStorage.Mode, "s3") {
+		return NewS3Storage(cfg, metadata)
+	}
+	return metadata, nil
 }
 
 type FileStorage struct {
@@ -176,6 +206,18 @@ func (fs *FileStorage) UpdateDocument(doc *models.PDFDocument) error {
 
 func (fs *FileStorage) SaveDocumentPDF(documentID string, data []byte, mediaType string) error {
 	return nil
+}
+
+func (fs *FileStorage) GetDocumentPDFData(documentID string) (*models.BinaryAsset, error) {
+	doc, err := fs.GetDocument(documentID)
+	if err != nil {
+		return nil, err
+	}
+	data, err := os.ReadFile(doc.FilePath)
+	if err != nil {
+		return nil, fmt.Errorf("pdf local no encontrado: %w", err)
+	}
+	return &models.BinaryAsset{ID: documentID, Data: data, MediaType: "application/pdf", ByteSize: int64(len(data))}, nil
 }
 
 func (fs *FileStorage) SaveDocumentImage(image *models.DocumentImage) error {

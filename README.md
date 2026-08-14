@@ -135,6 +135,83 @@ mongodb://127.0.0.1:27017/project_iiif
 mongodb://usuario:password@127.0.0.1:27017/project_iiif?authSource=admin
 ```
 
+### Almacenamiento S3 / RustFS
+
+RustFS se usa como almacenamiento de binarios y la base seleccionada continúa siendo el catálogo de metadatos. Los PDFs e imágenes se guardan como objetos S3; `documents.pdf_path` y `document_images.image_path` almacenan referencias `s3://bucket/clave`. En MongoDB se reutilizan los campos `pdf_path` e `image_path` de las colecciones actuales.
+
+```yaml
+FILESYSTEM_DISK: "s3"
+AWS_ACCESS_KEY_ID: "TU_ACCESS_KEY_DE_RUSTFS"
+AWS_SECRET_ACCESS_KEY: "TU_SECRET_KEY_DE_RUSTFS"
+AWS_DEFAULT_REGION: "us-east-1"
+AWS_BUCKET: "mi-proyecto"
+AWS_ENDPOINT: "http://127.0.0.1:9000"
+AWS_USE_PATH_STYLE_ENDPOINT: true
+
+binary_storage:
+  mode: "s3"
+  temp_path: "./data/temp"
+```
+
+La estructura de objetos es:
+
+```text
+projects/{project}/documents/{document_id}/document.pdf
+projects/{project}/documents/{document_id}/images/page_{page}_{image_id}.{format}
+projects/{project}/tenants/{tenant}/documents/...
+```
+
+Al iniciar, el servidor valida RustFS y crea el bucket configurado si todavía no existe. Puedes ejecutar una prueba no destructiva de escritura, lectura y eliminación:
+
+```bash
+cd backend
+go run ./cmd/s3-smoke
+```
+
+#### Relación entre la base de datos, S3 e IIIF
+
+S3 no reemplaza la base de datos. Cada componente tiene una responsabilidad distinta:
+
+| Componente | Responsabilidad |
+| --- | --- |
+| MySQL, PostgreSQL o MongoDB | Guarda documentos, páginas, dimensiones, estado, proyecto, tenant y las referencias de almacenamiento. |
+| RustFS / S3 | Guarda los bytes de los PDF y de las imágenes. |
+| IIIF | Consulta los metadatos, descarga la imagen desde S3 y entrega la representación solicitada. |
+
+Cuando `binary_storage.mode` es `s3`, los campos contienen referencias como estas:
+
+```text
+documents.pdf_path = s3://project-iiif/projects/default/tenants/sunat/documents/{document_id}/document.pdf
+document_images.image_path = s3://project-iiif/projects/default/tenants/sunat/documents/{document_id}/images/page_000001_{image_id}.jpg
+```
+
+Por lo tanto, la galería de imágenes sí usa `document_images.image_path`. El recorrido de una solicitud es:
+
+```text
+Navegador -> URL IIIF -> registro document_images -> image_path s3://... -> RustFS -> transformación IIIF -> JPEG/PNG/WebP
+```
+
+La URL IIIF no expone credenciales de RustFS ni redirige al navegador hacia el endpoint S3. El backend realiza la lectura internamente.
+
+Puedes comprobar las referencias en MySQL con:
+
+```sql
+SELECT id, original_name, pdf_path
+FROM documents;
+
+SELECT id, document_id, page_number, image_path
+FROM document_images
+ORDER BY document_id, page_number;
+```
+
+Pruebas rápidas de IIIF:
+
+```bash
+curl -f http://127.0.0.1:8080/iiif/3/{document_id}_page_1/info.json
+curl -f -o pagina.jpg http://127.0.0.1:8080/iiif/3/{document_id}_page_1/full/600,/0/default.jpg
+curl -f http://127.0.0.1:8080/api/iiif/{document_id}/manifest
+```
+
 ## Dashboard
 
 Activa el panel así:
@@ -156,11 +233,19 @@ Rutas relevantes:
 
 Funciones del dashboard:
 
-- Subida de PDFs.
+- Subida de PDFs con selección previa de dimensiones, DPI, formato y calidad.
 - Galería de imágenes IIIF.
 - Edición segura de `config.yaml`.
 - Reinicio asistido del servicio.
 - Migración local o remota por SSH.
+
+En **Configuración**, `Backend de metadatos` y `Modo binario` son opciones diferentes:
+
+- `Backend de metadatos`: `local`, `mysql`, `postgres` o `mongodb`.
+- `Modo binario`: `local`, `database` o `s3`.
+- Para RustFS, selecciona la base que guardará los registros y después selecciona `s3` como modo binario.
+- Los campos `S3 / RustFS` solo se habilitan cuando el modo binario es `s3`.
+- MySQL y PostgreSQL muestran los campos SQL; MongoDB muestra únicamente `Mongo URI`.
 
 ## Proyectos y multitenant
 
@@ -186,6 +271,32 @@ projects:
 
 `POST /api/v1/documents/upload` acepta `project` y `tenant` por `form-data` o headers `X-IIIF-Project` y `X-IIIF-Tenant`.
 
+### Resolución de las imágenes al subir un PDF
+
+Al seleccionar un PDF, el dashboard solicita la configuración antes de iniciar la conversión. Los valores predeterminados son:
+
+| Campo | Valor |
+| --- | --- |
+| Ancho máximo | `1241 px` |
+| Alto máximo | `1754 px` |
+| Resolución | `150 DPI` |
+| Formato | `JPG` |
+| Calidad JPG | `85` |
+
+La imagen conserva la proporción original y se ajusta dentro de esos límites; no se estira para ocupar ambas dimensiones. `1241 × 1754 px` a `150 DPI` es adecuado para visualización web e IIIF. Por ejemplo, una página Carta se genera aproximadamente a `1241 × 1606 px`.
+
+La API recibe estos campos como `multipart/form-data`:
+
+```text
+max_width=1241
+max_height=1754
+dpi=150
+format=jpg
+quality=85
+```
+
+Los límites aceptados son `256-8192 px`, `72-600 DPI` y calidad `1-100`. La configuración usada queda registrada con el documento en MySQL, PostgreSQL o MongoDB.
+
 ## Migración local o SSH hacia la base de datos activa
 
 El migrador sirve para copiar histórico desde filesystem local o desde un servidor remoto por SSH hacia el motor activo.
@@ -200,13 +311,30 @@ Aunque el comando histórico mantiene el nombre `migrate-local-to-mysql`, hoy so
 - MySQL
 - PostgreSQL
 - MongoDB
+- S3 / RustFS como destino binario
 
 Comportamiento:
 
 - Migra documentos e imágenes.
 - Migra binarios a BLOB o GridFS según el motor activo.
+- Con `binary_storage.mode: s3`, migra los binarios a RustFS y conserva metadatos en la base activa.
 - Es idempotente.
 - No borra archivos locales al finalizar.
+
+### Prueba limpia de migración a S3
+
+En un entorno de pruebas puedes vaciar únicamente los datos documentales y conservar `schema_migrations`:
+
+```sql
+SET FOREIGN_KEY_CHECKS = 0;
+TRUNCATE TABLE document_images;
+TRUNCATE TABLE documents;
+SET FOREIGN_KEY_CHECKS = 1;
+```
+
+Después ejecuta el migrador con `binary_storage.mode: s3`. Una migración verificada en el entorno de prueba produjo 3 PDF y 939 imágenes, todas con referencias `s3://project-iiif/...`, y IIIF devolvió correctamente `info.json`, el manifiesto y una imagen JPEG.
+
+> `TRUNCATE` elimina los registros existentes. Úsalo únicamente cuando quieras reiniciar una prueba y tengas respaldo si los datos son importantes.
 
 Para habilitar migración desde el dashboard:
 
@@ -293,6 +421,18 @@ IIIF:
 - `GET /iiif/3/:identifier/default.jpg`
 - `GET /api/iiif/:id/manifest`
 
+El manifiesto usa IIIF Presentation 3. Sin parámetros incluye todas las páginas. Para generar una vista parcial, usa `pages` con números y rangos separados por comas:
+
+```text
+GET /api/iiif/{document_id}/manifest?pages=1-5,8,10-12
+```
+
+- Las páginas se validan contra `total_pages`.
+- Los duplicados se eliminan y la respuesta queda ordenada.
+- `pages=all` equivale a omitir el parámetro.
+- Una selección inválida devuelve HTTP `400`.
+- La selección no vuelve a convertir ni duplica imágenes; únicamente determina qué canvases aparecen en el manifiesto.
+
 ## Estructura del proyecto
 
 ```text
@@ -321,3 +461,5 @@ backend/
 - Si usas MongoDB sin autenticación, deja usuario y contraseña vacíos.
 - Si la migración muestra errores por documento, revisa el modal de progreso y los logs.
 - Si Swagger no refleja cambios recientes, regenera `backend/docs`.
+
+Los documentos migrados con estado `completed` también muestran `Generar manifest` en el dashboard. La acción crea la respuesta IIIF dinámicamente desde las imágenes registradas, aunque el documento no tuviera una URL de manifiesto guardada previamente.

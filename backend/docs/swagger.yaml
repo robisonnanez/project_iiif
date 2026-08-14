@@ -133,6 +133,23 @@ definitions:
           require_project:
             type: boolean
         type: object
+      s3:
+        properties:
+          access_key_id:
+            type: string
+          bucket:
+            type: string
+          endpoint:
+            type: string
+          filesystem_disk:
+            type: string
+          region:
+            type: string
+          secret_access_key:
+            type: string
+          use_path_style_endpoint:
+            type: boolean
+        type: object
       security:
         properties:
           cors_origins:
@@ -317,6 +334,16 @@ definitions:
     type: object
   models.PDFDocument:
     properties:
+      conversionDpi:
+        type: integer
+      conversionFormat:
+        type: string
+      conversionHeight:
+        type: integer
+      conversionQuality:
+        type: integer
+      conversionWidth:
+        type: integer
       convertedPages:
         type: integer
       id:
@@ -718,6 +745,31 @@ paths:
         in: formData
         name: tenant
         type: string
+      - default: 1241
+        description: Ancho maximo de imagen
+        in: formData
+        name: max_width
+        type: integer
+      - default: 1754
+        description: Alto maximo de imagen
+        in: formData
+        name: max_height
+        type: integer
+      - default: 150
+        description: Resolucion de render
+        in: formData
+        name: dpi
+        type: integer
+      - default: jpg
+        description: Formato de salida (jpg o png)
+        in: formData
+        name: format
+        type: string
+      - default: 85
+        description: Calidad JPEG
+        in: formData
+        name: quality
+        type: integer
       produces:
       - application/json
       responses:

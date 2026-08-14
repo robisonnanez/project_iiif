@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"html"
 	"net/http"
+	"strings"
 
 	"iiif-pdf-server/internal/config"
 
@@ -286,6 +287,7 @@ func (h *WelcomeHandler) Welcome(c *gin.Context) {
 }
 
 func (h *WelcomeHandler) HealthCheck(c *gin.Context) {
+	s3Enabled := strings.EqualFold(h.config.FilesystemDisk, "s3") || strings.EqualFold(h.config.BinaryStorage.Mode, "s3")
 	c.JSON(http.StatusOK, gin.H{
 		"status":  "ok",
 		"message": "Servidor IIIF PDF funcionando correctamente",
@@ -295,6 +297,12 @@ func (h *WelcomeHandler) HealthCheck(c *gin.Context) {
 		"frontend": gin.H{
 			"enabled":      h.config.Frontend.Enabled,
 			"require_auth": h.config.Frontend.RequireAuth,
+		},
+		"binary_storage": gin.H{
+			"mode":        h.config.BinaryStorage.Mode,
+			"s3_enabled":  s3Enabled,
+			"s3_endpoint": h.config.AWSEndpoint,
+			"s3_bucket":   h.config.AWSBucket,
 		},
 		"endpoints": map[string]string{
 			"upload":    "/api/v1/documents/upload",

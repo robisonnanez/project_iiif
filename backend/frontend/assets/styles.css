@@ -293,6 +293,28 @@ td code {
   font-family: Consolas, "Liberation Mono", monospace;
 }
 
+.manifest-actions {
+  display: grid;
+  grid-template-columns: auto minmax(140px, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+  min-width: 340px;
+}
+
+.manifest-actions input {
+  min-height: 34px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-2);
+  color: var(--text);
+  padding: 0 9px;
+}
+
+.manifest-actions button {
+  min-height: 34px;
+  padding: 0 10px;
+}
+
 .empty {
   color: var(--muted);
   padding: 8px 0;
@@ -347,6 +369,24 @@ td code {
 #mongo-db-fields {
   display: grid;
   gap: 12px;
+}
+
+#sql-db-fields[hidden],
+#mongo-db-fields[hidden] {
+  display: none;
+}
+
+.config-card {
+  transition: opacity 160ms ease, background-color 160ms ease;
+}
+
+.config-card.is-disabled {
+  background: #f2f5f8;
+  opacity: 0.68;
+}
+
+.config-card.is-disabled :is(input, select, textarea) {
+  cursor: not-allowed;
 }
 
 .field-help {
@@ -526,10 +566,29 @@ td code {
   gap: 10px;
 }
 
+.upload-settings-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.upload-settings-summary {
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface-2);
+  color: var(--muted);
+}
+
 .modal-actions {
   display: flex;
   justify-content: flex-end;
   gap: 8px;
+}
+
+@media (max-width: 560px) {
+  .upload-settings-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 .progress-track {

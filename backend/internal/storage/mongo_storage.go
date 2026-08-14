@@ -201,6 +201,25 @@ func (ms *MongoStorage) SaveDocumentPDF(documentID string, data []byte, mediaTyp
 	return err
 }
 
+func (ms *MongoStorage) GetDocumentPDFData(documentID string) (*models.BinaryAsset, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	fileID, err := ms.documentBlobID(ctx, documentID)
+	if err != nil || fileID.IsZero() {
+		return nil, fmt.Errorf("pdf GridFS no encontrado: %w", err)
+	}
+	stream, err := ms.pdfBucket.OpenDownloadStream(fileID)
+	if err != nil {
+		return nil, err
+	}
+	defer stream.Close()
+	var buffer bytes.Buffer
+	if _, err := buffer.ReadFrom(stream); err != nil {
+		return nil, err
+	}
+	return &models.BinaryAsset{ID: documentID, Data: buffer.Bytes(), MediaType: "application/pdf", ByteSize: int64(buffer.Len())}, nil
+}
+
 func (ms *MongoStorage) SaveDocumentImage(image *models.DocumentImage) error {
 	if image.CreatedAt.IsZero() {
 		image.CreatedAt = time.Now()
@@ -378,6 +397,11 @@ func (ms *MongoStorage) upsertDocument(doc *models.PDFDocument) error {
 		"status":              doc.Status,
 		"total_pages":         doc.TotalPages,
 		"converted_pages":     doc.ConvertedPages,
+		"conversion_width":    doc.ConversionWidth,
+		"conversion_height":   doc.ConversionHeight,
+		"conversion_dpi":      doc.ConversionDPI,
+		"conversion_format":   doc.ConversionFormat,
+		"conversion_quality":  doc.ConversionQuality,
 		"pdf_path":            doc.FilePath,
 		"thumbnail_path":      doc.ThumbnailURL,
 		"manifest_url":        doc.ManifestURL,
@@ -454,6 +478,11 @@ func decodeDocument(raw bson.M) *models.PDFDocument {
 		Status:            stringValue(raw, "status"),
 		TotalPages:        intValue(raw, "total_pages"),
 		ConvertedPages:    intValue(raw, "converted_pages"),
+		ConversionWidth:   intValue(raw, "conversion_width"),
+		ConversionHeight:  intValue(raw, "conversion_height"),
+		ConversionDPI:     intValue(raw, "conversion_dpi"),
+		ConversionFormat:  stringValue(raw, "conversion_format"),
+		ConversionQuality: intValue(raw, "conversion_quality"),
 		ManifestURL:       stringValue(raw, "manifest_url"),
 		ThumbnailURL:      stringValue(raw, "thumbnail_path"),
 		FilePath:          stringValue(raw, "pdf_path"),

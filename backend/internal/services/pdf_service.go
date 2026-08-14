@@ -7,6 +7,7 @@ import (
 	"image/jpeg"
 	"image/png"
 	"io"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -40,6 +41,12 @@ func (s *PDFService) ProcessPDF(sourcePath string, filename string, settings mod
 	if settings.Quality == 0 {
 		settings.Quality = s.config.Conversion.DefaultQuality
 	}
+	if settings.DPI == 0 {
+		settings.DPI = s.config.Conversion.DPI
+	}
+	if settings.DPI == 0 {
+		settings.DPI = 150
+	}
 
 	documentID := uuid.New().String()
 	if scope == nil {
@@ -68,6 +75,11 @@ func (s *PDFService) ProcessPDF(sourcePath string, filename string, settings mod
 		Status:            "processing",
 		FilePath:          pdfPath,
 		ConvertedPages:    0,
+		ConversionWidth:   settings.MaxWidth,
+		ConversionHeight:  settings.MaxHeight,
+		ConversionDPI:     settings.DPI,
+		ConversionFormat:  settings.Format,
+		ConversionQuality: settings.Quality,
 	}
 
 	if err := s.storage.SaveDocument(doc); err != nil {
@@ -77,6 +89,13 @@ func (s *PDFService) ProcessPDF(sourcePath string, filename string, settings mod
 		if err := s.storage.SaveDocumentPDF(doc.ID, pdfData, "application/pdf"); err != nil {
 			return nil, fmt.Errorf("error saving PDF blob: %w", err)
 		}
+		storedDoc, err := s.storage.GetDocument(doc.ID)
+		if err != nil {
+			return nil, fmt.Errorf("error reloading stored PDF metadata: %w", err)
+		}
+		// S3 assigns pdf_path while saving the object. Keep it in the worker copy
+		// so progress updates do not overwrite the persisted reference.
+		doc.FilePath = storedDoc.FilePath
 	}
 
 	go s.convertPDFToImages(doc, sourcePath, settings)
@@ -85,6 +104,8 @@ func (s *PDFService) ProcessPDF(sourcePath string, filename string, settings mod
 }
 
 func (s *PDFService) convertPDFToImages(doc *models.PDFDocument, sourcePath string, settings models.ConversionSettings) {
+	startedAt := time.Now()
+	var renderDuration, resizeDuration, encodeDuration, storeDuration time.Duration
 	defer func() {
 		if s.usesDatabaseBlobs() {
 			_ = os.Remove(sourcePath)
@@ -124,21 +145,28 @@ func (s *PDFService) convertPDFToImages(doc *models.PDFDocument, sourcePath stri
 	var imagePaths []string
 
 	for i := 0; i < pdf.NumPage(); i++ {
-		img, err := pdf.Image(i)
+		stageStarted := time.Now()
+		img, err := pdf.ImageDPI(i, float64(settings.DPI))
+		renderDuration += time.Since(stageStarted)
 		if err != nil {
 			continue
 		}
 		var pageImage image.Image = img
 
 		if settings.MaxWidth > 0 || settings.MaxHeight > 0 {
+			stageStarted = time.Now()
 			pageImage = imaging.Fit(pageImage, settings.MaxWidth, settings.MaxHeight, imaging.Lanczos)
+			resizeDuration += time.Since(stageStarted)
 		}
 
+		stageStarted = time.Now()
 		imageData, mediaType, err := s.encodeImage(pageImage, settings)
+		encodeDuration += time.Since(stageStarted)
 		if err != nil {
 			continue
 		}
 
+		stageStarted = time.Now()
 		imagePath := ""
 		if !s.usesDatabaseBlobs() {
 			imagePath = filepath.Join(imageDir, fmt.Sprintf("page_%d.%s", i+1, settings.Format))
@@ -171,12 +199,15 @@ func (s *PDFService) convertPDFToImages(doc *models.PDFDocument, sourcePath stri
 				continue
 			}
 		}
+		storeDuration += time.Since(stageStarted)
 
 		if imagePath != "" {
 			imagePaths = append(imagePaths, imagePath)
 		}
 		doc.ConvertedPages++
-		s.storage.UpdateDocument(doc)
+		if doc.ConvertedPages%5 == 0 || doc.ConvertedPages == doc.TotalPages {
+			s.storage.UpdateDocument(doc)
+		}
 
 		if i == 0 && !s.usesDatabaseBlobs() {
 			thumbnailPath := filepath.Join(s.scopePath(s.config.Storage.ThumbnailsPath, &models.Scope{ProjectKey: doc.ProjectKey, TenantKey: doc.TenantKey}), doc.ID+".jpg")
@@ -193,6 +224,9 @@ func (s *PDFService) convertPDFToImages(doc *models.PDFDocument, sourcePath stri
 	doc.ManifestURL = fmt.Sprintf("%s/api/iiif/%s/manifest", s.config.IIIF.BaseURL, doc.ID)
 
 	s.storage.UpdateDocument(doc)
+	log.Printf("PDF conversion completed document=%s pages=%d total=%s render=%s resize=%s encode=%s store=%s dpi=%d max=%dx%d format=%s",
+		doc.ID, doc.ConvertedPages, time.Since(startedAt), renderDuration, resizeDuration, encodeDuration, storeDuration,
+		settings.DPI, settings.MaxWidth, settings.MaxHeight, settings.Format)
 }
 
 func (s *PDFService) scopePath(base string, scope *models.Scope) string {
@@ -237,7 +271,7 @@ func (s *PDFService) saveImage(img image.Image, path string, settings models.Con
 func (s *PDFService) usesDatabaseBlobs() bool {
 	backend := strings.ToLower(s.config.Storage.Backend)
 	mode := strings.ToLower(s.config.BinaryStorage.Mode)
-	return backend != "local" && mode == "database"
+	return mode == "s3" || (backend != "local" && mode == "database")
 }
 
 func copyFile(sourcePath, destinationPath string) error {
