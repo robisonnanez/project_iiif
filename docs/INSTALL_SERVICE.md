@@ -189,6 +189,80 @@ binary_storage:
   temp_path: "/var/lib/project_iiif/temp"
 ```
 
+### Binarios en RustFS / S3
+
+Esta configuración puede combinarse con MySQL, PostgreSQL, MongoDB o metadata local:
+
+```yaml
+FILESYSTEM_DISK: "s3"
+AWS_ACCESS_KEY_ID: "TU_ACCESS_KEY_DE_RUSTFS"
+AWS_SECRET_ACCESS_KEY: "TU_SECRET_KEY_DE_RUSTFS"
+AWS_DEFAULT_REGION: "us-east-1"
+AWS_BUCKET: "mi-proyecto"
+AWS_ENDPOINT: "http://127.0.0.1:9000"
+AWS_USE_PATH_STYLE_ENDPOINT: true
+
+binary_storage:
+  mode: "s3"
+  temp_path: "/var/lib/project_iiif/temp"
+```
+
+Verifica las operaciones S3 antes de reiniciar el servicio:
+
+```bash
+cd /opt/project_iiif/backend
+go run ./cmd/s3-smoke
+```
+
+La migración desde BLOB/GridFS hacia RustFS está disponible en el dashboard seleccionando `Base de datos activa (BLOB/GridFS) a S3`.
+
+#### Cómo se leen los documentos y las imágenes
+
+La base activa continúa siendo el catálogo. En MySQL y PostgreSQL se utilizan los campos `documents.pdf_path` y `document_images.image_path`; en MongoDB se usan los campos equivalentes de sus colecciones. Con S3 activo, su valor es una referencia `s3://bucket/clave`, no el contenido binario.
+
+```text
+documents.pdf_path
+  -> s3://project-iiif/projects/default/tenants/sunat/documents/{document_id}/document.pdf
+
+document_images.image_path
+  -> s3://project-iiif/projects/default/tenants/sunat/documents/{document_id}/images/page_000001_{image_id}.jpg
+```
+
+Cuando se abre una imagen en el dashboard, el endpoint IIIF busca el registro por documento/página o identificador, obtiene `image_path`, descarga el objeto desde RustFS y devuelve la imagen transformada. El navegador no necesita acceso directo al bucket ni conoce las credenciales S3.
+
+Verifica el flujo completo después de instalar:
+
+```bash
+curl -f http://127.0.0.1:8080/health
+curl -f http://127.0.0.1:8080/iiif/3/{document_id}_page_1/info.json
+curl -f -o /tmp/pagina.jpg \
+  http://127.0.0.1:8080/iiif/3/{document_id}_page_1/full/600,/0/default.jpg
+file /tmp/pagina.jpg
+```
+
+El resultado final debe ser HTTP `200` y un archivo `image/jpeg`.
+
+#### Selección en el dashboard
+
+- En `Backend de metadatos`, selecciona MySQL, PostgreSQL, MongoDB o local. S3 no aparece aquí porque no almacena el catálogo.
+- En `Modo binario`, selecciona `s3` para guardar PDF e imágenes en RustFS.
+- Al seleccionar `s3`, se habilitan endpoint, región, bucket, access key, secret key y path-style.
+- Para MySQL/PostgreSQL se muestran host, puerto, base, usuario y contraseña.
+- Para MongoDB se ocultan los campos SQL y se muestra únicamente `Mongo URI`.
+
+#### Reiniciar una prueba de migración en MySQL
+
+Si necesitas empezar desde cero, conserva la tabla `schema_migrations` y vacía solamente las tablas documentales:
+
+```sql
+SET FOREIGN_KEY_CHECKS = 0;
+TRUNCATE TABLE document_images;
+TRUNCATE TABLE documents;
+SET FOREIGN_KEY_CHECKS = 1;
+```
+
+Esta operación elimina los registros actuales. No la ejecutes en producción sin respaldo.
+
 Si usas autenticación en MongoDB:
 
 ```yaml
@@ -372,3 +446,16 @@ Si el motor activo es MongoDB:
 - Si el dashboard muestra errores por documento durante la migración, revisa el modal de progreso y los logs.
 - Si cambias configuración desde el dashboard, puedes reiniciar el servicio desde el modal o con `systemctl restart project-iiif`.
 - Si Swagger no refleja cambios recientes, regenera `backend/docs` con `swag init -g main.go -o docs`.
+## Actualización para dimensiones y DPI configurables
+
+Después de desplegar esta versión, aplica las migraciones de base de datos antes de reiniciar el binario. Se agregan los campos `conversion_width`, `conversion_height`, `conversion_dpi`, `conversion_format` y `conversion_quality` a `documents` para MySQL/PostgreSQL. MongoDB no requiere una migración estructural.
+
+La configuración predeterminada del formulario es `1241 × 1754 px` a `150 DPI`. El render conserva la proporción de cada página y registra tiempos agregados de render, redimensionamiento, codificación y almacenamiento en el log del servicio.
+
+```bash
+sudo systemctl restart project-iiif
+sudo systemctl status project-iiif --no-pager
+journalctl -u project-iiif -n 100 --no-pager
+```
+
+En **Documentos**, cualquier registro con estado `completed`, incluidos los migrados a S3/RustFS, dispone del botón **Generar manifest**.
