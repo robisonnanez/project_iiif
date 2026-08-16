@@ -1,6 +1,13 @@
 export type Engine = "mysql" | "postgres" | "mongodb";
 export type BinaryMode = "local" | "database" | "s3";
 
+export interface ProjectConfig {
+  key: string;
+  name: string;
+  multitenant: boolean;
+  tenants: string[];
+}
+
 export interface DocumentRecord {
   id: string;
   name: string;
@@ -70,7 +77,7 @@ export interface AppConfig {
   };
   iiif: { base_url: string; api_version: string; max_width: number; max_height: number; cache: boolean; cache_ttl: number };
   conversion: { default_width: number; default_height: number; dpi: number; default_format: "jpg" | "png"; default_quality: number; enable_ocr: boolean };
-  projects: { enabled: boolean; default_project: string; require_project: boolean; allow_dynamic_tenants: boolean; items: unknown[] };
+  projects: { enabled: boolean; default_project: string; require_project: boolean; allow_dynamic_tenants: boolean; items: ProjectConfig[] };
   security: { enable_auth: boolean; log_level: string; cors_origins: string[]; max_concurrent_uploads: number };
 }
 
@@ -80,4 +87,9 @@ export interface UploadSettings {
   dpi: number;
   format: "jpg" | "png";
   quality: number;
+}
+
+export interface UploadScope {
+  project: string;
+  tenant: string;
 }

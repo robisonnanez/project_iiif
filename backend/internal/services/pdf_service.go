@@ -98,7 +98,17 @@ func (s *PDFService) ProcessPDF(sourcePath string, filename string, settings mod
 		doc.FilePath = storedDoc.FilePath
 	}
 
-	go s.convertPDFToImages(doc, sourcePath, settings)
+	workerPath := sourcePath
+	if s.usesDatabaseBlobs() {
+		workerPath, err = createProcessingCopy(s.config.PDF.TempPath, pdfData)
+		if err != nil {
+			doc.Status = "error"
+			_ = s.storage.UpdateDocument(doc)
+			return nil, fmt.Errorf("error preparing PDF conversion: %w", err)
+		}
+	}
+
+	go s.convertPDFToImages(doc, workerPath, settings)
 
 	return doc, nil
 }
@@ -112,7 +122,8 @@ func (s *PDFService) convertPDFToImages(doc *models.PDFDocument, sourcePath stri
 		}
 		if r := recover(); r != nil {
 			doc.Status = "error"
-			s.storage.UpdateDocument(doc)
+			_ = s.storage.UpdateDocument(doc)
+			log.Printf("PDF conversion failed document=%s stage=panic error=%v", doc.ID, r)
 		}
 	}()
 
@@ -124,7 +135,8 @@ func (s *PDFService) convertPDFToImages(doc *models.PDFDocument, sourcePath stri
 	pdf, err := fitz.New(openPath)
 	if err != nil {
 		doc.Status = "error"
-		s.storage.UpdateDocument(doc)
+		_ = s.storage.UpdateDocument(doc)
+		log.Printf("PDF conversion failed document=%s stage=open error=%v", doc.ID, err)
 		return
 	}
 	defer pdf.Close()
@@ -138,7 +150,8 @@ func (s *PDFService) convertPDFToImages(doc *models.PDFDocument, sourcePath stri
 		imageDir = filepath.Join(s.scopePath(s.config.Storage.ImagesPath, &models.Scope{ProjectKey: doc.ProjectKey, TenantKey: doc.TenantKey}), doc.ID)
 		if err := os.MkdirAll(imageDir, 0755); err != nil {
 			doc.Status = "error"
-			s.storage.UpdateDocument(doc)
+			_ = s.storage.UpdateDocument(doc)
+			log.Printf("PDF conversion failed document=%s stage=create_image_directory error=%v", doc.ID, err)
 			return
 		}
 	}
@@ -323,4 +336,25 @@ func copyFile(sourcePath, destinationPath string) error {
 
 	_, err = io.Copy(destination, source)
 	return err
+}
+
+func createProcessingCopy(tempPath string, data []byte) (string, error) {
+	if err := os.MkdirAll(tempPath, 0o750); err != nil {
+		return "", err
+	}
+	file, err := os.CreateTemp(tempPath, "processing-*.pdf")
+	if err != nil {
+		return "", err
+	}
+	path := file.Name()
+	if _, err = file.Write(data); err != nil {
+		_ = file.Close()
+		_ = os.Remove(path)
+		return "", err
+	}
+	if err = file.Close(); err != nil {
+		_ = os.Remove(path)
+		return "", err
+	}
+	return path, nil
 }

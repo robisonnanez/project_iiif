@@ -1,4 +1,4 @@
-import type { AppConfig, DocumentRecord, UploadSettings } from "./types";
+import type { AppConfig, DocumentRecord, UploadScope, UploadSettings } from "./types";
 
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
   const response = await fetch(url, { credentials: "same-origin", ...init });
@@ -19,7 +19,7 @@ export const api = {
     body: JSON.stringify(config),
   }),
   documents: () => request<DocumentRecord[]>("/api/v1/documents"),
-  upload: (file: File, settings: UploadSettings) => {
+  upload: (file: File, settings: UploadSettings, scope: UploadScope) => {
     const form = new FormData();
     form.append("pdf", file);
     form.append("max_width", String(settings.width));
@@ -27,6 +27,8 @@ export const api = {
     form.append("dpi", String(settings.dpi));
     form.append("format", settings.format);
     form.append("quality", String(settings.quality));
+    if (scope.project) form.append("project", scope.project);
+    if (scope.tenant) form.append("tenant", scope.tenant);
     return request<DocumentRecord>("/api/v1/documents/upload", { method: "POST", body: form });
   },
   startMigration: (payload: unknown) => request<{ message: string }>("/api/v1/admin/migrations/local-to-db/start", {

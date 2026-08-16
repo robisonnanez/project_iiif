@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { api } from "../api";
 import type { AppConfig, UploadSettings } from "../types";
 import { Alert, Button, Card, FormField, Input, Modal, PageHeader, Select, Spinner } from "../components/ui";
@@ -17,6 +17,20 @@ export function UploadPage({ config, onUploaded }: { config: AppConfig | null; o
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
+  const projects = config?.projects.items ?? [];
+  const configuredDefault = config?.projects.default_project || projects[0]?.key || "default";
+  const [project, setProject] = useState(configuredDefault);
+  const [tenant, setTenant] = useState("");
+  const selectedProject = projects.find((item) => item.key === project);
+  const tenantRequired = Boolean(config?.projects.enabled && selectedProject?.multitenant);
+
+  useEffect(() => {
+    if (!config?.projects.enabled) return;
+    const nextProject = projects.some((item) => item.key === project) ? project : configuredDefault;
+    if (nextProject !== project) setProject(nextProject);
+    const nextConfig = projects.find((item) => item.key === nextProject);
+    if (!nextConfig?.multitenant) setTenant("");
+  }, [config, configuredDefault, project, projects]);
   const defaults = useMemo<UploadSettings>(() => ({
     width: config?.conversion?.default_width || 1241,
     height: config?.conversion?.default_height || 1754,
@@ -30,9 +44,11 @@ export function UploadPage({ config, onUploaded }: { config: AppConfig | null; o
     const validationError = validate(settings);
     if (validationError) return setError(validationError);
     if (!file) return setError("Selecciona un archivo PDF.");
+    if (config?.projects.enabled && config.projects.require_project && !project) return setError("Selecciona un proyecto.");
+    if (tenantRequired && !tenant.trim()) return setError("Selecciona un tenant para el proyecto multitenant.");
     setBusy(true); setError("");
     try {
-      const document = await api.upload(file, settings);
+      const document = await api.upload(file, settings, { project, tenant: tenant.trim() });
       setMessage(`“${document.name}” se está convirtiendo.`);
       setModal(false); setFile(null); onUploaded();
     } catch (cause) {
@@ -44,6 +60,19 @@ export function UploadPage({ config, onUploaded }: { config: AppConfig | null; o
     <PageHeader eyebrow="Documentos" title="Subir PDF" description="Convierte un PDF conservando su proporción y publícalo mediante IIIF." />
     {message && <Alert tone="success">{message}</Alert>}
     <Card className="narrow-card">
+      {config?.projects.enabled && <div className="form-grid two-columns">
+        <FormField label="Proyecto" help="Selecciona Proyecto por defecto si el documento no pertenece a un tenant.">
+          {(id) => <Select id={id} value={project} onChange={(event) => { setProject(event.target.value); setTenant(""); setError(""); }}>
+            {projects.map((item) => <option key={item.key} value={item.key}>{item.name || item.key}</option>)}
+          </Select>}
+        </FormField>
+        {tenantRequired && <FormField label="Tenant" help={config.projects.allow_dynamic_tenants ? "Puedes usar un tenant configurado o escribir uno nuevo." : "Obligatorio para este proyecto."}>
+          {(id) => config.projects.allow_dynamic_tenants
+            ? <Input id={id} list="tenant-options" value={tenant} onChange={(event) => setTenant(event.target.value)} />
+            : <Select id={id} value={tenant} onChange={(event) => setTenant(event.target.value)}><option value="">Selecciona un tenant</option>{selectedProject?.tenants.map((item) => <option key={item} value={item}>{item}</option>)}</Select>}
+        </FormField>}
+        {tenantRequired && config.projects.allow_dynamic_tenants && <datalist id="tenant-options">{selectedProject?.tenants.map((item) => <option key={item} value={item} />)}</datalist>}
+      </div>}
       <FormField label="Archivo PDF" help="Solo PDF. El límite se toma de la configuración del servidor.">
         {(id) => <Input id={id} type="file" accept="application/pdf,.pdf" onChange={(event) => { setFile(event.target.files?.[0] ?? null); setError(""); }} />}
       </FormField>
