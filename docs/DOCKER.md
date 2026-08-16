@@ -1,455 +1,191 @@
-# Docker para Project IIIF
+# Docker y Docker Compose
 
-Esta guía explica cómo ejecutar Project IIIF con Docker y Docker Compose en tres escenarios:
+Esta guía levanta `project_iiif` desde cero con RustFS y uno de los tres motores de metadata. Compose usa perfiles para evitar duplicación.
 
-- modo local
-- modo MySQL / PostgreSQL
-- modo MongoDB
+## 1. Requisitos
 
-La imagen incluye el backend Go, el dashboard en `backend/frontend` y las migraciones SQL del proyecto.
+- Docker Engine 24 o posterior.
+- Docker Compose v2.
+- Puertos libres: aplicación `18080`, RustFS API `19000` y consola `19001` por defecto.
 
-## 1. Archivos recomendados
+No se necesita Go, Node ni pnpm en el host: el `Dockerfile` multi-stage compila React con Node 22, compila los tres binarios Go y crea una imagen Debian mínima que ejecuta como UID 10001.
 
-### Dockerfile
-
-Crea un `Dockerfile` en la raíz del proyecto:
-
-```dockerfile
-# syntax=docker/dockerfile:1
-
-FROM golang:1.24-bookworm AS builder
-
-WORKDIR /src/backend
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends build-essential libmupdf-dev ca-certificates \
-    && rm -rf /var/lib/apt/lists/*
-
-COPY backend/go.mod backend/go.sum ./
-RUN go mod download
-
-COPY backend/ ./
-RUN CGO_ENABLED=1 go build -ldflags="-s -w" -o /out/iiif-server main.go
-RUN CGO_ENABLED=1 go build -ldflags="-s -w" -o /out/migrate-local-to-mysql ./cmd/migrate-local-to-mysql
-
-FROM debian:bookworm-slim
-
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends libmupdf-dev ca-certificates tzdata \
-    && rm -rf /var/lib/apt/lists/*
-
-WORKDIR /app
-COPY --from=builder /out/iiif-server /app/iiif-server
-COPY --from=builder /out/migrate-local-to-mysql /app/migrate-local-to-mysql
-COPY backend/frontend /app/frontend
-COPY backend/migrations /app/migrations
-COPY backend/config.yaml.example /app/config.yaml.example
-
-RUN mkdir -p /data/pdfs /data/images /data/documents /data/thumbnails /data/manifests /data/temp \
-    && useradd -r -u 10001 -g root iiif \
-    && chown -R iiif:root /app /data
-
-USER iiif
-EXPOSE 8080
-CMD ["/app/iiif-server"]
-```
-
-Si quieres compilar CSS dentro de la imagen, agrega antes del `go build`:
-
-```dockerfile
-RUN apt-get update && apt-get install -y --no-install-recommends nodejs npm
-RUN cd /src/backend/frontend && npm install && npm run build:css
-```
-
-### .dockerignore
-
-```gitignore
-.git
-.gitignore
-backend/iiif-server
-backend/data
-backend/tmp
-**/*.log
-```
-
-## 2. Crear la configuración del contenedor
+## 2. Configuración inicial y `.env`
 
 ```bash
-mkdir -p docker
-cp backend/config.yaml.example docker/config.yaml
+cp .env.example .env
+chmod 600 .env
 ```
 
-## 3. Ejemplo de configuración por motor
+Edita todos los valores:
 
-### Opción A: modo local
-
-```yaml
-STORAGE_BACKEND: "local"
-DB_CONNECTION: "local"
-
-server:
-  port: "8080"
-  mode: "release"
-
-storage:
-  backend: "local"
-  data_path: "/data"
-  pdfs_path: "/data/pdfs"
-  images_path: "/data/images"
-  documents_path: "/data/documents"
-  thumbnails_path: "/data/thumbnails"
-  manifests_path: "/data/manifests"
-
-binary_storage:
-  mode: "local"
-  temp_path: "/data/temp"
-
-pdf:
-  temp_path: "/data/temp"
-
-frontend:
-  enabled: true
-  path: "./frontend"
-  require_auth: true
-  username: "admin"
-  password: "CAMBIAR_PASSWORD"
+```dotenv
+DB_PASSWORD=una-clave-de-desarrollo-no-reutilizada
+RUSTFS_ACCESS_KEY=una-access-key-no-reutilizada
+RUSTFS_SECRET_KEY=una-secret-key-larga
+FRONTEND_USERNAME=admin
+FRONTEND_PASSWORD=una-clave-del-dashboard
 ```
 
-### Opción B: modo MySQL
+Variables opcionales: `APP_PORT`, `APP_BASE_URL`, `RUSTFS_API_PORT` y `RUSTFS_CONSOLE_PORT`. No confirmes `.env`; `.env.example` contiene únicamente placeholders.
 
-```yaml
-STORAGE_BACKEND: "mysql"
-DB_CONNECTION: "mysql"
-DB_HOST: "mysql"
-DB_PORT: "3306"
-DB_DATABASE: "project_iiif"
-DB_USERNAME: "project_iiif"
-DB_PASSWORD: "PASSWORD_SEGURO"
-
-server:
-  port: "8080"
-  mode: "release"
-
-storage:
-  backend: "mysql"
-  data_path: "/data"
-  pdfs_path: "/data/pdfs"
-  images_path: "/data/images"
-  documents_path: "/data/documents"
-  thumbnails_path: "/data/thumbnails"
-  manifests_path: "/data/manifests"
-
-binary_storage:
-  mode: "database"
-  temp_path: "/data/temp"
-
-pdf:
-  temp_path: "/data/temp"
-
-frontend:
-  enabled: true
-  path: "./frontend"
-  require_auth: true
-  username: "admin"
-  password: "CAMBIAR_PASSWORD"
-```
-
-### Opción C: modo MongoDB
-
-```yaml
-STORAGE_BACKEND: "mongodb"
-DB_CONNECTION: "mongodb"
-DB_HOST: "mongo"
-DB_PORT: "27017"
-DB_DATABASE: "project_iiif"
-DB_USERNAME: ""
-DB_PASSWORD: ""
-
-server:
-  port: "8080"
-  mode: "release"
-
-storage:
-  backend: "mongodb"
-  data_path: "/data"
-  pdfs_path: "/data/pdfs"
-  images_path: "/data/images"
-  documents_path: "/data/documents"
-  thumbnails_path: "/data/thumbnails"
-  manifests_path: "/data/manifests"
-
-database:
-  mongodb:
-    host: "mongo"
-    port: "27017"
-    user: ""
-    password: ""
-    database: "project_iiif"
-    auth_source: "admin"
-    direct_connection: true
-    server_selection_timeout_ms: 2000
-
-binary_storage:
-  mode: "database"
-  temp_path: "/data/temp"
-
-pdf:
-  temp_path: "/data/temp"
-
-frontend:
-  enabled: true
-  path: "./frontend"
-  require_auth: true
-  username: "admin"
-  password: "CAMBIAR_PASSWORD"
-```
-
-Notas para MongoDB:
-
-- Si el contenedor Mongo no tiene autenticación, deja usuario y contraseña vacíos.
-- Si usas autenticación, completa `DB_USERNAME`, `DB_PASSWORD` y `auth_source`.
-- El dashboard está pensado para URIs `mongodb://...`.
-- El backend todavía no soporta `mongodb+srv://...`.
-
-### Opción D: RustFS / S3 para binarios
-
-Combina esta sección con cualquiera de los motores anteriores:
-
-```yaml
-FILESYSTEM_DISK: "s3"
-AWS_ACCESS_KEY_ID: "TU_ACCESS_KEY_DE_RUSTFS"
-AWS_SECRET_ACCESS_KEY: "TU_SECRET_KEY_DE_RUSTFS"
-AWS_DEFAULT_REGION: "us-east-1"
-AWS_BUCKET: "mi-proyecto"
-AWS_ENDPOINT: "http://rustfs:9000"
-AWS_USE_PATH_STYLE_ENDPOINT: true
-
-binary_storage:
-  mode: "s3"
-  temp_path: "/data/temp"
-```
-
-Ejemplo de servicio RustFS para Compose:
-
-```yaml
-services:
-  rustfs:
-    image: rustfs/rustfs:latest
-    environment:
-      RUSTFS_ACCESS_KEY: TU_ACCESS_KEY_DE_RUSTFS
-      RUSTFS_SECRET_KEY: TU_SECRET_KEY_DE_RUSTFS
-    ports:
-      - "9000:9000"
-      - "9001:9001"
-    volumes:
-      - project_iiif_rustfs:/data
-
-volumes:
-  project_iiif_rustfs:
-```
-
-#### Flujo de metadatos y binarios
-
-El servicio `iiif` debe conectarse tanto al motor de metadatos como a RustFS:
-
-```text
-MySQL/PostgreSQL/MongoDB
-  documents.pdf_path       -> s3://bucket/clave-del-pdf
-  document_images.image_path -> s3://bucket/clave-de-la-imagen
-
-RustFS
-  bucket/clave-del-pdf       -> bytes del PDF
-  bucket/clave-de-la-imagen  -> bytes JPEG/PNG/WebP
-```
-
-La galería y los endpoints IIIF consultan primero la base de datos y después descargan el objeto indicado por `image_path`. No montes el volumen interno de RustFS dentro del contenedor IIIF ni construyas rutas de filesystem con esos valores; deben tratarse como referencias S3.
-
-Para contenedores, usa el nombre del servicio como endpoint:
-
-```yaml
-AWS_ENDPOINT: "http://rustfs:9000"
-```
-
-`http://127.0.0.1:9000` solo es correcto cuando RustFS comparte la misma red de proceso o se ejecuta directamente en el host accesible desde la aplicación.
-
-Verificación desde el contenedor IIIF:
+## 3. Build
 
 ```bash
-docker compose exec iiif ./s3-smoke
-curl -f http://127.0.0.1:8080/health
-curl -f -o pagina.jpg \
-  http://127.0.0.1:8080/iiif/3/{document_id}_page_1/full/600,/0/default.jpg
-file pagina.jpg
+docker compose --profile mysql build --no-cache app-mysql
 ```
 
-En el dashboard, selecciona la base en `Backend de metadatos` y `s3` en `Modo binario`. El bloque `S3 / RustFS` permanece deshabilitado para los modos `local` y `database`.
+El mismo tag `project-iiif:development` sirve para los tres perfiles; no es necesario reconstruir al cambiar de motor.
 
-## 4. docker-compose.yml
-
-### Compose para MySQL
-
-```yaml
-services:
-  mysql:
-    image: mysql:8.4
-    container_name: project-iiif-mysql
-    environment:
-      MYSQL_DATABASE: project_iiif
-      MYSQL_USER: project_iiif
-      MYSQL_PASSWORD: PASSWORD_SEGURO
-      MYSQL_ROOT_PASSWORD: ROOT_PASSWORD_SEGURO
-    ports:
-      - "3306:3306"
-    volumes:
-      - project_iiif_mysql:/var/lib/mysql
-      - ./backend/migrations:/docker-entrypoint-initdb.d:ro
-    healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
-      interval: 10s
-      timeout: 5s
-      retries: 10
-
-  iiif:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    container_name: project-iiif
-    depends_on:
-      mysql:
-        condition: service_healthy
-    ports:
-      - "8080:8080"
-    volumes:
-      - ./docker/config.yaml:/app/config.yaml:ro
-      - project_iiif_data:/data
-    restart: unless-stopped
-
-volumes:
-  project_iiif_mysql:
-  project_iiif_data:
-```
-
-### Compose para MongoDB
-
-```yaml
-services:
-  mongo:
-    image: mongo:8
-    container_name: project-iiif-mongo
-    ports:
-      - "27017:27017"
-    volumes:
-      - project_iiif_mongo:/data/db
-
-  iiif:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    container_name: project-iiif
-    depends_on:
-      - mongo
-    ports:
-      - "8080:8080"
-    volumes:
-      - ./docker/config.yaml:/app/config.yaml:ro
-      - project_iiif_data:/data
-    restart: unless-stopped
-
-volumes:
-  project_iiif_mongo:
-  project_iiif_data:
-```
-
-### Compose para modo local
-
-```yaml
-services:
-  iiif:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    container_name: project-iiif
-    ports:
-      - "8080:8080"
-    volumes:
-      - ./docker/config.yaml:/app/config.yaml:ro
-      - project_iiif_data:/data
-    restart: unless-stopped
-
-volumes:
-  project_iiif_data:
-```
-
-## 5. Construcción y arranque
+## 4. Elegir base de datos
 
 ```bash
-docker compose build
-docker compose up -d
-docker compose logs -f iiif
+# MySQL 8.4
+docker compose --profile mysql up -d --wait
+
+# PostgreSQL 17
+docker compose --profile mysql down
+docker compose --profile postgres up -d --wait
+
+# MongoDB 8
+docker compose --profile postgres down
+docker compose --profile mongodb up -d --wait
 ```
 
-Pruebas rápidas:
+`down` sin `-v` elimina contenedores y red, pero conserva los volúmenes. Usa un perfil de app a la vez porque todos publican el mismo puerto.
+
+## 5. Servicios y healthchecks
+
+Cada perfil inicia:
+
+- `app-{motor}`: backend y dashboard, healthcheck `/health`.
+- `{motor}`: base con healthcheck nativo.
+- `rustfs`: S3 compatible con volumen y healthcheck HTTP.
+- `config-init`: inicializa una sola vez el volumen de configuración.
+- `rustfs-permissions`: prepara permisos de los volúmenes.
 
 ```bash
-curl http://localhost:8080/health
-curl http://localhost:8080/api/v1/documents
+docker compose --profile mysql ps
+curl -f http://127.0.0.1:18080/health
 ```
 
-## 6. Migración de histórico dentro del contenedor
+Compose usa `depends_on.condition` para esperar servicios saludables; no sustituye healthchecks por sleeps fijos.
 
-El binario del migrador conserva el nombre histórico `migrate-local-to-mysql`, pero hoy funciona con el motor activo, incluido MongoDB.
+## 6. Configuración activa y UI
+
+`deploy/docker/config.yaml` se copia a `app_config:/app/config/config.yaml` solo si el volumen aún no tiene configuración. `CONFIG_PATH` apunta a ese archivo. Las variables del perfil seleccionan motor y credenciales sin escribir secretos en Git.
+
+El dashboard está en `http://127.0.0.1:18080/dashboard`. Desde allí se configura motor, Mongo URI, almacenamiento S3, conversión y migraciones. El guardado llega al backend y se escribe atómicamente en `app_config`. Para cambios de conexión que requieren reinicio:
 
 ```bash
-docker compose exec iiif /app/migrate-local-to-mysql
+docker compose --profile mysql restart app-mysql
+docker compose --profile mysql up -d --wait app-mysql
 ```
 
-Si la configuración activa apunta a MongoDB:
+## 7. RustFS / S3
 
-- migra metadatos a colecciones Mongo
-- guarda PDFs en GridFS `pdfs`
-- guarda imágenes en GridFS `images`
+Dentro de Compose el endpoint es `http://rustfs:9000`; desde el host es `http://127.0.0.1:19000`. El bucket predeterminado es `project-iiif`, path-style está habilitado y la consola está en `http://127.0.0.1:19001`.
 
-## 7. Reinicio y limpieza
-
-Detener:
+Smoke test real:
 
 ```bash
-docker compose down
+docker compose --profile mysql exec -T app-mysql \
+  env CONFIG_PATH=/app/config/config.yaml s3-smoke
 ```
 
-Borrar datos y recrear:
+Debe imprimir `S3/RustFS OK: escritura, lectura y eliminación verificadas`.
+
+## 8. Migraciones
+
+`AUTO_MIGRATE=true` ejecuta migraciones pendientes antes de aceptar tráfico. SQL registra versiones en `schema_migrations`; MongoDB inicializa colecciones e índices de forma idempotente.
 
 ```bash
-docker compose down -v
-docker compose up -d --build
+docker compose --profile mysql logs app-mysql
 ```
 
-## 8. Migraciones SQL manuales
+`005_add_conversion_settings.sql` conserva parámetros de conversión y `006_add_pdf_outline.sql` añade el outline.
 
-Solo aplica para MySQL:
+## 9. Subir un PDF y probar IIIF
 
 ```bash
-docker compose exec -T mysql mysql -u project_iiif -p project_iiif < backend/migrations/001_create_documents.sql
-docker compose exec -T mysql mysql -u project_iiif -p project_iiif < backend/migrations/002_add_blob_storage.sql
-docker compose exec -T mysql mysql -p project_iiif < backend/migrations/003_add_projects_multitenant.sql
+curl -f -F 'pdf=@documento.pdf;type=application/pdf' \
+  -F 'project=default' \
+  -F 'max_width=1241' -F 'max_height=1754' \
+  -F 'dpi=150' -F 'format=jpg' -F 'quality=85' \
+  http://127.0.0.1:18080/api/v1/documents/upload
 ```
 
-## 9. Recomendaciones de producción
-
-- Cambia todos los passwords antes de publicar.
-- Ajusta `iiif.base_url` al dominio real.
-- Usa volúmenes persistentes para `/data` y para la base de datos.
-- Mantén `frontend.require_auth: true` si expones el dashboard.
-- En MongoDB con autenticación, valida que el usuario tenga permisos sobre la base configurada.
-## Conversión configurable de PDFs
-
-Al seleccionar un PDF en el dashboard se abre un cuadro para definir ancho y alto máximos, DPI, formato y calidad. Los valores recomendados para consulta web e IIIF son `1241 × 1754 px`, `150 DPI`, `JPG` y calidad `85`. Las dimensiones conservan la proporción original.
-
-En instalaciones existentes ejecuta las migraciones después de actualizar la imagen o el código:
+La respuesta inicial puede tener `status=processing`. Consulta `/api/v1/documents/{id}` hasta `completed` y luego:
 
 ```bash
-curl -X POST http://localhost:8080/api/v1/admin/db/migrations/run
+curl -f http://127.0.0.1:18080/api/iiif/{id}/manifest
+curl -f 'http://127.0.0.1:18080/api/iiif/{id}/manifest?pages=1-5,8,10-12'
+curl -f http://127.0.0.1:18080/iiif/2/{id}_page_1/info.json
+curl -f -o page.jpg http://127.0.0.1:18080/iiif/2/{id}_page_1/full/600,/0/default.jpg
 ```
 
-El endpoint requiere la sesión administrativa cuando la autenticación está activa. La migración agrega a `documents` los campos que registran la configuración utilizada; MongoDB los crea automáticamente al guardar cada documento.
+Los PDF con bookmarks incluyen `structures`; los PDF sin bookmarks omiten el campo.
 
-Los documentos migrados y completados pueden generar el manifiesto desde el dashboard, tanto para todas las páginas como para una selección (`1-5,8,10-12`).
+## 10. Persistencia y volúmenes
+
+- `app_config`: configuración guardada desde la UI.
+- `app_data`: temporales y datos locales permitidos.
+- `rustfs_data` y `rustfs_logs`: objetos y logs RustFS.
+- `mysql_data`, `postgres_data`, `mongodb_data`: catálogo de cada motor.
+
+```bash
+docker compose --profile mysql restart
+docker compose --profile mysql up -d --wait
+curl -f http://127.0.0.1:18080/api/v1/documents/{id}
+curl -f http://127.0.0.1:18080/api/iiif/{id}/manifest
+```
+
+## 11. Backups
+
+Detén escrituras antes de una copia consistente. Usa `mysqldump`, `pg_dump` o `mongodump` para metadata. Para configuración y objetos:
+
+```bash
+docker run --rm -v project-iiif_rustfs_data:/source:ro \
+  -v "$PWD/backups":/backup busybox \
+  tar -czf /backup/rustfs-data.tgz -C /source .
+docker run --rm -v project-iiif_app_config:/source:ro \
+  -v "$PWD/backups":/backup busybox \
+  tar -czf /backup/app-config.tgz -C /source .
+```
+
+En producción aplica una política de backup consistente del motor y del almacén de objetos; no dependas solo de una copia de volumen en caliente.
+
+## 12. Actualización y rollback
+
+```bash
+git pull --ff-only
+docker compose --profile mysql build
+docker compose --profile mysql up -d --wait
+```
+
+Para rollback, vuelve al tag/commit anterior, reconstruye y levanta sin `-v`. Respalda antes de migraciones sin reversión automática.
+
+## 13. Logs y troubleshooting
+
+```bash
+docker compose --profile mysql ps
+docker compose --profile mysql logs --tail=200 app-mysql mysql rustfs
+docker compose --profile mysql config --quiet
+```
+
+- `variable is required`: falta una clave en `.env`.
+- puerto ocupado: cambia `APP_PORT`, `RUSTFS_API_PORT` o `RUSTFS_CONSOLE_PORT`.
+- S3 `AccessDenied`: app y RustFS deben usar las mismas claves y bucket.
+- manifest 404: espera `status=completed`.
+- manifest parcial 400: revisa sintaxis y páginas existentes.
+- conexión no cambia tras guardar: reinicia solo `app-{motor}`.
+
+## 14. Reset del entorno
+
+Operación destructiva, únicamente para desarrollo y tras verificar el proyecto Compose correcto:
+
+```bash
+docker compose --profile mysql down -v --remove-orphans
+```
+
+Esto elimina bases, configuración y objetos RustFS del proyecto. Sin `-v`, los datos se conservan.
