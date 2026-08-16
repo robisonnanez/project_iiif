@@ -1,0 +1,48 @@
+import { render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { vi } from "vitest";
+import { api } from "../api";
+import { ConfigPage } from "./ConfigPage";
+import { sampleConfig } from "../test/fixtures";
+
+it("muestra solo Mongo URI para MongoDB", async () => {
+  const user = userEvent.setup();
+  render(<ConfigPage initial={structuredClone(sampleConfig)} onSaved={() => undefined} />);
+  await user.selectOptions(screen.getByLabelText("Motor"), "mongodb");
+  expect(screen.getByLabelText("Mongo URI")).toBeInTheDocument();
+  expect(screen.queryByLabelText("Host")).not.toBeInTheDocument();
+  expect(screen.queryByLabelText("Usuario")).not.toBeInTheDocument();
+});
+
+it("muestra S3 únicamente cuando el modo es s3", async () => {
+  const user = userEvent.setup();
+  render(<ConfigPage initial={structuredClone(sampleConfig)} onSaved={() => undefined} />);
+  expect(screen.queryByTestId("s3-fields")).not.toBeInTheDocument();
+  await user.selectOptions(screen.getByLabelText("Modo"), "s3");
+  expect(screen.getByTestId("s3-fields")).toBeInTheDocument();
+  expect(screen.getByLabelText("Endpoint")).toBeInTheDocument();
+});
+
+it("presenta los defaults de conversión", () => {
+  render(<ConfigPage initial={structuredClone(sampleConfig)} onSaved={() => undefined} />);
+  expect(screen.getByLabelText("Ancho máximo")).toHaveValue(1241);
+  expect(screen.getByLabelText("Alto máximo")).toHaveValue(1754);
+  expect(screen.getByLabelText("DPI")).toHaveValue(150);
+});
+
+it("cambia entre los campos específicos de MySQL y PostgreSQL", async () => {
+  const user = userEvent.setup();
+  render(<ConfigPage initial={structuredClone(sampleConfig)} onSaved={() => undefined} />);
+  expect(screen.queryByLabelText("SSL mode")).not.toBeInTheDocument();
+  await user.selectOptions(screen.getByLabelText("Motor"), "postgres");
+  expect(screen.getByLabelText("Host")).toHaveValue(sampleConfig.database.postgres.host);
+  expect(screen.getByLabelText("SSL mode")).toBeInTheDocument();
+});
+
+it("muestra el error que devuelve la API al guardar", async () => {
+  const user = userEvent.setup();
+  vi.spyOn(api, "saveConfig").mockRejectedValueOnce(new Error("Configuración rechazada"));
+  render(<ConfigPage initial={structuredClone(sampleConfig)} onSaved={() => undefined} />);
+  await user.click(screen.getByRole("button", { name: "Guardar cambios" }));
+  expect(await screen.findByText("Configuración rechazada")).toBeInTheDocument();
+});
