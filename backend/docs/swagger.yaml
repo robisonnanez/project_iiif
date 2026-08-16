@@ -22,6 +22,21 @@ definitions:
           temp_path:
             type: string
         type: object
+      conversion:
+        properties:
+          default_format:
+            type: string
+          default_height:
+            type: integer
+          default_quality:
+            type: integer
+          default_width:
+            type: integer
+          dpi:
+            type: integer
+          enable_ocr:
+            type: boolean
+        type: object
       database:
         properties:
           DB_CONNECTION:
@@ -289,6 +304,89 @@ definitions:
         example: admin
         type: string
     type: object
+  models.IIIFAnnotation:
+    properties:
+      body:
+        $ref: '#/definitions/models.IIIFBody'
+      id:
+        type: string
+      motivation:
+        type: string
+      target:
+        type: string
+      type:
+        type: string
+    type: object
+  models.IIIFAnnotationPage:
+    properties:
+      id:
+        type: string
+      items:
+        items:
+          $ref: '#/definitions/models.IIIFAnnotation'
+        type: array
+      type:
+        type: string
+    type: object
+  models.IIIFAnnotationV2:
+    properties:
+      '@id':
+        type: string
+      '@type':
+        type: string
+      motivation:
+        type: string
+      "on":
+        type: string
+      resource:
+        $ref: '#/definitions/models.IIIFResourceV2'
+    type: object
+  models.IIIFBody:
+    properties:
+      format:
+        type: string
+      id:
+        type: string
+      service:
+        items:
+          $ref: '#/definitions/models.IIIFService'
+        type: array
+      type:
+        type: string
+    type: object
+  models.IIIFCanvas:
+    properties:
+      height:
+        type: integer
+      id:
+        type: string
+      items:
+        items:
+          $ref: '#/definitions/models.IIIFAnnotationPage'
+        type: array
+      label: {}
+      type:
+        type: string
+      width:
+        type: integer
+    type: object
+  models.IIIFCanvasV2:
+    properties:
+      '@id':
+        type: string
+      '@type':
+        type: string
+      height:
+        type: integer
+      images:
+        items:
+          $ref: '#/definitions/models.IIIFAnnotationV2'
+        type: array
+      label:
+        type: string
+      width:
+        type: integer
+    type: object
   models.IIIFImageInfo:
     properties:
       '@context':
@@ -313,6 +411,154 @@ definitions:
         type: string
       width:
         type: integer
+    type: object
+  models.IIIFImageInfoV2:
+    properties:
+      '@context':
+        type: string
+      '@id':
+        type: string
+      height:
+        type: integer
+      profile:
+        type: string
+      protocol:
+        type: string
+      sizes:
+        items:
+          $ref: '#/definitions/models.IIIFSize'
+        type: array
+      tiles:
+        items:
+          $ref: '#/definitions/models.IIIFTile'
+        type: array
+      width:
+        type: integer
+    type: object
+  models.IIIFManifest:
+    properties:
+      '@context':
+        items:
+          type: string
+        type: array
+      id:
+        type: string
+      items:
+        items:
+          $ref: '#/definitions/models.IIIFCanvas'
+        type: array
+      label: {}
+      type:
+        type: string
+    type: object
+  models.IIIFManifestV2:
+    properties:
+      '@context':
+        type: string
+      '@id':
+        type: string
+      '@type':
+        type: string
+      attribution:
+        type: string
+      description:
+        type: string
+      label:
+        type: string
+      license:
+        type: string
+      metadata:
+        items:
+          $ref: '#/definitions/models.IIIFMetadataV2'
+        type: array
+      sequences:
+        items:
+          $ref: '#/definitions/models.IIIFSequenceV2'
+        type: array
+      structures:
+        items:
+          $ref: '#/definitions/models.IIIFRangeV2'
+        type: array
+      thumbnail:
+        $ref: '#/definitions/models.IIIFResourceV2'
+    type: object
+  models.IIIFMetadataV2:
+    properties:
+      label:
+        type: string
+      value:
+        type: string
+    type: object
+  models.IIIFRangeV2:
+    properties:
+      '@id':
+        type: string
+      '@type':
+        type: string
+      canvases:
+        items:
+          type: string
+        type: array
+      label:
+        type: string
+      ranges:
+        items:
+          $ref: '#/definitions/models.IIIFRangeV2'
+        type: array
+      within:
+        type: string
+    type: object
+  models.IIIFResourceV2:
+    properties:
+      '@id':
+        type: string
+      '@type':
+        type: string
+      format:
+        type: string
+      height:
+        type: integer
+      service:
+        $ref: '#/definitions/models.IIIFServiceV2'
+      width:
+        type: integer
+    type: object
+  models.IIIFSequenceV2:
+    properties:
+      '@id':
+        type: string
+      '@type':
+        type: string
+      canvases:
+        items:
+          $ref: '#/definitions/models.IIIFCanvasV2'
+        type: array
+      label:
+        type: string
+      viewingHint:
+        type: string
+    type: object
+  models.IIIFService:
+    properties:
+      '@context':
+        type: string
+      id:
+        type: string
+      profile:
+        type: string
+      type:
+        type: string
+    type: object
+  models.IIIFServiceV2:
+    properties:
+      '@context':
+        type: string
+      '@id':
+        type: string
+      profile:
+        type: string
+      protocol:
+        type: string
     type: object
   models.IIIFSize:
     properties:
@@ -354,6 +600,10 @@ definitions:
         type: boolean
       name:
         type: string
+      outline:
+        items:
+          $ref: '#/definitions/models.PDFOutlineItem'
+        type: array
       projectKey:
         type: string
       status:
@@ -368,14 +618,87 @@ definitions:
       uploadDate:
         type: string
     type: object
+  models.PDFOutlineItem:
+    properties:
+      level:
+        type: integer
+      pageNumber:
+        type: integer
+      title:
+        type: string
+    type: object
 info:
   contact: {}
-  description: API para conversion de PDF a imagenes IIIF v3, administracion y migracion.
-    Las rutas recomendadas usan /api/v1 y los endpoints legacy se mantienen por compatibilidad
-    temporal.
+  description: API para conversion de PDF, IIIF Presentation v2 (con v3 compatible),
+    IIIF Image API, administracion y migracion. Las rutas recomendadas usan /api/v1
+    y los endpoints legacy se mantienen por compatibilidad temporal.
   title: IIIF PDF Server API
   version: "2.1"
 paths:
+  /api/iiif/{id}/manifest:
+    get:
+      description: Devuelve un manifiesto v2 con secuencia, canvases y rangos jerarquicos
+        derivados de los marcadores PDF. El parametro pages permite seleccionar paginas
+        y poda rangos vacios.
+      parameters:
+      - description: ID del documento
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Paginas o rangos, por ejemplo 1-3,5
+        in: query
+        name: pages
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/models.IIIFManifestV2'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.errorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.errorResponse'
+      summary: Obtener manifiesto IIIF Presentation API v2
+      tags:
+      - IIIF
+  /api/iiif/v3/{id}/manifest:
+    get:
+      description: Endpoint de compatibilidad para clientes IIIF Presentation v3.
+      parameters:
+      - description: ID del documento
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Paginas o rangos, por ejemplo 1-3,5
+        in: query
+        name: pages
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/models.IIIFManifest'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.errorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.errorResponse'
+      summary: Obtener manifiesto IIIF Presentation API v3
+      tags:
+      - IIIF
   /api/v1/admin/config:
     get:
       produces:
@@ -844,6 +1167,80 @@ paths:
       summary: Verificar sesion
       tags:
       - Auth
+  /iiif/2/{identifier}/{region}/{size}/{rotation}/{quality_format}:
+    get:
+      parameters:
+      - description: Identificador IIIF
+        in: path
+        name: identifier
+        required: true
+        type: string
+      - description: Region
+        in: path
+        name: region
+        required: true
+        type: string
+      - description: Tamano
+        in: path
+        name: size
+        required: true
+        type: string
+      - description: Rotacion
+        in: path
+        name: rotation
+        required: true
+        type: string
+      - description: quality.format
+        in: path
+        name: quality_format
+        required: true
+        type: string
+      produces:
+      - image/jpeg
+      - image/png
+      - image/webp
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: file
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.errorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.errorResponse'
+      summary: Obtener imagen IIIF transformada
+      tags:
+      - IIIF
+  /iiif/2/{identifier}/info.json:
+    get:
+      parameters:
+      - description: Identificador IIIF, por ejemplo documento_page_1
+        in: path
+        name: identifier
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/models.IIIFImageInfoV2'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.errorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.errorResponse'
+      summary: Obtener info IIIF Image API v2
+      tags:
+      - IIIF
   /iiif/3/{identifier}/{region}/{size}/{rotation}/{quality_format}:
     get:
       parameters:

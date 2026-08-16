@@ -15,6 +15,100 @@ const docTemplate = `{
     "host": "{{.Host}}",
     "basePath": "{{.BasePath}}",
     "paths": {
+        "/api/iiif/v3/{id}/manifest": {
+            "get": {
+                "description": "Endpoint de compatibilidad para clientes IIIF Presentation v3.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "IIIF"
+                ],
+                "summary": "Obtener manifiesto IIIF Presentation API v3",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "ID del documento",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Paginas o rangos, por ejemplo 1-3,5",
+                        "name": "pages",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/models.IIIFManifest"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.errorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.errorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/iiif/{id}/manifest": {
+            "get": {
+                "description": "Devuelve un manifiesto v2 con secuencia, canvases y rangos jerarquicos derivados de los marcadores PDF. El parametro pages permite seleccionar paginas y poda rangos vacios.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "IIIF"
+                ],
+                "summary": "Obtener manifiesto IIIF Presentation API v2",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "ID del documento",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Paginas o rangos, por ejemplo 1-3,5",
+                        "name": "pages",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/models.IIIFManifestV2"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.errorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.errorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/admin/config": {
             "get": {
                 "security": [
@@ -746,6 +840,116 @@ const docTemplate = `{
                 }
             }
         },
+        "/iiif/2/{identifier}/info.json": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "IIIF"
+                ],
+                "summary": "Obtener info IIIF Image API v2",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Identificador IIIF, por ejemplo documento_page_1",
+                        "name": "identifier",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/models.IIIFImageInfoV2"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.errorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.errorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/iiif/2/{identifier}/{region}/{size}/{rotation}/{quality_format}": {
+            "get": {
+                "produces": [
+                    "image/jpeg",
+                    "image/png",
+                    "image/webp"
+                ],
+                "tags": [
+                    "IIIF"
+                ],
+                "summary": "Obtener imagen IIIF transformada",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Identificador IIIF",
+                        "name": "identifier",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Region",
+                        "name": "region",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Tamano",
+                        "name": "size",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Rotacion",
+                        "name": "rotation",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "quality.format",
+                        "name": "quality_format",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "file"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.errorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.errorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/iiif/3/{identifier}/info.json": {
             "get": {
                 "produces": [
@@ -889,6 +1093,29 @@ const docTemplate = `{
                         },
                         "temp_path": {
                             "type": "string"
+                        }
+                    }
+                },
+                "conversion": {
+                    "type": "object",
+                    "properties": {
+                        "default_format": {
+                            "type": "string"
+                        },
+                        "default_height": {
+                            "type": "integer"
+                        },
+                        "default_quality": {
+                            "type": "integer"
+                        },
+                        "default_width": {
+                            "type": "integer"
+                        },
+                        "dpi": {
+                            "type": "integer"
+                        },
+                        "enable_ocr": {
+                            "type": "boolean"
                         }
                     }
                 },
@@ -1294,6 +1521,133 @@ const docTemplate = `{
                 }
             }
         },
+        "models.IIIFAnnotation": {
+            "type": "object",
+            "properties": {
+                "body": {
+                    "$ref": "#/definitions/models.IIIFBody"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "motivation": {
+                    "type": "string"
+                },
+                "target": {
+                    "type": "string"
+                },
+                "type": {
+                    "type": "string"
+                }
+            }
+        },
+        "models.IIIFAnnotationPage": {
+            "type": "object",
+            "properties": {
+                "id": {
+                    "type": "string"
+                },
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/models.IIIFAnnotation"
+                    }
+                },
+                "type": {
+                    "type": "string"
+                }
+            }
+        },
+        "models.IIIFAnnotationV2": {
+            "type": "object",
+            "properties": {
+                "@id": {
+                    "type": "string"
+                },
+                "@type": {
+                    "type": "string"
+                },
+                "motivation": {
+                    "type": "string"
+                },
+                "on": {
+                    "type": "string"
+                },
+                "resource": {
+                    "$ref": "#/definitions/models.IIIFResourceV2"
+                }
+            }
+        },
+        "models.IIIFBody": {
+            "type": "object",
+            "properties": {
+                "format": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "service": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/models.IIIFService"
+                    }
+                },
+                "type": {
+                    "type": "string"
+                }
+            }
+        },
+        "models.IIIFCanvas": {
+            "type": "object",
+            "properties": {
+                "height": {
+                    "type": "integer"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/models.IIIFAnnotationPage"
+                    }
+                },
+                "label": {},
+                "type": {
+                    "type": "string"
+                },
+                "width": {
+                    "type": "integer"
+                }
+            }
+        },
+        "models.IIIFCanvasV2": {
+            "type": "object",
+            "properties": {
+                "@id": {
+                    "type": "string"
+                },
+                "@type": {
+                    "type": "string"
+                },
+                "height": {
+                    "type": "integer"
+                },
+                "images": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/models.IIIFAnnotationV2"
+                    }
+                },
+                "label": {
+                    "type": "string"
+                },
+                "width": {
+                    "type": "integer"
+                }
+            }
+        },
         "models.IIIFImageInfo": {
             "type": "object",
             "properties": {
@@ -1329,6 +1683,232 @@ const docTemplate = `{
                 },
                 "width": {
                     "type": "integer"
+                }
+            }
+        },
+        "models.IIIFImageInfoV2": {
+            "type": "object",
+            "properties": {
+                "@context": {
+                    "type": "string"
+                },
+                "@id": {
+                    "type": "string"
+                },
+                "height": {
+                    "type": "integer"
+                },
+                "profile": {
+                    "type": "string"
+                },
+                "protocol": {
+                    "type": "string"
+                },
+                "sizes": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/models.IIIFSize"
+                    }
+                },
+                "tiles": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/models.IIIFTile"
+                    }
+                },
+                "width": {
+                    "type": "integer"
+                }
+            }
+        },
+        "models.IIIFManifest": {
+            "type": "object",
+            "properties": {
+                "@context": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "id": {
+                    "type": "string"
+                },
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/models.IIIFCanvas"
+                    }
+                },
+                "label": {},
+                "type": {
+                    "type": "string"
+                }
+            }
+        },
+        "models.IIIFManifestV2": {
+            "type": "object",
+            "properties": {
+                "@context": {
+                    "type": "string"
+                },
+                "@id": {
+                    "type": "string"
+                },
+                "@type": {
+                    "type": "string"
+                },
+                "attribution": {
+                    "type": "string"
+                },
+                "description": {
+                    "type": "string"
+                },
+                "label": {
+                    "type": "string"
+                },
+                "license": {
+                    "type": "string"
+                },
+                "metadata": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/models.IIIFMetadataV2"
+                    }
+                },
+                "sequences": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/models.IIIFSequenceV2"
+                    }
+                },
+                "structures": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/models.IIIFRangeV2"
+                    }
+                },
+                "thumbnail": {
+                    "$ref": "#/definitions/models.IIIFResourceV2"
+                }
+            }
+        },
+        "models.IIIFMetadataV2": {
+            "type": "object",
+            "properties": {
+                "label": {
+                    "type": "string"
+                },
+                "value": {
+                    "type": "string"
+                }
+            }
+        },
+        "models.IIIFRangeV2": {
+            "type": "object",
+            "properties": {
+                "@id": {
+                    "type": "string"
+                },
+                "@type": {
+                    "type": "string"
+                },
+                "canvases": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "label": {
+                    "type": "string"
+                },
+                "ranges": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/models.IIIFRangeV2"
+                    }
+                },
+                "within": {
+                    "type": "string"
+                }
+            }
+        },
+        "models.IIIFResourceV2": {
+            "type": "object",
+            "properties": {
+                "@id": {
+                    "type": "string"
+                },
+                "@type": {
+                    "type": "string"
+                },
+                "format": {
+                    "type": "string"
+                },
+                "height": {
+                    "type": "integer"
+                },
+                "service": {
+                    "$ref": "#/definitions/models.IIIFServiceV2"
+                },
+                "width": {
+                    "type": "integer"
+                }
+            }
+        },
+        "models.IIIFSequenceV2": {
+            "type": "object",
+            "properties": {
+                "@id": {
+                    "type": "string"
+                },
+                "@type": {
+                    "type": "string"
+                },
+                "canvases": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/models.IIIFCanvasV2"
+                    }
+                },
+                "label": {
+                    "type": "string"
+                },
+                "viewingHint": {
+                    "type": "string"
+                }
+            }
+        },
+        "models.IIIFService": {
+            "type": "object",
+            "properties": {
+                "@context": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "profile": {
+                    "type": "string"
+                },
+                "type": {
+                    "type": "string"
+                }
+            }
+        },
+        "models.IIIFServiceV2": {
+            "type": "object",
+            "properties": {
+                "@context": {
+                    "type": "string"
+                },
+                "@id": {
+                    "type": "string"
+                },
+                "profile": {
+                    "type": "string"
+                },
+                "protocol": {
+                    "type": "string"
                 }
             }
         },
@@ -1393,6 +1973,12 @@ const docTemplate = `{
                 "name": {
                     "type": "string"
                 },
+                "outline": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/models.PDFOutlineItem"
+                    }
+                },
                 "projectKey": {
                     "type": "string"
                 },
@@ -1410,6 +1996,20 @@ const docTemplate = `{
                     "type": "integer"
                 },
                 "uploadDate": {
+                    "type": "string"
+                }
+            }
+        },
+        "models.PDFOutlineItem": {
+            "type": "object",
+            "properties": {
+                "level": {
+                    "type": "integer"
+                },
+                "pageNumber": {
+                    "type": "integer"
+                },
+                "title": {
                     "type": "string"
                 }
             }
@@ -1431,7 +2031,7 @@ var SwaggerInfo = &swag.Spec{
 	BasePath:         "/",
 	Schemes:          []string{},
 	Title:            "IIIF PDF Server API",
-	Description:      "API para conversion de PDF a imagenes IIIF v3, administracion y migracion. Las rutas recomendadas usan /api/v1 y los endpoints legacy se mantienen por compatibilidad temporal.",
+	Description:      "API para conversion de PDF, IIIF Presentation v2 (con v3 compatible), IIIF Image API, administracion y migracion. Las rutas recomendadas usan /api/v1 y los endpoints legacy se mantienen por compatibilidad temporal.",
 	InfoInstanceName: "swagger",
 	SwaggerTemplate:  docTemplate,
 	LeftDelim:        "{{",
