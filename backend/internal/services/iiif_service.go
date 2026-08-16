@@ -48,7 +48,7 @@ func (e *InvalidPageSelectionError) Error() string {
 	return fmt.Sprintf("seleccion de paginas invalida %q: %s", e.Selection, e.Reason)
 }
 
-func (s *IIIFService) GetManifest(documentID, pageSelection string) (*models.IIIFManifest, error) {
+func (s *IIIFService) GetManifest(documentID, pageSelection string) (*models.IIIFManifestV2, error) {
 	doc, err := s.storage.GetDocument(documentID)
 	if err != nil {
 		return nil, fmt.Errorf("document not found: %w", err)
@@ -61,10 +61,10 @@ func (s *IIIFService) GetManifest(documentID, pageSelection string) (*models.III
 	if err != nil {
 		return nil, err
 	}
-	cacheKey := "manifest_" + documentID + "_" + normalizedSelection
+	cacheKey := "manifest_v2_" + documentID + "_" + normalizedSelection
 	if s.cache != nil {
 		if cached, found := s.cache.Get(cacheKey); found {
-			return cached.(*models.IIIFManifest), nil
+			return cached.(*models.IIIFManifestV2), nil
 		}
 	}
 
@@ -73,21 +73,35 @@ func (s *IIIFService) GetManifest(documentID, pageSelection string) (*models.III
 		manifestID += "?pages=" + url.QueryEscape(normalizedSelection)
 	}
 
-	manifest := &models.IIIFManifest{
-		Context: []string{
-			"http://iiif.io/api/presentation/3/context.json",
+	manifest := &models.IIIFManifestV2{
+		Context: "http://iiif.io/api/presentation/2/context.json",
+		ID:      manifestID,
+		Type:    "sc:Manifest",
+		Label:   doc.Name,
+		Metadata: []models.IIIFMetadataV2{
+			{Label: "Pages", Value: strconv.Itoa(doc.TotalPages)},
 		},
-		ID:   manifestID,
-		Type: "Manifest",
-		Label: map[string][]string{
-			"es": {doc.Name},
+		Sequences: []models.IIIFSequenceV2{
+			{
+				ID:          manifestID + "/sequence/normal",
+				Type:        "sc:Sequence",
+				Label:       "Current page order",
+				ViewingHint: "paged",
+				Canvases:    make([]models.IIIFCanvasV2, 0, len(pages)),
+			},
 		},
-		Items: make([]models.IIIFCanvas, 0, len(pages)),
+	}
+	if isHTTPURL(doc.ThumbnailURL) {
+		manifest.Thumbnail = &models.IIIFResourceV2{ID: doc.ThumbnailURL, Type: "dctypes:Image", Format: "image/jpeg"}
 	}
 
 	for _, page := range pages {
-		canvas := s.createCanvas(documentID, page, doc.Name)
-		manifest.Items = append(manifest.Items, canvas)
+		canvas := s.createCanvasV2(documentID, page, doc.Name)
+		manifest.Sequences[0].Canvases = append(manifest.Sequences[0].Canvases, canvas)
+	}
+	manifest.Structures = s.createRangesV2(documentID, doc.Outline, pages, doc.TotalPages)
+	if len(manifest.Structures) == 0 {
+		manifest.Structures = nil
 	}
 
 	// Guardar en caché
@@ -95,6 +109,47 @@ func (s *IIIFService) GetManifest(documentID, pageSelection string) (*models.III
 		s.cache.Set(cacheKey, manifest, cache.DefaultExpiration)
 	}
 
+	return manifest, nil
+}
+
+// GetManifestV3 preserves the previous Presentation API 3 representation for
+// clients that already consumed it. New integrations should use GetManifest.
+func (s *IIIFService) GetManifestV3(documentID, pageSelection string) (*models.IIIFManifest, error) {
+	doc, err := s.storage.GetDocument(documentID)
+	if err != nil {
+		return nil, fmt.Errorf("document not found: %w", err)
+	}
+	if doc.Status != "completed" {
+		return nil, fmt.Errorf("document not ready")
+	}
+	pages, normalizedSelection, err := manifestPages(pageSelection, doc.TotalPages)
+	if err != nil {
+		return nil, err
+	}
+	cacheKey := "manifest_v3_" + documentID + "_" + normalizedSelection
+	if s.cache != nil {
+		if cached, found := s.cache.Get(cacheKey); found {
+			return cached.(*models.IIIFManifest), nil
+		}
+	}
+
+	manifestID := fmt.Sprintf("%s/api/iiif/v3/%s/manifest", s.config.IIIF.BaseURL, documentID)
+	if normalizedSelection != "all" {
+		manifestID += "?pages=" + url.QueryEscape(normalizedSelection)
+	}
+	manifest := &models.IIIFManifest{
+		Context: []string{"http://iiif.io/api/presentation/3/context.json"},
+		ID:      manifestID,
+		Type:    "Manifest",
+		Label:   map[string][]string{"es": {doc.Name}},
+		Items:   make([]models.IIIFCanvas, 0, len(pages)),
+	}
+	for _, page := range pages {
+		manifest.Items = append(manifest.Items, s.createCanvasV3(documentID, page, doc.Name))
+	}
+	if s.cache != nil {
+		s.cache.Set(cacheKey, manifest, cache.DefaultExpiration)
+	}
 	return manifest, nil
 }
 
@@ -152,7 +207,46 @@ func manifestPages(selection string, totalPages int) ([]int, string, error) {
 	return pages, strings.Join(normalized, ","), nil
 }
 
-func (s *IIIFService) createCanvas(documentID string, page int, title string) models.IIIFCanvas {
+func (s *IIIFService) createCanvasV2(documentID string, page int, title string) models.IIIFCanvasV2 {
+	canvasID := s.canvasIDV2(documentID, page)
+	imageIdentifier := s.imageIdentifier(documentID, page, title)
+	imageServiceID := fmt.Sprintf("%s/iiif/2/%s", s.config.IIIF.BaseURL, imageIdentifier)
+	width, height := s.getImageDimensions(documentID, page)
+	format := "image/jpeg"
+	if image, err := s.storage.GetDocumentImageByPage(documentID, page); err == nil {
+		format = mediaTypeForIIIF(image.Format, image.MediaType)
+	}
+	return models.IIIFCanvasV2{
+		ID:     canvasID,
+		Type:   "sc:Canvas",
+		Label:  fmt.Sprintf("Page %d", page),
+		Height: height,
+		Width:  width,
+		Images: []models.IIIFAnnotationV2{
+			{
+				ID:         canvasID + "/annotations/painting",
+				Type:       "oa:Annotation",
+				Motivation: "sc:painting",
+				Resource: models.IIIFResourceV2{
+					ID:     imageServiceID + "/full/full/0/default.jpg",
+					Type:   "dctypes:Image",
+					Format: format,
+					Height: height,
+					Width:  width,
+					Service: &models.IIIFServiceV2{
+						Context:  "http://iiif.io/api/image/2/context.json",
+						ID:       imageServiceID,
+						Profile:  "http://iiif.io/api/image/2/level1.json",
+						Protocol: "http://iiif.io/api/image",
+					},
+				},
+				On: canvasID,
+			},
+		},
+	}
+}
+
+func (s *IIIFService) createCanvasV3(documentID string, page int, title string) models.IIIFCanvas {
 	canvasID := fmt.Sprintf("%s/api/iiif/%s/canvas/%d", s.config.IIIF.BaseURL, documentID, page)
 
 	imageIdentifier := s.imageIdentifier(documentID, page, title)
@@ -198,6 +292,109 @@ func (s *IIIFService) createCanvas(documentID string, page int, title string) mo
 			},
 		},
 	}
+}
+
+func (s *IIIFService) canvasIDV2(documentID string, page int) string {
+	return fmt.Sprintf("%s/api/iiif/%s/canvases/%s_%04d", s.config.IIIF.BaseURL, documentID, documentID, page)
+}
+
+type rangeCandidate struct {
+	index    int
+	item     models.PDFOutlineItem
+	endPage  int
+	children []*rangeCandidate
+}
+
+func (s *IIIFService) createRangesV2(documentID string, outline []models.PDFOutlineItem, pages []int, totalPages int) []models.IIIFRangeV2 {
+	if len(outline) == 0 || totalPages < 1 {
+		return nil
+	}
+	selected := make(map[int]struct{}, len(pages))
+	for _, page := range pages {
+		selected[page] = struct{}{}
+	}
+
+	valid := make([]rangeCandidate, 0, len(outline))
+	for index, item := range outline {
+		item.Title = strings.TrimSpace(item.Title)
+		if item.Title == "" || item.PageNumber < 1 || item.PageNumber > totalPages {
+			continue
+		}
+		if item.Level < 1 {
+			item.Level = 1
+		}
+		valid = append(valid, rangeCandidate{index: index + 1, item: item, endPage: totalPages})
+	}
+	for i := range valid {
+		for j := i + 1; j < len(valid); j++ {
+			if valid[j].item.Level <= valid[i].item.Level {
+				valid[i].endPage = valid[j].item.PageNumber - 1
+				break
+			}
+		}
+		if valid[i].endPage < valid[i].item.PageNumber {
+			valid[i].endPage = valid[i].item.PageNumber
+		}
+	}
+
+	roots := make([]*rangeCandidate, 0)
+	stack := make([]*rangeCandidate, 0)
+	for i := range valid {
+		node := &valid[i]
+		for len(stack) > 0 && stack[len(stack)-1].item.Level >= node.item.Level {
+			stack = stack[:len(stack)-1]
+		}
+		if len(stack) == 0 {
+			roots = append(roots, node)
+		} else {
+			parent := stack[len(stack)-1]
+			parent.children = append(parent.children, node)
+		}
+		stack = append(stack, node)
+	}
+
+	result := make([]models.IIIFRangeV2, 0, len(roots))
+	for _, root := range roots {
+		if item, ok := s.materializeRangeV2(documentID, root, "", selected); ok {
+			result = append(result, item)
+		}
+	}
+	return result
+}
+
+func (s *IIIFService) materializeRangeV2(documentID string, node *rangeCandidate, parentID string, selected map[int]struct{}) (models.IIIFRangeV2, bool) {
+	id := fmt.Sprintf("%s/api/iiif/%s/ranges/LOG_%04d", s.config.IIIF.BaseURL, documentID, node.index)
+	rangeValue := models.IIIFRangeV2{ID: id, Type: "sc:Range", Label: node.item.Title, Within: parentID}
+	for page := node.item.PageNumber; page <= node.endPage; page++ {
+		if _, ok := selected[page]; ok {
+			rangeValue.Canvases = append(rangeValue.Canvases, s.canvasIDV2(documentID, page))
+		}
+	}
+	for _, child := range node.children {
+		if childRange, ok := s.materializeRangeV2(documentID, child, id, selected); ok {
+			rangeValue.Ranges = append(rangeValue.Ranges, childRange)
+		}
+	}
+	return rangeValue, len(rangeValue.Canvases) > 0 || len(rangeValue.Ranges) > 0
+}
+
+func mediaTypeForIIIF(format, stored string) string {
+	if strings.HasPrefix(stored, "image/") {
+		return stored
+	}
+	switch strings.ToLower(strings.TrimPrefix(format, ".")) {
+	case "png":
+		return "image/png"
+	case "webp":
+		return "image/webp"
+	default:
+		return "image/jpeg"
+	}
+}
+
+func isHTTPURL(value string) bool {
+	parsed, err := url.Parse(strings.TrimSpace(value))
+	return err == nil && (parsed.Scheme == "http" || parsed.Scheme == "https") && parsed.Host != ""
 }
 
 func (s *IIIFService) GetImageInfo(documentID string, page int) (*models.IIIFImageInfo, error) {
@@ -255,6 +452,39 @@ func (s *IIIFService) GetImageInfo(documentID string, page int) (*models.IIIFIma
 	}
 
 	return info, nil
+}
+
+func (s *IIIFService) GetImageInfoV2(documentID string, page int) (*models.IIIFImageInfoV2, error) {
+	image, err := s.resolveImage(documentID, page)
+	if err != nil {
+		return nil, fmt.Errorf("image not found: %w", err)
+	}
+	width, height := image.Width, image.Height
+	if width == 0 || height == 0 {
+		width, height = s.getImageDimensions(documentID, page)
+	}
+	if width == 0 || height == 0 {
+		return nil, fmt.Errorf("image not found")
+	}
+	identifier := image.ID
+	if identifier == "" {
+		identifier = s.imageIdentifier(documentID, page, documentID)
+	}
+	imageID := fmt.Sprintf("%s/iiif/2/%s", s.config.IIIF.BaseURL, identifier)
+	return &models.IIIFImageInfoV2{
+		Context:  "http://iiif.io/api/image/2/context.json",
+		ID:       imageID,
+		Protocol: "http://iiif.io/api/image",
+		Profile:  "http://iiif.io/api/image/2/level1.json",
+		Width:    width,
+		Height:   height,
+		Sizes: []models.IIIFSize{
+			{Width: width / 4, Height: height / 4},
+			{Width: width / 2, Height: height / 2},
+			{Width: width, Height: height},
+		},
+		Tiles: []models.IIIFTile{{Width: s.config.IIIF.TileSize, Height: s.config.IIIF.TileSize, ScaleFactors: s.config.IIIF.ScaleFactors}},
+	}, nil
 }
 
 func (s *IIIFService) GetImage(documentID string, page int, size, rotation, quality, format string) ([]byte, string, error) {

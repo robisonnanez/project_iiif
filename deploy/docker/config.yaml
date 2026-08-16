@@ -1,0 +1,98 @@
+STORAGE_BACKEND: "local"
+DB_CONNECTION: "local"
+FILESYSTEM_DISK: "s3"
+AWS_DEFAULT_REGION: "us-east-1"
+AWS_BUCKET: "project-iiif"
+AWS_ENDPOINT: "http://rustfs:9000"
+AWS_USE_PATH_STYLE_ENDPOINT: true
+
+server:
+  port: "8080"
+  mode: "production"
+storage:
+  backend: "local"
+  data_path: "/app/data"
+  pdfs_path: "/app/data/pdfs"
+  images_path: "/app/data/images"
+  documents_path: "/app/data/documents"
+  thumbnails_path: "/app/data/thumbnails"
+  manifests_path: "/app/data/manifests"
+database:
+  mysql:
+    host: "mysql"
+    port: "3306"
+    user: "project_iiif"
+    database: "project_iiif"
+    charset: "utf8mb4"
+    parse_time: true
+  postgres:
+    host: "postgres"
+    port: "5432"
+    user: "project_iiif"
+    database: "project_iiif"
+    sslmode: "disable"
+    schema: "public"
+  mongodb:
+    host: "mongodb"
+    port: "27017"
+    user: "project_iiif"
+    database: "project_iiif"
+    auth_source: "admin"
+    direct_connection: true
+    server_selection_timeout_ms: 10000
+pdf:
+  max_file_size: 104857600
+  allowed_formats: ["pdf"]
+  temp_path: "/app/data/temp"
+binary_storage:
+  mode: "s3"
+  temp_path: "/app/data/temp"
+iiif:
+  base_url: "http://localhost:8080"
+  api_version: "3"
+  max_width: 2048
+  max_height: 2048
+  cache_enabled: true
+  cache_ttl: 3600
+  tile_size: 512
+  scale_factors: [1, 2, 4, 8]
+conversion:
+  default_width: 1241
+  default_height: 1754
+  default_format: "jpg"
+  default_quality: 85
+  enable_ocr: false
+  dpi: 150
+  background_color: "white"
+security:
+  enable_auth: true
+  log_level: "info"
+  cors_origins: ["http://localhost:8080"]
+  max_concurrent_uploads: 4
+frontend:
+  enabled: true
+  path: "./frontend"
+  require_auth: true
+  username: "admin"
+projects:
+  enabled: true
+  default_project: "default"
+  require_project: false
+  allow_dynamic_tenants: true
+  items:
+    - key: "default"
+      name: "Proyecto por defecto"
+      multitenant: false
+      tenants: []
+performance:
+  max_workers: 4
+  queue_size: 100
+  cleanup_interval: 3600
+  max_cache_size: "1GB"
+migration:
+  enabled: true
+  allowed_local_roots: ["/app/data"]
+  max_log_lines: 1000
+  ssh:
+    connect_timeout_sec: 15
+    allowed_hosts: []

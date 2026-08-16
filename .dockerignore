@@ -1,0 +1,16 @@
+.git
+.gitignore
+.codex-tmp
+**/node_modules
+**/dist
+backend/frontend/app.js
+backend/frontend/assets
+backend/frontend/postcss.config.js
+backend/frontend/tailwind.config.js
+backend/data
+backend/config.yaml
+backend/iiif-server
+backend/migrate-local-to-mysql
+*.log
+*.pdf
+!backend/internal/services/testdata/*.pdf

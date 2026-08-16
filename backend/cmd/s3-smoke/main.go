@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"os"
+	"strings"
 	"time"
 
 	"iiif-pdf-server/internal/config"
@@ -11,9 +13,13 @@ import (
 )
 
 func main() {
-	cfg, err := config.Load("config.yaml")
+	configPath := strings.TrimSpace(os.Getenv("CONFIG_PATH"))
+	if configPath == "" {
+		configPath = "config.yaml"
+	}
+	cfg, err := config.Load(configPath)
 	if err != nil {
-		log.Fatalf("no se pudo cargar config.yaml: %v", err)
+		log.Fatalf("no se pudo cargar %s: %v", configPath, err)
 	}
 	store, err := storage.NewS3Storage(cfg, nil)
 	if err != nil {

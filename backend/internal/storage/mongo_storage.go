@@ -402,6 +402,7 @@ func (ms *MongoStorage) upsertDocument(doc *models.PDFDocument) error {
 		"conversion_dpi":      doc.ConversionDPI,
 		"conversion_format":   doc.ConversionFormat,
 		"conversion_quality":  doc.ConversionQuality,
+		"outline":             doc.Outline,
 		"pdf_path":            doc.FilePath,
 		"thumbnail_path":      doc.ThumbnailURL,
 		"manifest_url":        doc.ManifestURL,
@@ -483,6 +484,7 @@ func decodeDocument(raw bson.M) *models.PDFDocument {
 		ConversionDPI:     intValue(raw, "conversion_dpi"),
 		ConversionFormat:  stringValue(raw, "conversion_format"),
 		ConversionQuality: intValue(raw, "conversion_quality"),
+		Outline:           outlineValue(raw, "outline"),
 		ManifestURL:       stringValue(raw, "manifest_url"),
 		ThumbnailURL:      stringValue(raw, "thumbnail_path"),
 		FilePath:          stringValue(raw, "pdf_path"),
@@ -491,6 +493,30 @@ func decodeDocument(raw bson.M) *models.PDFDocument {
 		doc.ProjectKey = "default"
 	}
 	return doc
+}
+
+func outlineValue(raw bson.M, key string) []models.PDFOutlineItem {
+	values, ok := raw[key].(primitive.A)
+	if !ok {
+		if generic, genericOK := raw[key].([]interface{}); genericOK {
+			values = primitive.A(generic)
+		} else {
+			return nil
+		}
+	}
+	result := make([]models.PDFOutlineItem, 0, len(values))
+	for _, value := range values {
+		item, ok := value.(bson.M)
+		if !ok {
+			continue
+		}
+		result = append(result, models.PDFOutlineItem{
+			Level:      intValue(item, "level"),
+			Title:      stringValue(item, "title"),
+			PageNumber: intValue(item, "page_number"),
+		})
+	}
+	return result
 }
 
 func decodeImage(raw bson.M) *models.DocumentImage {

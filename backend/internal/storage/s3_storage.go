@@ -3,6 +3,7 @@ package storage
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"path"
@@ -16,6 +17,7 @@ import (
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
+	"github.com/aws/smithy-go"
 )
 
 type S3Storage struct {
@@ -61,6 +63,8 @@ func NewS3Storage(cfg *appconfig.Config, metadata Storage) (*S3Storage, error) {
 func (s *S3Storage) ensureBucket(ctx context.Context) error {
 	if err := s.CheckConnection(ctx); err == nil {
 		return nil
+	} else if !isS3NotFound(err) {
+		return err
 	}
 	if _, err := s.client.CreateBucket(ctx, &s3.CreateBucketInput{Bucket: aws.String(s.bucket)}); err != nil {
 		return fmt.Errorf("no se pudo acceder ni crear el bucket S3 %q: %w", s.bucket, err)
@@ -82,7 +86,11 @@ func (s *S3Storage) SmokeTest(ctx context.Context) error {
 	if err := s.putObject(key, payload, "text/plain"); err != nil {
 		return err
 	}
-	defer s.client.DeleteObject(context.Background(), &s3.DeleteObjectInput{Bucket: aws.String(s.bucket), Key: aws.String(key)})
+	defer func() {
+		cleanupCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		_, _ = s.client.DeleteObject(cleanupCtx, &s3.DeleteObjectInput{Bucket: aws.String(s.bucket), Key: aws.String(key)})
+	}()
 	asset, err := s.getObject("s3-smoke", s.reference(key))
 	if err != nil {
 		return err
@@ -208,7 +216,10 @@ func (s *S3Storage) objectExists(reference string) (bool, error) {
 	defer cancel()
 	_, err = s.client.HeadObject(ctx, &s3.HeadObjectInput{Bucket: aws.String(s.bucket), Key: aws.String(key)})
 	if err != nil {
-		return false, nil
+		if isS3NotFound(err) {
+			return false, nil
+		}
+		return false, fmt.Errorf("no se pudo consultar s3://%s/%s: %w", s.bucket, key, err)
 	}
 	return true, nil
 }
@@ -223,12 +234,27 @@ func (s *S3Storage) deletePrefix(prefix string) error {
 			return err
 		}
 		for _, object := range result.Contents {
-			_, _ = s.client.DeleteObject(ctx, &s3.DeleteObjectInput{Bucket: aws.String(s.bucket), Key: object.Key})
+			if _, err := s.client.DeleteObject(ctx, &s3.DeleteObjectInput{Bucket: aws.String(s.bucket), Key: object.Key}); err != nil {
+				return fmt.Errorf("no se pudo eliminar objeto S3: %w", err)
+			}
 		}
 		if !aws.ToBool(result.IsTruncated) || result.NextContinuationToken == nil {
 			return nil
 		}
 		token = result.NextContinuationToken
+	}
+}
+
+func isS3NotFound(err error) bool {
+	var apiError smithy.APIError
+	if !errors.As(err, &apiError) {
+		return false
+	}
+	switch strings.ToLower(apiError.ErrorCode()) {
+	case "notfound", "nosuchbucket", "nosuchkey", "404":
+		return true
+	default:
+		return false
 	}
 }
 

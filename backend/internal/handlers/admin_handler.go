@@ -536,28 +536,31 @@ func (h *AdminHandler) sanitizedConfig() gin.H {
 			"DB_USERNAME":   h.config.DBUsername,
 			"DB_PASSWORD":   maskedSecret(h.config.DBPassword),
 			"mysql": gin.H{
-				"host":       h.config.Database.MySQL.Host,
-				"port":       h.config.Database.MySQL.Port,
-				"user":       h.config.Database.MySQL.User,
-				"password":   maskedSecret(h.config.Database.MySQL.Password),
-				"database":   h.config.Database.MySQL.Database,
-				"charset":    h.config.Database.MySQL.Charset,
-				"parse_time": h.config.Database.MySQL.ParseTime,
+				"host":                h.config.Database.MySQL.Host,
+				"port":                h.config.Database.MySQL.Port,
+				"user":                h.config.Database.MySQL.User,
+				"password":            maskedSecret(h.config.Database.MySQL.Password),
+				"password_configured": h.config.Database.MySQL.Password != "",
+				"database":            h.config.Database.MySQL.Database,
+				"charset":             h.config.Database.MySQL.Charset,
+				"parse_time":          h.config.Database.MySQL.ParseTime,
 			},
 			"postgres": gin.H{
-				"host":     h.config.Database.Postgres.Host,
-				"port":     h.config.Database.Postgres.Port,
-				"user":     h.config.Database.Postgres.User,
-				"password": maskedSecret(h.config.Database.Postgres.Password),
-				"database": h.config.Database.Postgres.Database,
-				"sslmode":  h.config.Database.Postgres.SSLMode,
-				"schema":   h.config.Database.Postgres.Schema,
+				"host":                h.config.Database.Postgres.Host,
+				"port":                h.config.Database.Postgres.Port,
+				"user":                h.config.Database.Postgres.User,
+				"password":            maskedSecret(h.config.Database.Postgres.Password),
+				"password_configured": h.config.Database.Postgres.Password != "",
+				"database":            h.config.Database.Postgres.Database,
+				"sslmode":             h.config.Database.Postgres.SSLMode,
+				"schema":              h.config.Database.Postgres.Schema,
 			},
 			"mongodb": gin.H{
 				"host":                        h.config.Database.MongoDB.Host,
 				"port":                        h.config.Database.MongoDB.Port,
 				"user":                        h.config.Database.MongoDB.User,
 				"password":                    maskedSecret(h.config.Database.MongoDB.Password),
+				"password_configured":         h.config.Database.MongoDB.Password != "",
 				"database":                    h.config.Database.MongoDB.Database,
 				"auth_source":                 h.config.Database.MongoDB.AuthSource,
 				"direct_connection":           h.config.Database.MongoDB.DirectConnection,
@@ -579,6 +582,8 @@ func (h *AdminHandler) sanitizedConfig() gin.H {
 			"filesystem_disk":         h.config.FilesystemDisk,
 			"access_key_id":           maskedSecret(h.config.AWSAccessKeyID),
 			"secret_access_key":       maskedSecret(h.config.AWSSecretAccessKey),
+			"access_key_configured":   h.config.AWSAccessKeyID != "",
+			"secret_key_configured":   h.config.AWSSecretAccessKey != "",
 			"region":                  h.config.AWSDefaultRegion,
 			"bucket":                  h.config.AWSBucket,
 			"endpoint":                h.config.AWSEndpoint,
@@ -597,6 +602,14 @@ func (h *AdminHandler) sanitizedConfig() gin.H {
 			"max_width":   h.config.IIIF.MaxWidth,
 			"max_height":  h.config.IIIF.MaxHeight,
 			"cache":       h.config.IIIF.CacheEnabled,
+		},
+		"conversion": gin.H{
+			"default_width":   h.config.Conversion.DefaultWidth,
+			"default_height":  h.config.Conversion.DefaultHeight,
+			"dpi":             h.config.Conversion.DPI,
+			"default_format":  h.config.Conversion.DefaultFormat,
+			"default_quality": h.config.Conversion.DefaultQuality,
+			"enable_ocr":      h.config.Conversion.EnableOCR,
 		},
 		"security": gin.H{
 			"enable_auth":            h.config.Security.EnableAuth,
@@ -692,6 +705,14 @@ type editableConfigPayload struct {
 		CacheEnabled bool   `json:"cache"`
 		CacheTTL     int    `json:"cache_ttl"`
 	} `json:"iiif"`
+	Conversion struct {
+		DefaultWidth   int    `json:"default_width"`
+		DefaultHeight  int    `json:"default_height"`
+		DPI            int    `json:"dpi"`
+		DefaultFormat  string `json:"default_format"`
+		DefaultQuality int    `json:"default_quality"`
+		EnableOCR      bool   `json:"enable_ocr"`
+	} `json:"conversion"`
 	Projects struct {
 		Enabled             bool                   `json:"enabled"`
 		DefaultProject      string                 `json:"default_project"`
@@ -742,6 +763,18 @@ func applyEditableConfig(next, current *config.Config, payload editableConfigPay
 	}
 	if payload.IIIF.MaxWidth <= 0 || payload.IIIF.MaxHeight <= 0 {
 		return &configError{"iiif.max_width y iiif.max_height deben ser mayores que cero"}
+	}
+	if payload.Conversion.DefaultWidth < 256 || payload.Conversion.DefaultWidth > 8192 || payload.Conversion.DefaultHeight < 256 || payload.Conversion.DefaultHeight > 8192 {
+		return &configError{"conversion.default_width y default_height deben estar entre 256 y 8192"}
+	}
+	if payload.Conversion.DPI < 72 || payload.Conversion.DPI > 600 {
+		return &configError{"conversion.dpi debe estar entre 72 y 600"}
+	}
+	if !allowedValue(payload.Conversion.DefaultFormat, "jpg", "jpeg", "png") {
+		return &configError{"conversion.default_format debe ser jpg o png"}
+	}
+	if payload.Conversion.DefaultQuality < 1 || payload.Conversion.DefaultQuality > 100 {
+		return &configError{"conversion.default_quality debe estar entre 1 y 100"}
 	}
 	if payload.Security.MaxConcurrentUploads <= 0 {
 		return &configError{"security.max_concurrent_uploads debe ser mayor que cero"}
@@ -829,6 +862,15 @@ func applyEditableConfig(next, current *config.Config, payload editableConfigPay
 	next.IIIF.MaxHeight = payload.IIIF.MaxHeight
 	next.IIIF.CacheEnabled = payload.IIIF.CacheEnabled
 	next.IIIF.CacheTTL = payload.IIIF.CacheTTL
+	next.Conversion.DefaultWidth = payload.Conversion.DefaultWidth
+	next.Conversion.DefaultHeight = payload.Conversion.DefaultHeight
+	next.Conversion.DPI = payload.Conversion.DPI
+	next.Conversion.DefaultFormat = strings.ToLower(payload.Conversion.DefaultFormat)
+	if next.Conversion.DefaultFormat == "jpeg" {
+		next.Conversion.DefaultFormat = "jpg"
+	}
+	next.Conversion.DefaultQuality = payload.Conversion.DefaultQuality
+	next.Conversion.EnableOCR = payload.Conversion.EnableOCR
 	next.Projects.Enabled = payload.Projects.Enabled
 	next.Projects.DefaultProject = payload.Projects.DefaultProject
 	next.Projects.RequireProject = payload.Projects.RequireProject

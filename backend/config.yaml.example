@@ -87,6 +87,8 @@ iiif:
   scale_factors: [1, 2, 4, 8]
 
 conversion:
+  default_width: 1241
+  default_height: 1754
   default_format: "jpg"
   default_quality: 85
   enable_ocr: false

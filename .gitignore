@@ -1,2 +1,8 @@
 backend/config.yaml
 backend/data/*
+backend/frontend/node_modules/
+backend/frontend/dist/
+backend/frontend/*.tsbuildinfo
+backend/frontend/vite.config.js
+backend/frontend/vite.config.d.ts
+.codex-tmp/

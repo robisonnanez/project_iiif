@@ -6,7 +6,6 @@ import (
 	"io"
 	"net/http"
 	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -84,23 +83,31 @@ func (h *APIHandler) UploadPDF(c *gin.Context) {
 		return
 	}
 
-	// Guardar archivo temporal
-	tempPath := filepath.Join(h.config.PDF.TempPath, "temp_"+filepath.Base(header.Filename))
-	tempFile, err := os.Create(tempPath)
+	// Usar un nombre aleatorio evita colisiones entre cargas concurrentes con el mismo nombre.
+	if err := os.MkdirAll(h.config.PDF.TempPath, 0o750); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Error preparando almacenamiento temporal"})
+		return
+	}
+	tempFile, err := os.CreateTemp(h.config.PDF.TempPath, "upload-*.pdf")
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Error guardando archivo"})
 		return
 	}
-	defer tempFile.Close()
+	tempPath := tempFile.Name()
+	defer os.Remove(tempPath)
 
 	if _, err := io.Copy(tempFile, file); err != nil {
+		tempFile.Close()
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Error copiando archivo"})
+		return
+	}
+	if err := tempFile.Close(); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Error cerrando archivo temporal"})
 		return
 	}
 
 	scope, err := h.requestScope(c)
 	if err != nil {
-		os.Remove(tempPath)
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
@@ -108,7 +115,6 @@ func (h *APIHandler) UploadPDF(c *gin.Context) {
 	// Procesar PDF
 	doc, err := h.pdfService.ProcessPDF(tempPath, header.Filename, settings, scope)
 	if err != nil {
-		os.Remove(tempPath)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Error procesando PDF"})
 		return
 	}
@@ -124,10 +130,16 @@ func (h *APIHandler) conversionSettings(c *gin.Context) (models.ConversionSettin
 	settings := models.ConversionSettings{
 		Format:    strings.ToLower(strings.TrimSpace(h.config.Conversion.DefaultFormat)),
 		Quality:   h.config.Conversion.DefaultQuality,
-		MaxWidth:  defaultUploadWidth,
-		MaxHeight: defaultUploadHeight,
+		MaxWidth:  h.config.Conversion.DefaultWidth,
+		MaxHeight: h.config.Conversion.DefaultHeight,
 		DPI:       dpi,
 		EnableOCR: h.config.Conversion.EnableOCR,
+	}
+	if settings.MaxWidth == 0 {
+		settings.MaxWidth = defaultUploadWidth
+	}
+	if settings.MaxHeight == 0 {
+		settings.MaxHeight = defaultUploadHeight
 	}
 	if settings.Format == "" {
 		settings.Format = "jpg"
@@ -286,6 +298,17 @@ func (h *APIHandler) UpdateProperties(c *gin.Context) {
 
 // IIIF Handlers - Formato Cantaloupe
 
+// GetManifest godoc
+// @Summary Obtener manifiesto IIIF Presentation API v2
+// @Description Devuelve un manifiesto v2 con secuencia, canvases y rangos jerarquicos derivados de los marcadores PDF. El parametro pages permite seleccionar paginas y poda rangos vacios.
+// @Tags IIIF
+// @Produce json
+// @Param id path string true "ID del documento"
+// @Param pages query string false "Paginas o rangos, por ejemplo 1-3,5"
+// @Success 200 {object} models.IIIFManifestV2
+// @Failure 400 {object} errorResponse
+// @Failure 404 {object} errorResponse
+// @Router /api/iiif/{id}/manifest [get]
 func (h *APIHandler) GetManifest(c *gin.Context) {
 	id := c.Param("id")
 	manifest, err := h.iiifService.GetManifest(id, c.Query("pages"))
@@ -301,6 +324,55 @@ func (h *APIHandler) GetManifest(c *gin.Context) {
 
 	c.Header("Content-Type", "application/json")
 	c.JSON(http.StatusOK, manifest)
+}
+
+// GetManifestV3 godoc
+// @Summary Obtener manifiesto IIIF Presentation API v3
+// @Description Endpoint de compatibilidad para clientes IIIF Presentation v3.
+// @Tags IIIF
+// @Produce json
+// @Param id path string true "ID del documento"
+// @Param pages query string false "Paginas o rangos, por ejemplo 1-3,5"
+// @Success 200 {object} models.IIIFManifest
+// @Failure 400 {object} errorResponse
+// @Failure 404 {object} errorResponse
+// @Router /api/iiif/v3/{id}/manifest [get]
+func (h *APIHandler) GetManifestV3(c *gin.Context) {
+	id := c.Param("id")
+	manifest, err := h.iiifService.GetManifestV3(id, c.Query("pages"))
+	if err != nil {
+		var selectionError *services.InvalidPageSelectionError
+		if errors.As(err, &selectionError) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": selectionError.Error()})
+			return
+		}
+		c.JSON(http.StatusNotFound, gin.H{"error": "Manifiesto no encontrado"})
+		return
+	}
+	c.JSON(http.StatusOK, manifest)
+}
+
+// GetImageInfoV2 godoc
+// @Summary Obtener info IIIF Image API v2
+// @Tags IIIF
+// @Produce json
+// @Param identifier path string true "Identificador IIIF, por ejemplo documento_page_1"
+// @Success 200 {object} models.IIIFImageInfoV2
+// @Failure 400 {object} errorResponse
+// @Failure 404 {object} errorResponse
+// @Router /iiif/2/{identifier}/info.json [get]
+func (h *APIHandler) GetImageInfoV2(c *gin.Context) {
+	docID, page, err := h.parseIdentifier(c.Param("identifier"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Identificador inválido"})
+		return
+	}
+	info, err := h.iiifService.GetImageInfoV2(docID, page)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Información de imagen no encontrada"})
+		return
+	}
+	c.JSON(http.StatusOK, info)
 }
 
 // GET /iiif/3/{identifier}/info.json
@@ -346,6 +418,7 @@ func (h *APIHandler) GetImageInfo(c *gin.Context) {
 // @Success 200 {file} file
 // @Failure 400 {object} errorResponse
 // @Failure 404 {object} errorResponse
+// @Router /iiif/2/{identifier}/{region}/{size}/{rotation}/{quality_format} [get]
 // @Router /iiif/3/{identifier}/{region}/{size}/{rotation}/{quality_format} [get]
 func (h *APIHandler) GetImage(c *gin.Context) {
 	identifier := c.Param("identifier")

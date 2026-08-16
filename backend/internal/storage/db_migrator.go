@@ -188,6 +188,7 @@ func migrationReflectedInSchema(db *sql.DB, engine, version string) (bool, error
 		"003": {{"documents", "project_key"}, {"document_images", "project_key"}},
 		"004": {{"documents", "migrated_from_local"}, {"document_images", "migrated_from_local"}},
 		"005": {{"documents", "conversion_width"}, {"documents", "conversion_quality"}},
+		"006": {{"documents", "outline_json"}},
 	}
 	checks, known := required[version]
 	if !known {

@@ -3,6 +3,7 @@ package main
 import (
 	"log"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 
@@ -20,14 +21,18 @@ import (
 
 // @title IIIF PDF Server API
 // @version 2.1
-// @description API para conversion de PDF a imagenes IIIF v3, administracion y migracion. Las rutas recomendadas usan /api/v1 y los endpoints legacy se mantienen por compatibilidad temporal.
+// @description API para conversion de PDF, IIIF Presentation v2 (con v3 compatible), IIIF Image API, administracion y migracion. Las rutas recomendadas usan /api/v1 y los endpoints legacy se mantienen por compatibilidad temporal.
 // @BasePath /
 // @securityDefinitions.apikey SessionCookie
 // @in cookie
 // @name project_iiif_session
 func main() {
 	// Cargar configuración
-	cfg, err := config.Load("config.yaml")
+	configPath := strings.TrimSpace(os.Getenv("CONFIG_PATH"))
+	if configPath == "" {
+		configPath = "config.yaml"
+	}
+	cfg, err := config.Load(configPath)
 	if err != nil {
 		log.Printf("Error cargando configuración: %v, usando valores por defecto", err)
 		cfg = config.Default()
@@ -35,6 +40,13 @@ func main() {
 
 	// Crear directorios necesarios
 	createDirectories(cfg)
+	if envEnabled("AUTO_MIGRATE") && cfg.Storage.Backend != "local" {
+		result, migrationErr := storage.RunDBMigrations(cfg, ".")
+		if migrationErr != nil {
+			log.Fatalf("Error ejecutando migraciones de %s: %v", result.Engine, migrationErr)
+		}
+		log.Printf("Migraciones %s: aplicadas=%d omitidas=%d", result.Engine, result.Applied, result.Skipped)
+	}
 
 	// Inicializar servicios
 	store, err := newStorage(cfg)
@@ -92,9 +104,10 @@ func main() {
 			dashboard.GET("/subir-pdf", frontendHandler.Dashboard)
 			dashboard.GET("/documentos", frontendHandler.Dashboard)
 			dashboard.GET("/imagenes", frontendHandler.Dashboard)
+			dashboard.GET("/iiif", frontendHandler.Dashboard)
 			dashboard.GET("/configuracion", frontendHandler.Dashboard)
 			dashboard.GET("/migracion", frontendHandler.Dashboard)
-			dashboard.Static("/assets", cfg.Frontend.Path+"/assets")
+			dashboard.Static("/assets", filepath.Join(cfg.Frontend.Path, "dist", "assets"))
 		}
 
 		// Expone rutas admin versionadas y mantiene aliases legacy durante la transicion.
@@ -153,6 +166,14 @@ func main() {
 	// Formato: /iiif/{version}/{identifier}/{region}/{size}/{rotation}/{quality}.{format}
 	iiifGroup := router.Group("/iiif")
 	{
+		// IIIF Image API v2, used by Presentation API v2 manifests.
+		v2 := iiifGroup.Group("/2")
+		{
+			v2.GET("/:identifier/info.json", apiHandler.GetImageInfoV2)
+			v2.GET("/:identifier/:region/:size/:rotation/:quality_format", apiHandler.GetImage)
+			v2.GET("/:identifier/default.jpg", apiHandler.GetImageDefault)
+		}
+
 		// IIIF Image API v3
 		v3 := iiifGroup.Group("/" + cfg.IIIF.APIVersion)
 		{
@@ -169,6 +190,7 @@ func main() {
 
 	// Rutas de manifiestos (mantener compatibilidad)
 	legacyAPI.GET("/iiif/:id/manifest", apiHandler.GetManifest)
+	legacyAPI.GET("/iiif/v3/:id/manifest", apiHandler.GetManifestV3)
 
 	// Iniciar servidor
 	log.Printf("Servidor IIIF iniciado en puerto %s", cfg.Server.Port)
@@ -183,6 +205,11 @@ func main() {
 	log.Printf("  Imagen página 2: http://localhost:%s/iiif/3/documento.pdf_page_2/full/800,/0/default.jpg", cfg.Server.Port)
 
 	log.Fatal(router.Run(":" + cfg.Server.Port))
+}
+
+func envEnabled(name string) bool {
+	value := strings.TrimSpace(os.Getenv(name))
+	return value == "1" || strings.EqualFold(value, "true") || strings.EqualFold(value, "yes")
 }
 
 func createDirectories(cfg *config.Config) {

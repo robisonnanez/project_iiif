@@ -2,6 +2,7 @@ package storage
 
 import (
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -66,12 +67,13 @@ func (ms *MySQLStorage) GetDocument(id string) (*models.PDFDocument, error) {
 	row := ms.db.QueryRow(`
 		SELECT id, original_name, COALESCE(project_key, 'default'), COALESCE(tenant_key, ''), COALESCE(migrated_from_local, 0), status, total_pages, converted_pages,
 		       COALESCE(conversion_width, 1241), COALESCE(conversion_height, 1754), COALESCE(conversion_dpi, 150), COALESCE(conversion_format, 'jpg'), COALESCE(conversion_quality, 85),
-		       pdf_path, thumbnail_path, manifest_url, created_at
+		       COALESCE(outline_json, '[]'), pdf_path, thumbnail_path, manifest_url, created_at
 		FROM documents
 		WHERE id = ?
 	`, id)
 
 	doc := &models.PDFDocument{}
+	var outlineJSON string
 	var pdfPath, thumbnailPath, manifestURL sql.NullString
 	if err := row.Scan(
 		&doc.ID,
@@ -87,6 +89,7 @@ func (ms *MySQLStorage) GetDocument(id string) (*models.PDFDocument, error) {
 		&doc.ConversionDPI,
 		&doc.ConversionFormat,
 		&doc.ConversionQuality,
+		&outlineJSON,
 		&pdfPath,
 		&thumbnailPath,
 		&manifestURL,
@@ -96,6 +99,7 @@ func (ms *MySQLStorage) GetDocument(id string) (*models.PDFDocument, error) {
 	}
 
 	doc.FilePath = pdfPath.String
+	doc.Outline = decodeOutlineJSON(outlineJSON)
 	doc.ThumbnailURL = thumbnailPath.String
 	doc.ManifestURL = manifestURL.String
 	doc.ImagePaths = ms.getImagePaths(doc.ID)
@@ -110,7 +114,7 @@ func (ms *MySQLStorage) GetDocumentsByScope(projectKey, tenantKey string) ([]*mo
 	query := `
 		SELECT id, original_name, COALESCE(project_key, 'default'), COALESCE(tenant_key, ''), COALESCE(migrated_from_local, 0), status, total_pages, converted_pages,
 		       COALESCE(conversion_width, 1241), COALESCE(conversion_height, 1754), COALESCE(conversion_dpi, 150), COALESCE(conversion_format, 'jpg'), COALESCE(conversion_quality, 85),
-		       pdf_path, thumbnail_path, manifest_url, created_at
+		       COALESCE(outline_json, '[]'), pdf_path, thumbnail_path, manifest_url, created_at
 		FROM documents`
 	var args []interface{}
 	var conditions []string
@@ -136,6 +140,7 @@ func (ms *MySQLStorage) GetDocumentsByScope(projectKey, tenantKey string) ([]*mo
 	var docs []*models.PDFDocument
 	for rows.Next() {
 		doc := &models.PDFDocument{}
+		var outlineJSON string
 		var pdfPath, thumbnailPath, manifestURL sql.NullString
 		if err := rows.Scan(
 			&doc.ID,
@@ -151,6 +156,7 @@ func (ms *MySQLStorage) GetDocumentsByScope(projectKey, tenantKey string) ([]*mo
 			&doc.ConversionDPI,
 			&doc.ConversionFormat,
 			&doc.ConversionQuality,
+			&outlineJSON,
 			&pdfPath,
 			&thumbnailPath,
 			&manifestURL,
@@ -159,6 +165,7 @@ func (ms *MySQLStorage) GetDocumentsByScope(projectKey, tenantKey string) ([]*mo
 			return nil, err
 		}
 		doc.FilePath = pdfPath.String
+		doc.Outline = decodeOutlineJSON(outlineJSON)
 		doc.ThumbnailURL = thumbnailPath.String
 		doc.ManifestURL = manifestURL.String
 		doc.ImagePaths = ms.getImagePaths(doc.ID)
@@ -323,9 +330,13 @@ func (ms *MySQLStorage) upsertDocument(doc *models.PDFDocument) error {
 		doc.UploadDate = time.Now()
 	}
 
-	_, err := ms.db.Exec(`
-		INSERT INTO documents (id, original_name, project_key, tenant_key, migrated_from_local, status, total_pages, converted_pages, conversion_width, conversion_height, conversion_dpi, conversion_format, conversion_quality, pdf_path, thumbnail_path, manifest_url, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
+	outlineJSON, err := json.Marshal(doc.Outline)
+	if err != nil {
+		return fmt.Errorf("error encoding PDF outline: %w", err)
+	}
+	_, err = ms.db.Exec(`
+		INSERT INTO documents (id, original_name, project_key, tenant_key, migrated_from_local, status, total_pages, converted_pages, conversion_width, conversion_height, conversion_dpi, conversion_format, conversion_quality, outline_json, pdf_path, thumbnail_path, manifest_url, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
 		ON DUPLICATE KEY UPDATE
 			original_name = VALUES(original_name),
 			project_key = VALUES(project_key),
@@ -339,15 +350,24 @@ func (ms *MySQLStorage) upsertDocument(doc *models.PDFDocument) error {
 			conversion_dpi = VALUES(conversion_dpi),
 			conversion_format = VALUES(conversion_format),
 			conversion_quality = VALUES(conversion_quality),
+			outline_json = VALUES(outline_json),
 			pdf_path = VALUES(pdf_path),
 			thumbnail_path = VALUES(thumbnail_path),
 			manifest_url = VALUES(manifest_url),
 			updated_at = NOW()
 	`, doc.ID, doc.Name, nullString(defaultProject(doc.ProjectKey)), nullString(doc.TenantKey), doc.MigratedFromLocal, doc.Status, doc.TotalPages, doc.ConvertedPages,
 		doc.ConversionWidth, doc.ConversionHeight, doc.ConversionDPI, nullString(doc.ConversionFormat), doc.ConversionQuality,
-		nullString(doc.FilePath), nullString(doc.ThumbnailURL), nullString(doc.ManifestURL), doc.UploadDate)
+		string(outlineJSON), nullString(doc.FilePath), nullString(doc.ThumbnailURL), nullString(doc.ManifestURL), doc.UploadDate)
 
 	return err
+}
+
+func decodeOutlineJSON(value string) []models.PDFOutlineItem {
+	var outline []models.PDFOutlineItem
+	if strings.TrimSpace(value) == "" || json.Unmarshal([]byte(value), &outline) != nil {
+		return nil
+	}
+	return outline
 }
 
 func (ms *MySQLStorage) getImagePaths(documentID string) []string {

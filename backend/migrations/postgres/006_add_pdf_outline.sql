@@ -1,0 +1,2 @@
+ALTER TABLE documents
+  ADD COLUMN IF NOT EXISTS outline_json JSONB NULL;

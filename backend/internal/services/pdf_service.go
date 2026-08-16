@@ -130,6 +130,7 @@ func (s *PDFService) convertPDFToImages(doc *models.PDFDocument, sourcePath stri
 	defer pdf.Close()
 
 	doc.TotalPages = pdf.NumPage()
+	doc.Outline = extractPDFOutline(pdf, doc.TotalPages)
 	s.storage.UpdateDocument(doc)
 
 	imageDir := ""
@@ -227,6 +228,35 @@ func (s *PDFService) convertPDFToImages(doc *models.PDFDocument, sourcePath stri
 	log.Printf("PDF conversion completed document=%s pages=%d total=%s render=%s resize=%s encode=%s store=%s dpi=%d max=%dx%d format=%s",
 		doc.ID, doc.ConvertedPages, time.Since(startedAt), renderDuration, resizeDuration, encodeDuration, storeDuration,
 		settings.DPI, settings.MaxWidth, settings.MaxHeight, settings.Format)
+}
+
+func extractPDFOutline(pdf *fitz.Document, totalPages int) []models.PDFOutlineItem {
+	outline, err := pdf.ToC()
+	if err != nil {
+		return nil
+	}
+	return normalizePDFOutline(outline, totalPages)
+}
+
+func normalizePDFOutline(source []fitz.Outline, totalPages int) []models.PDFOutlineItem {
+	result := make([]models.PDFOutlineItem, 0, len(source))
+	for _, item := range source {
+		title := strings.TrimSpace(item.Title)
+		page := item.Page + 1 // go-fitz exposes MuPDF's zero-based page index.
+		if title == "" || page < 1 || page > totalPages {
+			continue
+		}
+		level := item.Level
+		if level < 1 {
+			level = 1
+		}
+		result = append(result, models.PDFOutlineItem{
+			Level:      level,
+			Title:      title,
+			PageNumber: page,
+		})
+	}
+	return result
 }
 
 func (s *PDFService) scopePath(base string, scope *models.Scope) string {

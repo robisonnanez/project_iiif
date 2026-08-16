@@ -46,6 +46,20 @@ func TestConversionSettingsReadsMultipartFields(t *testing.T) {
 	}
 }
 
+func TestConversionSettingsUsesConfiguredDefaults(t *testing.T) {
+	handler := uploadSettingsTestHandler()
+	handler.config.Conversion.DefaultWidth = 1600
+	handler.config.Conversion.DefaultHeight = 2200
+
+	settings, err := handler.conversionSettings(uploadSettingsTestContext(url.Values{}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if settings.MaxWidth != 1600 || settings.MaxHeight != 2200 {
+		t.Fatalf("unexpected configured defaults: %+v", settings)
+	}
+}
+
 func TestConversionSettingsRejectsUnsafeDPI(t *testing.T) {
 	handler := uploadSettingsTestHandler()
 	context := uploadSettingsTestContext(url.Values{"dpi": {"1200"}})

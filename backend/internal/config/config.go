@@ -99,6 +99,8 @@ type Config struct {
 	} `yaml:"iiif"`
 
 	Conversion struct {
+		DefaultWidth    int    `yaml:"default_width"`
+		DefaultHeight   int    `yaml:"default_height"`
 		DefaultFormat   string `yaml:"default_format"`
 		DefaultQuality  int    `yaml:"default_quality"`
 		EnableOCR       bool   `yaml:"enable_ocr"`
@@ -177,12 +179,22 @@ func applyEnvironment(config *Config) {
 		name   string
 		target *string
 	}{
+		{"STORAGE_BACKEND", &config.StorageBackend},
+		{"DB_CONNECTION", &config.DBConnection},
+		{"DB_HOST", &config.DBHost},
+		{"DB_PORT", &config.DBPort},
+		{"DB_DATABASE", &config.DBDatabase},
+		{"DB_USERNAME", &config.DBUsername},
+		{"DB_PASSWORD", &config.DBPassword},
 		{"FILESYSTEM_DISK", &config.FilesystemDisk},
 		{"AWS_ACCESS_KEY_ID", &config.AWSAccessKeyID},
 		{"AWS_SECRET_ACCESS_KEY", &config.AWSSecretAccessKey},
 		{"AWS_DEFAULT_REGION", &config.AWSDefaultRegion},
 		{"AWS_BUCKET", &config.AWSBucket},
 		{"AWS_ENDPOINT", &config.AWSEndpoint},
+		{"FRONTEND_USERNAME", &config.Frontend.Username},
+		{"FRONTEND_PASSWORD", &config.Frontend.Password},
+		{"IIIF_BASE_URL", &config.IIIF.BaseURL},
 	}
 	for _, item := range stringValues {
 		if value, ok := os.LookupEnv(item.name); ok {
@@ -585,12 +597,16 @@ func Default() *Config {
 			ScaleFactors: []int{1, 2, 4, 8},
 		},
 		Conversion: struct {
+			DefaultWidth    int    `yaml:"default_width"`
+			DefaultHeight   int    `yaml:"default_height"`
 			DefaultFormat   string `yaml:"default_format"`
 			DefaultQuality  int    `yaml:"default_quality"`
 			EnableOCR       bool   `yaml:"enable_ocr"`
 			DPI             int    `yaml:"dpi"`
 			BackgroundColor string `yaml:"background_color"`
 		}{
+			DefaultWidth:    1241,
+			DefaultHeight:   1754,
 			DefaultFormat:   "jpg",
 			DefaultQuality:  85,
 			EnableOCR:       false,
