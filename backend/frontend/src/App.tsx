@@ -1,9 +1,12 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "./api";
-import type { AppConfig, DocumentRecord } from "./types";
-import { Alert, Badge, Button, Card, EmptyState, FormField, Input, PageHeader, Select, Spinner } from "./components/ui";
+import type { AppConfig, DocumentRecord, NoticeTone } from "./types";
+import { Alert, Badge, Button, Card, EmptyState, PageHeader, Spinner } from "./components/ui";
 import { ManifestDialog } from "./components/ManifestDialog";
+import { ToastStack, type ToastNotice } from "./components/ToastStack";
 import { ConfigPage } from "./pages/ConfigPage";
+import { ImagesPage } from "./pages/ImagesPage";
+import { MigrationPage } from "./pages/MigrationPage";
 import { UploadPage } from "./pages/UploadPage";
 
 type View = "dashboard" | "documents" | "iiif" | "upload" | "migration" | "config";
@@ -11,13 +14,14 @@ type View = "dashboard" | "documents" | "iiif" | "upload" | "migration" | "confi
 const nav: Array<{ view: View; label: string; path: string }> = [
   { view: "dashboard", label: "Dashboard", path: "/dashboard/inicio" },
   { view: "documents", label: "Documentos", path: "/dashboard/documentos" },
-  { view: "iiif", label: "IIIF", path: "/dashboard/iiif" },
+  { view: "iiif", label: "Imágenes IIIF", path: "/dashboard/iiif" },
   { view: "upload", label: "Subir PDF", path: "/dashboard/subir-pdf" },
   { view: "migration", label: "Migración", path: "/dashboard/migracion" },
   { view: "config", label: "Configuración", path: "/dashboard/configuracion" },
 ];
 
 function viewFromPath(): View {
+  if (location.pathname === "/dashboard/imagenes") return "iiif";
   return nav.find((item) => location.pathname === item.path)?.view ?? "dashboard";
 }
 
@@ -28,16 +32,46 @@ export default function App() {
   const [config, setConfig] = useState<AppConfig | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [notices, setNotices] = useState<ToastNotice[]>([]);
+  const noticeSequence = useRef(0);
+  const previousStatuses = useRef(new Map<string, string>());
+  const documentsInitialized = useRef(false);
+
+  const dismissNotice = useCallback((id: number) => setNotices((current) => current.filter((notice) => notice.id !== id)), []);
+  const notify = useCallback((message: string, tone: NoticeTone = "success") => {
+    noticeSequence.current += 1;
+    setNotices((current) => [...current, { id: noticeSequence.current, message, tone }].slice(-5));
+  }, []);
+  const applyDocuments = useCallback((next: DocumentRecord[]) => {
+    if (documentsInitialized.current) {
+      for (const document of next) {
+        const previous = previousStatuses.current.get(document.id);
+        if (previous === "processing" && document.status === "completed") notify(`“${document.name}” terminó de convertirse.`, "success");
+        if (previous === "processing" && document.status === "error") notify(`La conversión de “${document.name}” terminó con error.`, "danger");
+      }
+    }
+    previousStatuses.current = new Map(next.map((document) => [document.id, document.status]));
+    documentsInitialized.current = true;
+    setDocuments(next);
+  }, [notify]);
+  const refreshDocuments = useCallback(async (reportError = true) => {
+    try { applyDocuments(await api.documents()); }
+    catch (cause) { if (reportError) setError(cause instanceof Error ? cause.message : "No se pudieron cargar los documentos."); }
+  }, [applyDocuments]);
 
   const refresh = useCallback(async () => {
     setLoading(true); setError("");
     const [documentsResult, configResult] = await Promise.allSettled([api.documents(), api.config()]);
-    if (documentsResult.status === "fulfilled") setDocuments(documentsResult.value); else setError(documentsResult.reason.message);
+    if (documentsResult.status === "fulfilled") applyDocuments(documentsResult.value); else setError(documentsResult.reason.message);
     if (configResult.status === "fulfilled") setConfig(configResult.value); else setError((current) => current || configResult.reason.message);
     setLoading(false);
-  }, []);
+  }, [applyDocuments]);
 
   useEffect(() => { void refresh(); }, [refresh]);
+  useEffect(() => {
+    const timer = window.setInterval(() => { if (!document.hidden) void refreshDocuments(false); }, 2500);
+    return () => window.clearInterval(timer);
+  }, [refreshDocuments]);
   useEffect(() => {
     const pop = () => setView(viewFromPath());
     addEventListener("popstate", pop);
@@ -64,12 +98,13 @@ export default function App() {
       {loading && documents.length === 0 ? <div className="loading-page"><Spinner label="Cargando dashboard" /></div> : <>
         {view === "dashboard" && <Dashboard documents={documents} completed={completed} config={config} onRefresh={refresh} />}
         {view === "documents" && <DocumentsPage documents={documents} onRefresh={refresh} />}
-        {view === "iiif" && <IIIFPage documents={documents} />}
-        {view === "upload" && <UploadPage config={config} onUploaded={refresh} />}
-        {view === "migration" && <MigrationPage />}
+        {view === "upload" && <UploadPage config={config} onUploaded={() => void refreshDocuments(false)} notify={notify} />}
+        {view === "iiif" && <ImagesPage documents={documents} config={config} notify={notify} />}
+        {view === "migration" && <MigrationPage config={config} notify={notify} />}
         {view === "config" && (config ? <ConfigPage initial={config} onSaved={setConfig} /> : <Alert tone="danger">No se pudo cargar la configuración.</Alert>)}
       </>}
     </main>
+    <ToastStack notices={notices} dismiss={dismissNotice} />
   </div>;
 }
 
@@ -98,33 +133,4 @@ function DocumentsPage({ documents, onRefresh }: { documents: DocumentRecord[]; 
 function DocumentTable({ documents, onManifest, compact = false }: { documents: DocumentRecord[]; onManifest?: (document: DocumentRecord) => void; compact?: boolean }) {
   if (!documents.length) return <EmptyState title="Sin documentos" description="Sube un PDF para comenzar." />;
   return <div className="table-wrap"><table><thead><tr><th>Documento</th><th>Estado</th><th>Páginas</th>{!compact && <th>Origen</th>}{onManifest && <th><span className="sr-only">Acciones</span></th>}</tr></thead><tbody>{documents.map((document) => <tr key={document.id}><td><strong>{document.name}</strong><small className="table-secondary">{document.id}</small></td><td><Badge tone={document.status === "completed" ? "success" : document.status === "error" ? "danger" : "warning"}>{document.status}</Badge></td><td>{document.convertedPages} / {document.totalPages}</td>{!compact && <td>{document.migratedFromLocal ? "Migrado" : "Subido"}</td>}{onManifest && <td><Button variant="secondary" disabled={document.status !== "completed"} onClick={() => onManifest(document)}>Generar manifest</Button></td>}</tr>)}</tbody></table></div>;
-}
-
-function IIIFPage({ documents }: { documents: DocumentRecord[] }) {
-  const ready = documents.filter((document) => document.status === "completed");
-  const [selectedId, setSelectedId] = useState(ready[0]?.id ?? "");
-  const selected = useMemo(() => ready.find((document) => document.id === selectedId), [ready, selectedId]);
-  const [dialog, setDialog] = useState(false);
-  return <>
-    <PageHeader eyebrow="Interoperabilidad" title="IIIF" description="Publica Presentation API 2.1 y conserva una ruta compatible con v3." />
-    <Card className="narrow-card">
-      {ready.length ? <><FormField label="Documento">{(id) => <Select id={id} value={selectedId} onChange={(e) => setSelectedId(e.target.value)}>{ready.map((doc) => <option key={doc.id} value={doc.id}>{doc.name}</option>)}</Select>}</FormField><div className="button-row"><Button onClick={() => setDialog(true)}>Generar manifest</Button><a className="button button-secondary" href={selected ? `/api/iiif/v3/${encodeURIComponent(selected.id)}/manifest` : "#"} target="_blank" rel="noreferrer">Manifest v3</a></div></> : <EmptyState title="No hay documentos listos" description="Completa una conversión antes de generar manifests." />}
-    </Card>
-    {dialog && selected && <ManifestDialog document={selected} onClose={() => setDialog(false)} />}
-  </>;
-}
-
-function MigrationPage() {
-  const [source, setSource] = useState<"local" | "database" | "ssh">("local");
-  const [path, setPath] = useState("./data");
-  const [host, setHost] = useState(""); const [user, setUser] = useState(""); const [privateKey, setPrivateKey] = useState("");
-  const [busy, setBusy] = useState(false); const [message, setMessage] = useState(""); const [error, setError] = useState("");
-  const start = async () => {
-    setBusy(true); setError("");
-    try {
-      const result = await api.startMigration({ source: { type: source, local: { path }, ssh: { host, port: 22, user, path, private_key: privateKey } }, scope: { project_key: "default", tenant_key: "" } });
-      setMessage(result.message || "Migración iniciada.");
-    } catch (cause) { setError(cause instanceof Error ? cause.message : "No se pudo iniciar."); } finally { setBusy(false); }
-  };
-  return <><PageHeader eyebrow="Transferencias" title="Migración" description="Migra almacenamiento local, base de datos o un servidor SSH hacia el destino configurado." />{message && <Alert tone="success">{message}</Alert>}{error && <Alert tone="danger">{error}</Alert>}<Card className="narrow-card"><FormField label="Origen">{(id) => <Select id={id} value={source} onChange={(e) => setSource(e.target.value as typeof source)}><option value="local">Almacenamiento local</option><option value="database">Base de datos activa</option><option value="ssh">Servidor SSH</option></Select>}</FormField>{source !== "database" && <FormField label={source === "ssh" ? "Ruta remota" : "Ruta local"}>{(id) => <Input id={id} value={path} onChange={(e) => setPath(e.target.value)} />}</FormField>}{source === "ssh" && <><FormField label="Host">{(id) => <Input id={id} value={host} onChange={(e) => setHost(e.target.value)} />}</FormField><FormField label="Usuario">{(id) => <Input id={id} value={user} onChange={(e) => setUser(e.target.value)} />}</FormField><FormField label="Llave privada">{(id) => <textarea id={id} className="input" rows={6} value={privateKey} onChange={(e) => setPrivateKey(e.target.value)} autoComplete="off" />}</FormField></>}<Button disabled={busy} onClick={start}>{busy ? <Spinner label="Iniciando" /> : "Iniciar migración"}</Button></Card></>;
 }

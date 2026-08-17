@@ -47,7 +47,7 @@ export function EmptyState({ title, description }: { title: string; description:
   return <div className="empty-state"><strong>{title}</strong><p>{description}</p></div>;
 }
 
-export function Modal({ title, description, children, onClose }: { title: string; description?: string; children: ReactNode; onClose: () => void }) {
+export function Modal({ title, description, children, onClose, className = "" }: { title: string; description?: string; children: ReactNode; onClose: () => void; className?: string }) {
   const dialog = useRef<HTMLDivElement>(null);
   const restoreFocus = useRef<HTMLElement | null>(null);
   useEffect(() => {
@@ -60,5 +60,5 @@ export function Modal({ title, description, children, onClose }: { title: string
       restoreFocus.current?.focus();
     };
   }, [onClose]);
-  return <div className="modal-backdrop" onMouseDown={(event) => event.target === event.currentTarget && onClose()}><div ref={dialog} className="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title"><div className="modal-heading"><div><h2 id="modal-title">{title}</h2>{description && <p>{description}</p>}</div><Button variant="ghost" onClick={onClose} aria-label="Cerrar modal">×</Button></div>{children}</div></div>;
+  return <div className="modal-backdrop" onMouseDown={(event) => event.target === event.currentTarget && onClose()}><div ref={dialog} className={`modal ${className}`} role="dialog" aria-modal="true" aria-labelledby="modal-title"><div className="modal-heading"><div><h2 id="modal-title">{title}</h2>{description && <p>{description}</p>}</div><Button variant="ghost" onClick={onClose} aria-label="Cerrar modal">×</Button></div>{children}</div></div>;
 }

@@ -7,7 +7,7 @@ import { sampleConfig } from "../test/fixtures";
 
 it("abre el modal con defaults y permite cancelar", async () => {
   const user = userEvent.setup();
-  render(<UploadPage config={structuredClone(sampleConfig)} onUploaded={() => undefined} />);
+  render(<UploadPage config={structuredClone(sampleConfig)} onUploaded={() => undefined} notify={vi.fn()} />);
   const file = new File(["pdf"], "book.pdf", { type: "application/pdf" });
   await user.upload(screen.getByLabelText("Archivo PDF"), file);
   await user.click(screen.getByRole("button", { name: "Configurar y convertir" }));
@@ -20,7 +20,7 @@ it("abre el modal con defaults y permite cancelar", async () => {
 it("valida parámetros y presenta errores de la API", async () => {
   const user = userEvent.setup();
   vi.spyOn(api, "upload").mockRejectedValueOnce(new Error("PDF corrupto"));
-  render(<UploadPage config={structuredClone(sampleConfig)} onUploaded={() => undefined} />);
+  render(<UploadPage config={structuredClone(sampleConfig)} onUploaded={() => undefined} notify={vi.fn()} />);
   await user.upload(screen.getByLabelText("Archivo PDF"), new File(["pdf"], "book.pdf", { type: "application/pdf" }));
   await user.click(screen.getByRole("button", { name: "Configurar y convertir" }));
   await user.clear(screen.getByLabelText("DPI"));
@@ -48,7 +48,7 @@ it("envía el proyecto y tenant elegidos al subir", async () => {
   const upload = vi.spyOn(api, "upload").mockResolvedValueOnce({
     id: "document-id", name: "book.pdf", migratedFromLocal: false, status: "processing", totalPages: 0, convertedPages: 0,
   });
-  render(<UploadPage config={config} onUploaded={() => undefined} />);
+  render(<UploadPage config={config} onUploaded={() => undefined} notify={vi.fn()} />);
   await user.selectOptions(screen.getByLabelText("Proyecto"), "metavisor");
   await user.selectOptions(screen.getByLabelText("Tenant"), "sunat");
   await user.upload(screen.getByLabelText("Archivo PDF"), new File(["pdf"], "book.pdf", { type: "application/pdf" }));

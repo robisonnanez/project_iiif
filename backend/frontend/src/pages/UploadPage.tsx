@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { api } from "../api";
-import type { AppConfig, UploadSettings } from "../types";
+import type { AppConfig, Notify, UploadSettings } from "../types";
 import { Alert, Button, Card, FormField, Input, Modal, PageHeader, Select, Spinner } from "../components/ui";
 
 function validate(settings: UploadSettings): string {
@@ -11,7 +11,7 @@ function validate(settings: UploadSettings): string {
   return "";
 }
 
-export function UploadPage({ config, onUploaded }: { config: AppConfig | null; onUploaded: () => void }) {
+export function UploadPage({ config, onUploaded, notify }: { config: AppConfig | null; onUploaded: () => void; notify: Notify }) {
   const [file, setFile] = useState<File | null>(null);
   const [modal, setModal] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -50,9 +50,11 @@ export function UploadPage({ config, onUploaded }: { config: AppConfig | null; o
     try {
       const document = await api.upload(file, settings, { project, tenant: tenant.trim() });
       setMessage(`“${document.name}” se está convirtiendo.`);
+      notify(`“${document.name}” se subió y comenzó a convertirse.`, "success");
       setModal(false); setFile(null); onUploaded();
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "No se pudo subir el PDF.");
+      const message = cause instanceof Error ? cause.message : "No se pudo subir el PDF.";
+      setError(message); notify(message, "danger");
     } finally { setBusy(false); }
   };
 

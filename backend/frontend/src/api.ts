@@ -1,4 +1,4 @@
-import type { AppConfig, DocumentRecord, UploadScope, UploadSettings } from "./types";
+import type { AppConfig, DocumentImagesResponse, DocumentRecord, MigrationDirectory, MigrationPayload, MigrationStatus, UploadScope, UploadSettings } from "./types";
 
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
   const response = await fetch(url, { credentials: "same-origin", ...init });
@@ -31,11 +31,13 @@ export const api = {
     if (scope.tenant) form.append("tenant", scope.tenant);
     return request<DocumentRecord>("/api/v1/documents/upload", { method: "POST", body: form });
   },
-  startMigration: (payload: unknown) => request<{ message: string }>("/api/v1/admin/migrations/local-to-db/start", {
+  documentImages: (documentId: string) => request<DocumentImagesResponse>(`/api/v1/admin/documents/${encodeURIComponent(documentId)}/images`),
+  browseMigrationPath: (path: string) => request<{ path: string; dirs: MigrationDirectory[] }>(`/api/v1/admin/migrations/sources/local/browse${path ? `?path=${encodeURIComponent(path)}` : ""}`),
+  startMigration: (payload: MigrationPayload) => request<{ message: string; status: MigrationStatus }>("/api/v1/admin/migrations/local-to-db/start", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
   }),
-  migrationStatus: () => request<Record<string, unknown>>("/api/v1/admin/migrations/local-to-db/status"),
+  migrationStatus: () => request<MigrationStatus>("/api/v1/admin/migrations/local-to-db/status"),
   logout: () => request<void>("/auth/logout", { method: "POST" }),
 };

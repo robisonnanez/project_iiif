@@ -93,3 +93,67 @@ export interface UploadScope {
   project: string;
   tenant: string;
 }
+
+export type NoticeTone = "success" | "danger" | "info";
+export type Notify = (message: string, tone?: NoticeTone) => void;
+
+export interface DocumentImage {
+  image_id: string;
+  document_id: string;
+  project_key: string;
+  tenant_key?: string;
+  page_number: number;
+  width: number;
+  height: number;
+  format: string;
+  media_type: string;
+  byte_size: number;
+  migrated_from_local: boolean;
+  iiif_url: string;
+  info_url: string;
+}
+
+export interface DocumentImagesResponse {
+  document_id: string;
+  project_key: string;
+  tenant_key?: string;
+  images: DocumentImage[];
+}
+
+export interface MigrationItem {
+  document_id: string;
+  pdf_name: string;
+  images_done: number;
+  images_total: number;
+  status: string;
+  message?: string;
+}
+
+export interface MigrationStatus {
+  running: boolean;
+  started_at?: string;
+  finished_at?: string;
+  exit_code: number;
+  message?: string;
+  logs: string[];
+  job_id?: string;
+  source?: string;
+  metrics?: Record<string, number>;
+  progress_percent?: number;
+  current_document?: string;
+  items?: MigrationItem[];
+}
+
+export interface MigrationPayload {
+  source: {
+    type: "local" | "ssh" | "database";
+    local?: { path: string };
+    ssh?: { host: string; port: number; user: string; path: string; private_key: string };
+  };
+  scope: { project_key: string; tenant_key: string };
+}
+
+export interface MigrationDirectory {
+  name: string;
+  path: string;
+}
