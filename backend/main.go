@@ -91,7 +91,7 @@ func main() {
 	router.Static("/static", cfg.Storage.DataPath)
 
 	// Inicializar handlers
-	apiHandler := handlers.NewAPIHandler(pdfService, iiifService, documentService, cfg)
+	apiHandler := handlers.NewAPIHandler(pdfService, iiifService, documentService, ocrService, cfg)
 	welcomeHandler := handlers.NewWelcomeHandler(cfg)
 	frontendHandler := handlers.NewFrontendHandler(cfg)
 	adminHandler := handlers.NewAdminHandler(cfg, documentService)

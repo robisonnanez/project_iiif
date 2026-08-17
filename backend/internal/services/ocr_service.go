@@ -47,6 +47,8 @@ type OCRPage struct {
 	PageNumber     int       `json:"page_number"`
 	CanvasV2       string    `json:"canvas_v2"`
 	CanvasV3       string    `json:"canvas_v3"`
+	ImageID        string    `json:"image_id,omitempty"`
+	IIIFImage      string    `json:"iiif_image,omitempty"`
 	Status         string    `json:"status"`
 	Source         string    `json:"source"`
 	Language       string    `json:"language"`
@@ -103,6 +105,8 @@ type OCRSearchResult struct {
 	PageNumber int     `json:"page_number"`
 	CanvasV2   string  `json:"canvas_v2"`
 	CanvasV3   string  `json:"canvas_v3"`
+	ImageID    string  `json:"image_id,omitempty"`
+	IIIFImage  string  `json:"iiif_image,omitempty"`
 	Source     string  `json:"source"`
 	Snippet    string  `json:"snippet"`
 	Score      float64 `json:"score"`
@@ -395,7 +399,8 @@ func (s *OCRService) processPage(parent context.Context, document *fitz.Document
 		return nil, fmt.Errorf("render página %d: %w", pageIndex+1, err)
 	}
 	bounds := image.Bounds()
-	page := &OCRPage{SchemaVersion: ocrSchemaVersion, DocumentID: job.DocumentID, Generation: job.Generation, PageNumber: pageIndex + 1, CanvasV2: fmt.Sprintf("%s/api/iiif/%s/canvases/%s_%04d", strings.TrimRight(s.config.IIIF.BaseURL, "/"), job.DocumentID, job.DocumentID, pageIndex+1), CanvasV3: fmt.Sprintf("%s/api/iiif/%s/canvas/%d", strings.TrimRight(s.config.IIIF.BaseURL, "/"), job.DocumentID, pageIndex+1), Status: "indexed", Language: strings.Join(languages, "+"), Width: bounds.Dx(), Height: bounds.Dy(), NativeText: nativeText, Engine: "mupdf+tesseract-cli", CreatedAt: time.Now().UTC()}
+	imageID, iiifImage := s.imageReference(job.DocumentID, pageIndex+1)
+	page := &OCRPage{SchemaVersion: ocrSchemaVersion, DocumentID: job.DocumentID, Generation: job.Generation, PageNumber: pageIndex + 1, CanvasV2: fmt.Sprintf("%s/api/iiif/%s/canvases/%s_%04d", strings.TrimRight(s.config.IIIF.BaseURL, "/"), job.DocumentID, job.DocumentID, pageIndex+1), CanvasV3: fmt.Sprintf("%s/api/iiif/%s/canvas/%d", strings.TrimRight(s.config.IIIF.BaseURL, "/"), job.DocumentID, pageIndex+1), ImageID: imageID, IIIFImage: iiifImage, Status: "indexed", Language: strings.Join(languages, "+"), Width: bounds.Dx(), Height: bounds.Dy(), NativeText: nativeText, Engine: "mupdf+tesseract-cli", CreatedAt: time.Now().UTC()}
 	needsOCR := job.Mode == "exhaustive" || job.Mode == "ocr_only" || usefulRunes(nativeText) < s.config.OCR.MinTextChars
 	if !needsOCR {
 		page.Source = "text_layer"
@@ -543,7 +548,11 @@ func (s *OCRService) GetPage(documentID string, page int) (*OCRPage, error) {
 	if err != nil {
 		return nil, err
 	}
-	return s.readPage(documentID, summary.ActiveGeneration, page)
+	result, err := s.readPage(documentID, summary.ActiveGeneration, page)
+	if err == nil && result.ImageID == "" {
+		result.ImageID, result.IIIFImage = s.imageReference(documentID, page)
+	}
+	return result, err
 }
 
 func (s *OCRService) Search(query, project, tenant, documentID string, limit, offset int) ([]OCRSearchResult, int, error) {
@@ -574,7 +583,11 @@ func (s *OCRService) Search(query, project, tenant, documentID string, limit, of
 			if matches == 0 {
 				continue
 			}
-			results = append(results, OCRSearchResult{DocumentID: doc.ID, PageNumber: page, CanvasV2: item.CanvasV2, CanvasV3: item.CanvasV3, Source: item.Source, Snippet: makeSnippet(item.Text, needle), Score: float64(matches), Matches: matches})
+			imageID, iiifImage := item.ImageID, item.IIIFImage
+			if imageID == "" {
+				imageID, iiifImage = s.imageReference(doc.ID, page)
+			}
+			results = append(results, OCRSearchResult{DocumentID: doc.ID, PageNumber: page, CanvasV2: item.CanvasV2, CanvasV3: item.CanvasV3, ImageID: imageID, IIIFImage: iiifImage, Source: item.Source, Snippet: makeSnippet(item.Text, needle), Score: float64(matches), Matches: matches})
 		}
 	}
 	sort.Slice(results, func(i, j int) bool {
@@ -603,11 +616,22 @@ func (s *OCRService) Search(query, project, tenant, documentID string, limit, of
 	return results[offset:end], total, nil
 }
 
+func (s *OCRService) imageReference(documentID string, page int) (string, string) {
+	image, err := s.storage.GetDocumentImageByPage(documentID, page)
+	if err != nil || image == nil || image.ID == "" {
+		return "", ""
+	}
+	base := strings.TrimRight(s.config.IIIF.BaseURL, "/")
+	return image.ID, fmt.Sprintf("%s/iiif/%s/%s/full/max/0/default.jpg", base, s.config.IIIF.APIVersion, image.ID)
+}
+
 func (s *OCRService) Delete(documentID string) error {
-	if _, err := s.storage.GetDocument(documentID); err != nil {
+	if strings.TrimSpace(documentID) == "" || filepath.Base(documentID) != documentID {
+		return errors.New("identificador de documento inválido")
+	}
+	if err := os.Remove(filepath.Join(s.root, "documents", documentID+".json")); err != nil && !os.IsNotExist(err) {
 		return err
 	}
-	_ = os.Remove(filepath.Join(s.root, "documents", documentID+".json"))
 	return os.RemoveAll(filepath.Join(s.root, "pages", documentID))
 }
 

@@ -23,7 +23,9 @@ export const api = {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ password }),
   }),
+  serviceHealth: () => request<{ status: string }>("/health", { cache: "no-store" }),
   documents: () => request<DocumentRecord[]>("/api/v1/documents"),
+  deleteDocument: (documentId: string) => request<{ message: string }>(`/api/v1/documents/${encodeURIComponent(documentId)}`, { method: "DELETE" }),
   upload: (file: File, settings: UploadSettings, scope: UploadScope) => {
     const form = new FormData();
     form.append("pdf", file);

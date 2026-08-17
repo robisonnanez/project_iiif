@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "./api";
-import type { AppConfig, DocumentRecord, NoticeTone } from "./types";
-import { Alert, Badge, Button, Card, EmptyState, PageHeader, Spinner } from "./components/ui";
+import type { AppConfig, DocumentRecord, NoticeTone, Notify } from "./types";
+import { Alert, Badge, Button, Card, EmptyState, Modal, PageHeader, Spinner } from "./components/ui";
 import { ManifestDialog } from "./components/ManifestDialog";
 import { ToastStack, type ToastNotice } from "./components/ToastStack";
 import { ConfigPage } from "./pages/ConfigPage";
@@ -99,7 +99,7 @@ export default function App() {
       {error && <Alert tone="danger">{error}</Alert>}
       {loading && documents.length === 0 ? <div className="loading-page"><Spinner label="Cargando dashboard" /></div> : <>
         {view === "dashboard" && <Dashboard documents={documents} completed={completed} config={config} onRefresh={refresh} />}
-        {view === "documents" && <DocumentsPage documents={documents} onRefresh={refresh} />}
+        {view === "documents" && <DocumentsPage documents={documents} onRefresh={refresh} notify={notify} />}
         {view === "upload" && <UploadPage config={config} onUploaded={() => void refreshDocuments(false)} notify={notify} />}
         {view === "iiif" && <ImagesPage documents={documents} config={config} notify={notify} />}
         {view === "ocr" && <OCRPage documents={documents} config={config} notify={notify} />}
@@ -124,16 +124,38 @@ function Dashboard({ documents, completed, config, onRefresh }: { documents: Doc
   </>;
 }
 
-function DocumentsPage({ documents, onRefresh }: { documents: DocumentRecord[]; onRefresh: () => void }) {
+function DocumentsPage({ documents, onRefresh, notify }: { documents: DocumentRecord[]; onRefresh: () => void | Promise<void>; notify: Notify }) {
   const [selected, setSelected] = useState<DocumentRecord | null>(null);
+  const [deleting, setDeleting] = useState<DocumentRecord | null>(null);
+  const [deleteBusy, setDeleteBusy] = useState(false);
+  const [deleteError, setDeleteError] = useState("");
+  const remove = async () => {
+    if (!deleting) return;
+    setDeleteBusy(true); setDeleteError("");
+    try {
+      await api.deleteDocument(deleting.id);
+      const name = deleting.name;
+      setDeleting(null);
+      await onRefresh();
+      notify(`“${name}” y todos sus archivos fueron eliminados.`, "success");
+    } catch (cause) {
+      setDeleteError(cause instanceof Error ? cause.message : "No se pudo eliminar el documento.");
+    } finally { setDeleteBusy(false); }
+  };
   return <>
     <PageHeader eyebrow="Biblioteca" title="Documentos" description="Consulta conversiones y genera manifests completos o parciales." actions={<Button variant="secondary" onClick={onRefresh}>Actualizar</Button>} />
-    <Card><DocumentTable documents={documents} onManifest={setSelected} /></Card>
+    <Card><DocumentTable documents={documents} onManifest={setSelected} onDelete={(document) => { setDeleteError(""); setDeleting(document); }} /></Card>
     {selected && <ManifestDialog document={selected} onClose={() => setSelected(null)} />}
+    {deleting && <Modal title="Eliminar documento" description="Esta acción elimina metadata, PDF, imágenes, miniaturas, manifests y artefactos OCR asociados." onClose={() => !deleteBusy && setDeleting(null)}>
+      <p>¿Deseas eliminar definitivamente <strong>{deleting.name}</strong>?</p>
+      <p className="table-secondary">ID: {deleting.id}{deleting.projectKey ? ` · Proyecto: ${deleting.projectKey}` : ""}{deleting.tenantKey ? ` · Tenant: ${deleting.tenantKey}` : ""}</p>
+      {deleteError && <Alert tone="danger">{deleteError}</Alert>}
+      <div className="modal-actions"><Button variant="secondary" disabled={deleteBusy} onClick={() => setDeleting(null)}>Cancelar</Button><Button variant="danger" disabled={deleteBusy} onClick={remove}>{deleteBusy ? <Spinner label="Eliminando" /> : "Eliminar definitivamente"}</Button></div>
+    </Modal>}
   </>;
 }
 
-function DocumentTable({ documents, onManifest, compact = false }: { documents: DocumentRecord[]; onManifest?: (document: DocumentRecord) => void; compact?: boolean }) {
+function DocumentTable({ documents, onManifest, onDelete, compact = false }: { documents: DocumentRecord[]; onManifest?: (document: DocumentRecord) => void; onDelete?: (document: DocumentRecord) => void; compact?: boolean }) {
   if (!documents.length) return <EmptyState title="Sin documentos" description="Sube un PDF para comenzar." />;
-  return <div className="table-wrap"><table><thead><tr><th>Documento</th><th>Estado</th><th>Páginas</th>{!compact && <th>Origen</th>}{onManifest && <th><span className="sr-only">Acciones</span></th>}</tr></thead><tbody>{documents.map((document) => <tr key={document.id}><td><strong>{document.name}</strong><small className="table-secondary">{document.id}</small></td><td><Badge tone={document.status === "completed" ? "success" : document.status === "error" ? "danger" : "warning"}>{document.status}</Badge></td><td>{document.convertedPages} / {document.totalPages}</td>{!compact && <td>{document.migratedFromLocal ? "Migrado" : "Subido"}</td>}{onManifest && <td><Button variant="secondary" disabled={document.status !== "completed"} onClick={() => onManifest(document)}>Generar manifest</Button></td>}</tr>)}</tbody></table></div>;
+  return <div className="table-wrap"><table><thead><tr><th>Documento</th><th>Estado</th><th>Páginas</th>{!compact && <th>Origen</th>}{(onManifest || onDelete) && <th><span className="sr-only">Acciones</span></th>}</tr></thead><tbody>{documents.map((document) => <tr key={document.id}><td><strong>{document.name}</strong><small className="table-secondary">{document.id}</small></td><td><Badge tone={document.status === "completed" ? "success" : document.status === "error" ? "danger" : "warning"}>{document.status}</Badge></td><td>{document.convertedPages} / {document.totalPages}</td>{!compact && <td>{document.migratedFromLocal ? "Migrado" : "Subido"}</td>}{(onManifest || onDelete) && <td><div className="button-row">{onManifest && <Button variant="secondary" disabled={document.status !== "completed"} onClick={() => onManifest(document)}>Generar manifest</Button>}{onDelete && <Button variant="danger" onClick={() => onDelete(document)}>Eliminar</Button>}</div></td>}</tr>)}</tbody></table></div>;
 }

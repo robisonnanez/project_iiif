@@ -1,4 +1,5 @@
 import { render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { vi } from "vitest";
 import { api } from "./api";
 import App from "./App";
@@ -16,3 +17,22 @@ it("actualiza automáticamente el conteo de páginas y muestra una alerta al com
   expect(await screen.findByText("2 / 2", {}, { timeout: 3500 })).toBeInTheDocument();
   expect(screen.getByText("“Libro.pdf” terminó de convertirse.")).toBeInTheDocument();
 }, 5000);
+
+it("confirma y elimina un documento con todos sus archivos", async () => {
+  history.replaceState({}, "", "/dashboard/documentos");
+  const user = userEvent.setup();
+  const document: DocumentRecord = { id: "book-id", name: "Libro.pdf", projectKey: "default", migratedFromLocal: false, status: "completed", totalPages: 2, convertedPages: 2 };
+  vi.spyOn(api, "documents").mockResolvedValueOnce([document]).mockResolvedValue([]);
+  vi.spyOn(api, "config").mockResolvedValue(structuredClone(sampleConfig));
+  const remove = vi.spyOn(api, "deleteDocument").mockResolvedValueOnce({ message: "Documento eliminado" });
+  render(<App />);
+
+  expect(await screen.findByText("Libro.pdf")).toBeInTheDocument();
+  await user.click(screen.getByRole("button", { name: "Eliminar" }));
+  expect(screen.getByRole("heading", { name: "Eliminar documento" })).toBeInTheDocument();
+  await user.click(screen.getByRole("button", { name: "Eliminar definitivamente" }));
+
+  expect(remove).toHaveBeenCalledWith("book-id");
+  expect(await screen.findByText("Sin documentos")).toBeInTheDocument();
+  expect(screen.getByText(/todos sus archivos fueron eliminados/)).toBeInTheDocument();
+});

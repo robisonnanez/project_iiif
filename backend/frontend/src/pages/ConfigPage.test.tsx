@@ -79,6 +79,6 @@ it("solicita la contraseña y reinicia el servicio después de guardar", async (
   await user.click(screen.getByRole("button", { name: "Reiniciar servicio" }));
 
   expect(restart).toHaveBeenCalledWith("sudo-test");
-  expect(await screen.findByText(/Reinicio programado/)).toBeInTheDocument();
+  expect(await screen.findByText(/Reinicio en curso/)).toBeInTheDocument();
   expect(screen.queryByRole("heading", { name: "Reiniciar servicio" })).not.toBeInTheDocument();
 });

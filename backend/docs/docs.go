@@ -2679,6 +2679,12 @@ const docTemplate = `{
                 "height": {
                     "type": "integer"
                 },
+                "iiif_image": {
+                    "type": "string"
+                },
+                "image_id": {
+                    "type": "string"
+                },
                 "language": {
                     "type": "string"
                 },

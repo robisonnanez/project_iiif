@@ -96,6 +96,7 @@ export interface OCRJob {
 
 export interface OCRSearchResult {
   document_id: string; page_number: number; canvas_v2: string; canvas_v3: string;
+  image_id?: string; iiif_image?: string;
   source: string; snippet: string; score: number; matches: number;
 }
 

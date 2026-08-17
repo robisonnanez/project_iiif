@@ -162,9 +162,13 @@ func (s *S3Storage) HasImageBlob(imageID string) (bool, error) {
 }
 
 func (s *S3Storage) DeleteDocument(id string) error {
-	doc, _ := s.Storage.GetDocument(id)
-	if doc != nil {
-		_ = s.deletePrefix(scopePrefix(doc.ProjectKey, doc.TenantKey) + "/documents/" + safeSegment(doc.ID) + "/")
+	doc, err := s.Storage.GetDocument(id)
+	if err != nil {
+		return fmt.Errorf("no se pudo obtener metadata antes de eliminar S3: %w", err)
+	}
+	prefix := scopePrefix(doc.ProjectKey, doc.TenantKey) + "/documents/" + safeSegment(doc.ID) + "/"
+	if err := s.deletePrefix(prefix); err != nil {
+		return fmt.Errorf("no se pudo eliminar s3://%s/%s: %w", s.bucket, prefix, err)
 	}
 	return s.Storage.DeleteDocument(id)
 }

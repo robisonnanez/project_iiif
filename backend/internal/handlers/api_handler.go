@@ -20,6 +20,7 @@ type APIHandler struct {
 	pdfService      *services.PDFService
 	iiifService     *services.IIIFService
 	documentService *services.DocumentService
+	ocrService      *services.OCRService
 	config          *config.Config
 }
 
@@ -33,12 +34,14 @@ func NewAPIHandler(
 	pdfService *services.PDFService,
 	iiifService *services.IIIFService,
 	documentService *services.DocumentService,
+	ocrService *services.OCRService,
 	config *config.Config,
 ) *APIHandler {
 	return &APIHandler{
 		pdfService:      pdfService,
 		iiifService:     iiifService,
 		documentService: documentService,
+		ocrService:      ocrService,
 		config:          config,
 	}
 }
@@ -256,11 +259,17 @@ func (h *APIHandler) GetDocument(c *gin.Context) {
 func (h *APIHandler) DeleteDocument(c *gin.Context) {
 	id := c.Param("id")
 	if err := h.documentService.DeleteDocument(id); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Error eliminando documento"})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Error eliminando documento: " + err.Error()})
 		return
 	}
+	if h.ocrService != nil {
+		if err := h.ocrService.Delete(id); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Documento eliminado, pero no se pudieron limpiar sus artefactos OCR: " + err.Error()})
+			return
+		}
+	}
 
-	c.JSON(http.StatusOK, gin.H{"message": "Documento eliminado"})
+	c.JSON(http.StatusOK, gin.H{"message": "Documento, binarios y OCR eliminados"})
 }
 
 func (h *APIHandler) GetProperties(c *gin.Context) {

@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { api } from "../api";
 import { applyMongoURI, mongoURIFromConfig } from "../lib/validation";
 import type { AppConfig, BinaryMode, Engine } from "../types";
@@ -15,7 +15,33 @@ export function ConfigPage({ initial, onSaved }: { initial: AppConfig; onSaved: 
   const [sudoPassword, setSudoPassword] = useState("");
   const [restartBusy, setRestartBusy] = useState(false);
   const [restartError, setRestartError] = useState("");
+  const [restartScheduled, setRestartScheduled] = useState(false);
   const engine = (config.storage.backend === "local" ? "mysql" : config.storage.backend) as Engine;
+
+  useEffect(() => {
+    if (!restartScheduled) return;
+    let cancelled = false;
+    let timer = 0;
+    let attempts = 0;
+    const check = async () => {
+      try {
+        const health = await api.serviceHealth();
+        if (!cancelled && health.status === "ok") {
+          setRestartScheduled(false);
+          setMessage("Configuración aplicada. El servicio ya está disponible en el puerto 8080.");
+          return;
+        }
+      } catch { /* El servicio puede estar temporalmente fuera de línea durante el reinicio. */ }
+      attempts += 1;
+      if (!cancelled && attempts < 60) timer = window.setTimeout(check, 1000);
+      else if (!cancelled) {
+        setRestartScheduled(false);
+        setError("La configuración fue guardada, pero no se pudo confirmar que el servicio volviera a estar disponible.");
+      }
+    };
+    timer = window.setTimeout(check, 2000);
+    return () => { cancelled = true; window.clearTimeout(timer); };
+  }, [restartScheduled]);
 
   const setEngine = (value: Engine) => setConfig((current) => ({ ...current, storage: { ...current.storage, backend: value }, database: { ...current.database, DB_CONNECTION: value } }));
   const setBinaryMode = (value: BinaryMode) => setConfig((current) => ({ ...current, binary_storage: { ...current.binary_storage, mode: value }, s3: { ...current.s3, filesystem_disk: value === "s3" ? "s3" : "local" } }));
@@ -63,7 +89,8 @@ export function ConfigPage({ initial, onSaved }: { initial: AppConfig; onSaved: 
       await api.restartService(sudoPassword);
       setRestartOpen(false);
       setSudoPassword("");
-      setMessage("Configuración guardada. Reinicio programado; el servicio volverá a estar disponible en unos segundos.");
+      setRestartScheduled(true);
+      setMessage("Configuración guardada. Reinicio en curso; comprobando disponibilidad…");
     } catch (cause) {
       setRestartError(cause instanceof Error ? cause.message : "No se pudo reiniciar el servicio.");
       setSudoPassword("");
