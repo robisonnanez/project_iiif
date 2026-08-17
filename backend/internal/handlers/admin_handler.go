@@ -611,6 +611,7 @@ func (h *AdminHandler) sanitizedConfig() gin.H {
 			"default_quality": h.config.Conversion.DefaultQuality,
 			"enable_ocr":      h.config.Conversion.EnableOCR,
 		},
+		"ocr": h.config.OCR,
 		"security": gin.H{
 			"enable_auth":            h.config.Security.EnableAuth,
 			"log_level":              h.config.Security.LogLevel,

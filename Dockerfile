@@ -17,7 +17,7 @@ RUN CGO_ENABLED=1 go build -trimpath -ldflags="-s -w" -o /out/project-iiif . \
     && CGO_ENABLED=1 go build -trimpath -ldflags="-s -w" -o /out/migrate-local-to-db ./cmd/migrate-local-to-mysql
 
 FROM debian:bookworm-slim
-RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl tini && rm -rf /var/lib/apt/lists/* \
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl tini tesseract-ocr tesseract-ocr-osd tesseract-ocr-eng tesseract-ocr-spa tesseract-ocr-fra tesseract-ocr-por && rm -rf /var/lib/apt/lists/* \
     && useradd --system --uid 10001 --create-home --home-dir /app project-iiif
 WORKDIR /app
 COPY --from=backend /out/project-iiif /usr/local/bin/project-iiif

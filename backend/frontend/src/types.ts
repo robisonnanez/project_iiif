@@ -77,9 +77,27 @@ export interface AppConfig {
   };
   iiif: { base_url: string; api_version: string; max_width: number; max_height: number; cache: boolean; cache_ttl: number };
   conversion: { default_width: number; default_height: number; dpi: number; default_format: "jpg" | "png"; default_quality: number; enable_ocr: boolean };
+  ocr?: {
+    enabled: boolean; auto_after_conversion: boolean; default_mode: "hybrid" | "exhaustive" | "ocr_only";
+    workers: number; page_timeout_seconds: number; retries_per_page: number; render_dpi: number;
+    min_text_chars: number; candidate_languages: string[]; fallback_languages: string[];
+  };
   projects: { enabled: boolean; default_project: string; require_project: boolean; allow_dynamic_tenants: boolean; items: ProjectConfig[] };
   security: { enable_auth: boolean; log_level: string; cors_origins: string[]; max_concurrent_uploads: number };
 }
+
+export interface OCRJob {
+  id: string; document_id: string; generation: string; mode: string; languages: string[];
+  status: string; total_pages: number; processed_pages: number; failed_pages: number;
+  current_page?: number; error?: string;
+}
+
+export interface OCRSearchResult {
+  document_id: string; page_number: number; canvas_v2: string; canvas_v3: string;
+  source: string; snippet: string; score: number; matches: number;
+}
+
+export interface OCRSearchResponse { results: OCRSearchResult[]; total: number; limit: number; offset: number }
 
 export interface UploadSettings {
   width: number;

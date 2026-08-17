@@ -7,14 +7,16 @@ import { ToastStack, type ToastNotice } from "./components/ToastStack";
 import { ConfigPage } from "./pages/ConfigPage";
 import { ImagesPage } from "./pages/ImagesPage";
 import { MigrationPage } from "./pages/MigrationPage";
+import { OCRPage } from "./pages/OCRPage";
 import { UploadPage } from "./pages/UploadPage";
 
-type View = "dashboard" | "documents" | "iiif" | "upload" | "migration" | "config";
+type View = "dashboard" | "documents" | "iiif" | "upload" | "ocr" | "migration" | "config";
 
 const nav: Array<{ view: View; label: string; path: string }> = [
   { view: "dashboard", label: "Dashboard", path: "/dashboard/inicio" },
   { view: "documents", label: "Documentos", path: "/dashboard/documentos" },
   { view: "iiif", label: "Imágenes IIIF", path: "/dashboard/iiif" },
+  { view: "ocr", label: "OCR", path: "/dashboard/ocr" },
   { view: "upload", label: "Subir PDF", path: "/dashboard/subir-pdf" },
   { view: "migration", label: "Migración", path: "/dashboard/migracion" },
   { view: "config", label: "Configuración", path: "/dashboard/configuracion" },
@@ -100,6 +102,7 @@ export default function App() {
         {view === "documents" && <DocumentsPage documents={documents} onRefresh={refresh} />}
         {view === "upload" && <UploadPage config={config} onUploaded={() => void refreshDocuments(false)} notify={notify} />}
         {view === "iiif" && <ImagesPage documents={documents} config={config} notify={notify} />}
+        {view === "ocr" && <OCRPage documents={documents} config={config} notify={notify} />}
         {view === "migration" && <MigrationPage config={config} notify={notify} />}
         {view === "config" && (config ? <ConfigPage initial={config} onSaved={setConfig} /> : <Alert tone="danger">No se pudo cargar la configuración.</Alert>)}
       </>}

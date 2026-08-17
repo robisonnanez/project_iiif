@@ -56,6 +56,17 @@ func main() {
 	pdfService := services.NewPDFService(cfg, store)
 	iiifService := services.NewIIIFService(cfg, store)
 	documentService := services.NewDocumentService(store)
+	ocrService, err := services.NewOCRService(cfg, store)
+	if err != nil {
+		log.Fatalf("Error inicializando OCR: %v", err)
+	}
+	if cfg.OCR.Enabled && cfg.OCR.AutoAfterConversion {
+		pdfService.SetCompletionHook(func(documentID string) {
+			if _, createErr := ocrService.CreateJob(documentID, services.CreateOCRJobRequest{Mode: cfg.OCR.DefaultMode, LanguageMode: "auto"}); createErr != nil {
+				log.Printf("No se pudo iniciar OCR automático document=%s: %v", documentID, createErr)
+			}
+		})
+	}
 
 	// Configurar router
 	if cfg.Server.Mode == "production" {
@@ -84,6 +95,7 @@ func main() {
 	welcomeHandler := handlers.NewWelcomeHandler(cfg)
 	frontendHandler := handlers.NewFrontendHandler(cfg)
 	adminHandler := handlers.NewAdminHandler(cfg, documentService)
+	ocrHandler := handlers.NewOCRHandler(ocrService)
 	authHandler := handlers.NewAuthHandler(cfg)
 
 	// Ruta de bienvenida
@@ -107,6 +119,7 @@ func main() {
 			dashboard.GET("/iiif", frontendHandler.Dashboard)
 			dashboard.GET("/configuracion", frontendHandler.Dashboard)
 			dashboard.GET("/migracion", frontendHandler.Dashboard)
+			dashboard.GET("/ocr", frontendHandler.Dashboard)
 			dashboard.Static("/assets", filepath.Join(cfg.Frontend.Path, "dist", "assets"))
 		}
 
@@ -124,6 +137,14 @@ func main() {
 			group.GET("/migrations/local-to-mysql/status", adminHandler.GetLocalToMySQLMigrationStatus)
 			group.POST("/db/migrations/run", adminHandler.RunDBMigrations)
 			group.GET("/db/migrations/status", adminHandler.GetDBMigrationsStatus)
+			group.POST("/documents/:id/ocr/jobs", ocrHandler.CreateJob)
+			group.GET("/documents/:id/ocr", ocrHandler.GetSummary)
+			group.GET("/documents/:id/ocr/pages/:page", ocrHandler.GetPage)
+			group.GET("/documents/:id/ocr/search", ocrHandler.SearchDocument)
+			group.DELETE("/documents/:id/ocr", ocrHandler.Delete)
+			group.GET("/ocr/jobs/:job_id", ocrHandler.GetJob)
+			group.POST("/ocr/jobs/:job_id/cancel", ocrHandler.CancelJob)
+			group.GET("/ocr/search", ocrHandler.Search)
 		}
 
 		adminV1 := router.Group("/api/v1/admin")

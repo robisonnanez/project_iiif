@@ -23,8 +23,9 @@ import (
 )
 
 type PDFService struct {
-	config  *config.Config
-	storage storage.Storage
+	config      *config.Config
+	storage     storage.Storage
+	onCompleted func(string)
 }
 
 func NewPDFService(config *config.Config, storage storage.Storage) *PDFService {
@@ -33,6 +34,8 @@ func NewPDFService(config *config.Config, storage storage.Storage) *PDFService {
 		storage: storage,
 	}
 }
+
+func (s *PDFService) SetCompletionHook(hook func(string)) { s.onCompleted = hook }
 
 func (s *PDFService) ProcessPDF(sourcePath string, filename string, settings models.ConversionSettings, scope *models.Scope) (*models.PDFDocument, error) {
 	if settings.Format == "" {
@@ -238,6 +241,9 @@ func (s *PDFService) convertPDFToImages(doc *models.PDFDocument, sourcePath stri
 	doc.ManifestURL = fmt.Sprintf("%s/api/iiif/%s/manifest", s.config.IIIF.BaseURL, doc.ID)
 
 	s.storage.UpdateDocument(doc)
+	if s.onCompleted != nil {
+		s.onCompleted(doc.ID)
+	}
 	log.Printf("PDF conversion completed document=%s pages=%d total=%s render=%s resize=%s encode=%s store=%s dpi=%d max=%dx%d format=%s",
 		doc.ID, doc.ConvertedPages, time.Since(startedAt), renderDuration, resizeDuration, encodeDuration, storeDuration,
 		settings.DPI, settings.MaxWidth, settings.MaxHeight, settings.Format)

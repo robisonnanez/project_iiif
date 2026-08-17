@@ -95,6 +95,26 @@ conversion:
   dpi: 150
   background_color: "white"
 
+ocr:
+  enabled: false
+  auto_after_conversion: false
+  default_mode: "hybrid"
+  workers: 2
+  page_timeout_seconds: 120
+  retries_per_page: 2
+  render_dpi: 300
+  min_text_chars: 40
+  candidate_languages: ["spa", "eng", "fra", "por"]
+  fallback_languages: ["spa"]
+  language_detection:
+    enabled: true
+    sample_pages: 5
+    min_sample_chars: 200
+    minimum_confidence: 0.70
+    max_languages: 2
+  artifacts:
+    gzip: true
+
 security:
   enable_auth: false
   log_level: "info"

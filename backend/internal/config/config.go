@@ -108,6 +108,8 @@ type Config struct {
 		BackgroundColor string `yaml:"background_color"`
 	} `yaml:"conversion"`
 
+	OCR OCRConfig `yaml:"ocr"`
+
 	Security struct {
 		EnableAuth           bool     `yaml:"enable_auth"`
 		LogLevel             string   `yaml:"log_level"`
@@ -147,6 +149,29 @@ type Config struct {
 			AllowedHosts      []string `yaml:"allowed_hosts"`
 		} `yaml:"ssh"`
 	} `yaml:"migration"`
+}
+
+type OCRConfig struct {
+	Enabled             bool     `yaml:"enabled" json:"enabled"`
+	AutoAfterConversion bool     `yaml:"auto_after_conversion" json:"auto_after_conversion"`
+	DefaultMode         string   `yaml:"default_mode" json:"default_mode"`
+	Workers             int      `yaml:"workers" json:"workers"`
+	PageTimeoutSeconds  int      `yaml:"page_timeout_seconds" json:"page_timeout_seconds"`
+	RetriesPerPage      int      `yaml:"retries_per_page" json:"retries_per_page"`
+	RenderDPI           int      `yaml:"render_dpi" json:"render_dpi"`
+	MinTextChars        int      `yaml:"min_text_chars" json:"min_text_chars"`
+	CandidateLanguages  []string `yaml:"candidate_languages" json:"candidate_languages"`
+	FallbackLanguages   []string `yaml:"fallback_languages" json:"fallback_languages"`
+	LanguageDetection   struct {
+		Enabled           bool    `yaml:"enabled" json:"enabled"`
+		SamplePages       int     `yaml:"sample_pages" json:"sample_pages"`
+		MinSampleChars    int     `yaml:"min_sample_chars" json:"min_sample_chars"`
+		MinimumConfidence float64 `yaml:"minimum_confidence" json:"minimum_confidence"`
+		MaxLanguages      int     `yaml:"max_languages" json:"max_languages"`
+	} `yaml:"language_detection" json:"language_detection"`
+	Artifacts struct {
+		Gzip bool `yaml:"gzip" json:"gzip"`
+	} `yaml:"artifacts" json:"artifacts"`
 }
 
 type ProjectConfig struct {
@@ -252,6 +277,45 @@ func (config *Config) ApplyDefaults() {
 
 func applyDefaults(config *Config) {
 	defaults := Default()
+	if config.OCR.DefaultMode == "" {
+		config.OCR.DefaultMode = defaults.OCR.DefaultMode
+	}
+	if config.OCR.Workers <= 0 {
+		config.OCR.Workers = defaults.OCR.Workers
+	}
+	if config.OCR.PageTimeoutSeconds <= 0 {
+		config.OCR.PageTimeoutSeconds = defaults.OCR.PageTimeoutSeconds
+	}
+	if config.OCR.RetriesPerPage <= 0 {
+		config.OCR.RetriesPerPage = defaults.OCR.RetriesPerPage
+	}
+	if config.OCR.RenderDPI <= 0 {
+		config.OCR.RenderDPI = defaults.OCR.RenderDPI
+	}
+	if config.OCR.MinTextChars <= 0 {
+		config.OCR.MinTextChars = defaults.OCR.MinTextChars
+	}
+	if len(config.OCR.CandidateLanguages) == 0 {
+		config.OCR.CandidateLanguages = defaults.OCR.CandidateLanguages
+	}
+	if len(config.OCR.FallbackLanguages) == 0 {
+		config.OCR.FallbackLanguages = defaults.OCR.FallbackLanguages
+	}
+	if config.OCR.LanguageDetection.SamplePages <= 0 {
+		config.OCR.LanguageDetection.SamplePages = defaults.OCR.LanguageDetection.SamplePages
+	}
+	if config.OCR.LanguageDetection.MinSampleChars <= 0 {
+		config.OCR.LanguageDetection.MinSampleChars = defaults.OCR.LanguageDetection.MinSampleChars
+	}
+	if config.OCR.LanguageDetection.MinimumConfidence <= 0 {
+		config.OCR.LanguageDetection.MinimumConfidence = defaults.OCR.LanguageDetection.MinimumConfidence
+	}
+	if config.OCR.LanguageDetection.MaxLanguages <= 0 {
+		config.OCR.LanguageDetection.MaxLanguages = defaults.OCR.LanguageDetection.MaxLanguages
+	}
+	if config.Conversion.EnableOCR {
+		config.OCR.Enabled = true
+	}
 	if config.FilesystemDisk == "" {
 		config.FilesystemDisk = "local"
 	}
@@ -613,6 +677,20 @@ func Default() *Config {
 			DPI:             150,
 			BackgroundColor: "white",
 		},
+		OCR: func() OCRConfig {
+			value := OCRConfig{
+				Enabled: false, AutoAfterConversion: false, DefaultMode: "hybrid", Workers: 2,
+				PageTimeoutSeconds: 120, RetriesPerPage: 2, RenderDPI: 300, MinTextChars: 40,
+				CandidateLanguages: []string{"spa", "eng", "fra", "por"}, FallbackLanguages: []string{"spa"},
+			}
+			value.LanguageDetection.Enabled = true
+			value.LanguageDetection.SamplePages = 5
+			value.LanguageDetection.MinSampleChars = 200
+			value.LanguageDetection.MinimumConfidence = 0.70
+			value.LanguageDetection.MaxLanguages = 2
+			value.Artifacts.Gzip = true
+			return value
+		}(),
 		Security: struct {
 			EnableAuth           bool     `yaml:"enable_auth"`
 			LogLevel             string   `yaml:"log_level"`
