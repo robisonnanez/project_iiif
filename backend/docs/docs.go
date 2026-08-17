@@ -321,6 +321,70 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/v1/admin/documents/{id}/ocr/jobs": {
+            "post": {
+                "security": [
+                    {
+                        "SessionCookie": []
+                    }
+                ],
+                "description": "Inicia una generación OCR híbrida, exhaustiva o solo OCR. Requiere sesión administrativa.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "OCR"
+                ],
+                "summary": "Crear trabajo OCR",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "ID del documento",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Configuración del trabajo",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/services.CreateOCRJobRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "202": {
+                        "description": "Accepted",
+                        "schema": {
+                            "$ref": "#/definitions/services.OCRJob"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.errorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.errorResponse"
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.errorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/admin/migrations/local-to-db/start": {
             "post": {
                 "security": [
@@ -453,6 +517,84 @@ const docTemplate = `{
                     },
                     "403": {
                         "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.errorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/admin/ocr/jobs/{job_id}": {
+            "get": {
+                "security": [
+                    {
+                        "SessionCookie": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "OCR"
+                ],
+                "summary": "Consultar progreso OCR",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "ID del trabajo",
+                        "name": "job_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/services.OCRJob"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.errorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/admin/ocr/jobs/{job_id}/cancel": {
+            "post": {
+                "security": [
+                    {
+                        "SessionCookie": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "OCR"
+                ],
+                "summary": "Cancelar trabajo OCR",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "ID del trabajo",
+                        "name": "job_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/services.OCRJob"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
                         "schema": {
                             "$ref": "#/definitions/handlers.errorResponse"
                         }
@@ -747,6 +889,304 @@ const docTemplate = `{
                     },
                     "500": {
                         "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.errorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/documents/{id}/ocr": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "OCR"
+                ],
+                "summary": "Obtener estado OCR de un documento",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "ID del documento",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/services.OCRDocumentSummary"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.errorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/documents/{id}/ocr/pages/{page}": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "OCR"
+                ],
+                "summary": "Obtener OCR y bounding boxes de una página",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "ID del documento",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Número de página",
+                        "name": "page",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/services.OCRPage"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.errorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.errorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/documents/{id}/ocr/search": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "OCR"
+                ],
+                "summary": "Buscar texto OCR dentro de un documento",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "ID del documento",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Texto a buscar",
+                        "name": "q",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "integer",
+                        "default": 20,
+                        "description": "Máximo de resultados",
+                        "name": "limit",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "default": 0,
+                        "description": "Desplazamiento",
+                        "name": "offset",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.errorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/iiif/{id}/manifest": {
+            "get": {
+                "description": "Devuelve un manifiesto v2 con secuencia, canvases y rangos jerarquicos derivados de los marcadores PDF. El parametro pages permite seleccionar paginas y poda rangos vacios.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "IIIF"
+                ],
+                "summary": "Obtener manifiesto IIIF Presentation API v2",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "ID del documento",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Paginas o rangos, por ejemplo 1-3,5",
+                        "name": "pages",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/models.IIIFManifestV2"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.errorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.errorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/iiif/{id}/manifest/v3": {
+            "get": {
+                "description": "Endpoint de compatibilidad para clientes IIIF Presentation v3.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "IIIF"
+                ],
+                "summary": "Obtener manifiesto IIIF Presentation API v3",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "ID del documento",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Paginas o rangos, por ejemplo 1-3,5",
+                        "name": "pages",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/models.IIIFManifest"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.errorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.errorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/ocr/search": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "OCR"
+                ],
+                "summary": "Buscar texto OCR por proyecto, tenant o documento",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Texto a buscar",
+                        "name": "q",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Proyecto",
+                        "name": "project",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Tenant",
+                        "name": "tenant",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "ID del documento",
+                        "name": "document_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "default": 20,
+                        "description": "Máximo de resultados",
+                        "name": "limit",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "default": 0,
+                        "description": "Desplazamiento",
+                        "name": "offset",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
                         "schema": {
                             "$ref": "#/definitions/handlers.errorResponse"
                         }
@@ -1062,6 +1502,75 @@ const docTemplate = `{
         }
     },
     "definitions": {
+        "config.OCRConfig": {
+            "type": "object",
+            "properties": {
+                "artifacts": {
+                    "type": "object",
+                    "properties": {
+                        "gzip": {
+                            "type": "boolean"
+                        }
+                    }
+                },
+                "auto_after_conversion": {
+                    "type": "boolean"
+                },
+                "candidate_languages": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "default_mode": {
+                    "type": "string"
+                },
+                "enabled": {
+                    "type": "boolean"
+                },
+                "fallback_languages": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "language_detection": {
+                    "type": "object",
+                    "properties": {
+                        "enabled": {
+                            "type": "boolean"
+                        },
+                        "max_languages": {
+                            "type": "integer"
+                        },
+                        "min_sample_chars": {
+                            "type": "integer"
+                        },
+                        "minimum_confidence": {
+                            "type": "number"
+                        },
+                        "sample_pages": {
+                            "type": "integer"
+                        }
+                    }
+                },
+                "min_text_chars": {
+                    "type": "integer"
+                },
+                "page_timeout_seconds": {
+                    "type": "integer"
+                },
+                "render_dpi": {
+                    "type": "integer"
+                },
+                "retries_per_page": {
+                    "type": "integer"
+                },
+                "workers": {
+                    "type": "integer"
+                }
+            }
+        },
         "config.ProjectConfig": {
             "type": "object",
             "properties": {
@@ -1265,6 +1774,9 @@ const docTemplate = `{
                             "type": "integer"
                         }
                     }
+                },
+                "ocr": {
+                    "$ref": "#/definitions/config.OCRConfig"
                 },
                 "projects": {
                     "type": "object",
@@ -2011,6 +2523,217 @@ const docTemplate = `{
                 },
                 "title": {
                     "type": "string"
+                }
+            }
+        },
+        "services.CreateOCRJobRequest": {
+            "type": "object",
+            "properties": {
+                "force": {
+                    "type": "boolean"
+                },
+                "language_mode": {
+                    "type": "string"
+                },
+                "languages": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "mode": {
+                    "type": "string"
+                }
+            }
+        },
+        "services.OCRDocumentSummary": {
+            "type": "object",
+            "properties": {
+                "active_generation": {
+                    "type": "string"
+                },
+                "document_id": {
+                    "type": "string"
+                },
+                "failed_pages": {
+                    "type": "integer"
+                },
+                "indexed_pages": {
+                    "type": "integer"
+                },
+                "languages": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "project_key": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "tenant_key": {
+                    "type": "string"
+                },
+                "total_pages": {
+                    "type": "integer"
+                },
+                "updated_at": {
+                    "type": "string"
+                }
+            }
+        },
+        "services.OCRJob": {
+            "type": "object",
+            "properties": {
+                "cancel_requested": {
+                    "type": "boolean"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "current_page": {
+                    "type": "integer"
+                },
+                "document_id": {
+                    "type": "string"
+                },
+                "error": {
+                    "type": "string"
+                },
+                "failed_pages": {
+                    "type": "integer"
+                },
+                "finished_at": {
+                    "type": "string"
+                },
+                "generation": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "language_mode": {
+                    "type": "string"
+                },
+                "languages": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "mode": {
+                    "type": "string"
+                },
+                "processed_pages": {
+                    "type": "integer"
+                },
+                "project_key": {
+                    "type": "string"
+                },
+                "started_at": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "tenant_key": {
+                    "type": "string"
+                },
+                "total_pages": {
+                    "type": "integer"
+                }
+            }
+        },
+        "services.OCRPage": {
+            "type": "object",
+            "properties": {
+                "canvas_v2": {
+                    "type": "string"
+                },
+                "canvas_v3": {
+                    "type": "string"
+                },
+                "confidence": {
+                    "type": "number"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "document_id": {
+                    "type": "string"
+                },
+                "engine": {
+                    "type": "string"
+                },
+                "error": {
+                    "type": "string"
+                },
+                "generation": {
+                    "type": "string"
+                },
+                "geometry_status": {
+                    "type": "string"
+                },
+                "height": {
+                    "type": "integer"
+                },
+                "language": {
+                    "type": "string"
+                },
+                "native_text": {
+                    "type": "string"
+                },
+                "ocr_text": {
+                    "type": "string"
+                },
+                "page_number": {
+                    "type": "integer"
+                },
+                "schema_version": {
+                    "type": "integer"
+                },
+                "source": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "text": {
+                    "type": "string"
+                },
+                "width": {
+                    "type": "integer"
+                },
+                "words": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/services.OCRWord"
+                    }
+                }
+            }
+        },
+        "services.OCRWord": {
+            "type": "object",
+            "properties": {
+                "confidence": {
+                    "type": "number"
+                },
+                "height": {
+                    "type": "integer"
+                },
+                "left": {
+                    "type": "integer"
+                },
+                "text": {
+                    "type": "string"
+                },
+                "top": {
+                    "type": "integer"
+                },
+                "width": {
+                    "type": "integer"
                 }
             }
         }

@@ -77,10 +77,12 @@ export interface AppConfig {
   };
   iiif: { base_url: string; api_version: string; max_width: number; max_height: number; cache: boolean; cache_ttl: number };
   conversion: { default_width: number; default_height: number; dpi: number; default_format: "jpg" | "png"; default_quality: number; enable_ocr: boolean };
-  ocr?: {
+  ocr: {
     enabled: boolean; auto_after_conversion: boolean; default_mode: "hybrid" | "exhaustive" | "ocr_only";
     workers: number; page_timeout_seconds: number; retries_per_page: number; render_dpi: number;
     min_text_chars: number; candidate_languages: string[]; fallback_languages: string[];
+    language_detection: { enabled: boolean; sample_pages: number; min_sample_chars: number; minimum_confidence: number; max_languages: number };
+    artifacts: { gzip: boolean };
   };
   projects: { enabled: boolean; default_project: string; require_project: boolean; allow_dynamic_tenants: boolean; items: ProjectConfig[] };
   security: { enable_auth: boolean; log_level: string; cors_origins: string[]; max_concurrent_uploads: number };

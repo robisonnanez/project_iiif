@@ -309,6 +309,7 @@ func (h *APIHandler) UpdateProperties(c *gin.Context) {
 // @Failure 400 {object} errorResponse
 // @Failure 404 {object} errorResponse
 // @Router /api/iiif/{id}/manifest [get]
+// @Router /api/v1/iiif/{id}/manifest [get]
 func (h *APIHandler) GetManifest(c *gin.Context) {
 	id := c.Param("id")
 	manifest, err := h.iiifService.GetManifest(id, c.Query("pages"))
@@ -337,6 +338,7 @@ func (h *APIHandler) GetManifest(c *gin.Context) {
 // @Failure 400 {object} errorResponse
 // @Failure 404 {object} errorResponse
 // @Router /api/iiif/v3/{id}/manifest [get]
+// @Router /api/v1/iiif/{id}/manifest/v3 [get]
 func (h *APIHandler) GetManifestV3(c *gin.Context) {
 	id := c.Param("id")
 	manifest, err := h.iiifService.GetManifestV3(id, c.Query("pages"))

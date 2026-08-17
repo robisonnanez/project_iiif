@@ -7,6 +7,7 @@ import { Alert, Button, Card, Checkbox, FormField, Input, PageHeader, Select, Sp
 export function ConfigPage({ initial, onSaved }: { initial: AppConfig; onSaved: (config: AppConfig) => void }) {
   const [config, setConfig] = useState(initial);
   const [mongoURI, setMongoURI] = useState(() => mongoURIFromConfig(initial.database.mongodb));
+  const [corsOrigins, setCorsOrigins] = useState(() => initial.security.cors_origins.join("\n"));
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
@@ -19,7 +20,7 @@ export function ConfigPage({ initial, onSaved }: { initial: AppConfig; onSaved: 
   const save = async () => {
     setBusy(true); setError(""); setMessage("");
     try {
-      let payload = config;
+      let payload = { ...config, security: { ...config.security, cors_origins: parseCorsOrigins(corsOrigins) } };
       if (engine === "mongodb") payload = applyMongoURI(payload, mongoURI) as AppConfig;
       const active = payload.database[engine];
       payload = { ...payload, database: {
@@ -40,7 +41,7 @@ export function ConfigPage({ initial, onSaved }: { initial: AppConfig; onSaved: 
   };
 
   return <>
-    <PageHeader eyebrow="Administración" title="Configuración" description="Metadata, almacenamiento binario y conversión desde una sola vista." actions={<Button onClick={save} disabled={busy}>{busy ? <Spinner label="Guardando" /> : "Guardar cambios"}</Button>} />
+    <PageHeader eyebrow="Administración" title="Configuración" description="Metadata, almacenamiento, conversión, OCR y seguridad desde una sola vista." actions={<Button onClick={save} disabled={busy}>{busy ? <Spinner label="Guardando" /> : "Guardar cambios"}</Button>} />
     {message && <Alert tone="success">{message}</Alert>}{error && <Alert tone="danger">{error}</Alert>}
     <div className="settings-grid">
       <Card><div className="section-heading"><span className="step">1</span><div><h2>Motor de metadata</h2><p>Selecciona dónde se guardan documentos y metadatos.</p></div></div>
@@ -87,6 +88,41 @@ export function ConfigPage({ initial, onSaved }: { initial: AppConfig; onSaved: 
           <FormField label="Calidad JPG">{(id) => <Input id={id} type="number" min="1" max="100" value={config.conversion.default_quality} onChange={(e) => setConfig({ ...config, conversion: { ...config.conversion, default_quality: Number(e.target.value) } })} />}</FormField>
         </div>
       </Card>
+
+      <Card><div className="section-heading"><span className="step">4</span><div><h2>OCR e indexación</h2><p>Configura Tesseract, la detección de idioma y el procesamiento automático.</p></div></div>
+        <div className="form-grid two-columns">
+          <Checkbox label="Activar OCR" checked={config.ocr.enabled} onChange={(event) => setConfig({ ...config, ocr: { ...config.ocr, enabled: event.target.checked }, conversion: { ...config.conversion, enable_ocr: event.target.checked } })} />
+          <Checkbox label="Ejecutar después de convertir" checked={config.ocr.auto_after_conversion} disabled={!config.ocr.enabled} onChange={(event) => setConfig({ ...config, ocr: { ...config.ocr, auto_after_conversion: event.target.checked } })} />
+          <FormField label="Modo predeterminado">{(id) => <Select id={id} value={config.ocr.default_mode} onChange={(event) => setConfig({ ...config, ocr: { ...config.ocr, default_mode: event.target.value as AppConfig["ocr"]["default_mode"] } })}><option value="hybrid">Híbrido por página</option><option value="exhaustive">Exhaustivo</option><option value="ocr_only">Solo OCR</option></Select>}</FormField>
+          <FormField label="Workers concurrentes" help="Para este servidor se recomiendan 2.">{(id) => <Input id={id} type="number" min="1" max="16" value={config.ocr.workers} onChange={(event) => setConfig({ ...config, ocr: { ...config.ocr, workers: Number(event.target.value) } })} />}</FormField>
+          <FormField label="DPI para OCR">{(id) => <Input id={id} type="number" min="150" max="600" value={config.ocr.render_dpi} onChange={(event) => setConfig({ ...config, ocr: { ...config.ocr, render_dpi: Number(event.target.value) } })} />}</FormField>
+          <FormField label="Timeout por página (segundos)">{(id) => <Input id={id} type="number" min="10" max="3600" value={config.ocr.page_timeout_seconds} onChange={(event) => setConfig({ ...config, ocr: { ...config.ocr, page_timeout_seconds: Number(event.target.value) } })} />}</FormField>
+          <FormField label="Reintentos por página">{(id) => <Input id={id} type="number" min="1" max="10" value={config.ocr.retries_per_page} onChange={(event) => setConfig({ ...config, ocr: { ...config.ocr, retries_per_page: Number(event.target.value) } })} />}</FormField>
+          <FormField label="Caracteres mínimos de capa PDF">{(id) => <Input id={id} type="number" min="1" max="10000" value={config.ocr.min_text_chars} onChange={(event) => setConfig({ ...config, ocr: { ...config.ocr, min_text_chars: Number(event.target.value) } })} />}</FormField>
+        </div>
+        <div className="config-subsection"><h3>Idiomas instalados</h3><p>Selecciona los idiomas que podrá usar la detección automática.</p><div className="language-options">{languageOptions.map(({ code, label }) => <Checkbox key={code} label={`${label} (${code})`} checked={config.ocr.candidate_languages.includes(code)} onChange={(event) => setConfig({ ...config, ocr: { ...config.ocr, candidate_languages: toggleList(config.ocr.candidate_languages, code, event.target.checked), fallback_languages: event.target.checked ? config.ocr.fallback_languages : config.ocr.fallback_languages.filter((item) => item !== code) } })} />)}</div></div>
+        <div className="config-subsection"><h3>Idioma de respaldo</h3><p>Se usa cuando no hay texto suficiente para una detección confiable.</p><div className="language-options">{languageOptions.map(({ code, label }) => <Checkbox key={code} label={`${label} (${code})`} disabled={!config.ocr.candidate_languages.includes(code)} checked={config.ocr.fallback_languages.includes(code)} onChange={(event) => setConfig({ ...config, ocr: { ...config.ocr, fallback_languages: toggleList(config.ocr.fallback_languages, code, event.target.checked) } })} />)}</div></div>
+        <div className="form-grid two-columns config-subsection">
+          <Checkbox label="Detectar idioma automáticamente" checked={config.ocr.language_detection.enabled} onChange={(event) => setConfig({ ...config, ocr: { ...config.ocr, language_detection: { ...config.ocr.language_detection, enabled: event.target.checked } } })} />
+          <Checkbox label="Comprimir artefactos JSON" checked={config.ocr.artifacts.gzip} onChange={(event) => setConfig({ ...config, ocr: { ...config.ocr, artifacts: { ...config.ocr.artifacts, gzip: event.target.checked } } })} />
+          <FormField label="Páginas de muestra">{(id) => <Input id={id} type="number" min="1" max="20" value={config.ocr.language_detection.sample_pages} onChange={(event) => setConfig({ ...config, ocr: { ...config.ocr, language_detection: { ...config.ocr.language_detection, sample_pages: Number(event.target.value) } } })} />}</FormField>
+          <FormField label="Caracteres mínimos de muestra">{(id) => <Input id={id} type="number" min="20" max="10000" value={config.ocr.language_detection.min_sample_chars} onChange={(event) => setConfig({ ...config, ocr: { ...config.ocr, language_detection: { ...config.ocr.language_detection, min_sample_chars: Number(event.target.value) } } })} />}</FormField>
+          <FormField label="Confianza mínima">{(id) => <Input id={id} type="number" min="0.01" max="1" step="0.05" value={config.ocr.language_detection.minimum_confidence} onChange={(event) => setConfig({ ...config, ocr: { ...config.ocr, language_detection: { ...config.ocr.language_detection, minimum_confidence: Number(event.target.value) } } })} />}</FormField>
+          <FormField label="Máximo de idiomas">{(id) => <Input id={id} type="number" min="1" max="4" value={config.ocr.language_detection.max_languages} onChange={(event) => setConfig({ ...config, ocr: { ...config.ocr, language_detection: { ...config.ocr.language_detection, max_languages: Number(event.target.value) } } })} />}</FormField>
+        </div>
+      </Card>
+
+      <Card><div className="section-heading"><span className="step">5</span><div><h2>Seguridad y CORS</h2><p>Autoriza los sitios web que pueden consumir la API desde el navegador.</p></div></div>
+        <div className="form-grid two-columns">
+          <Checkbox label="Activar autenticación de API" checked={config.security.enable_auth} onChange={(event) => setConfig({ ...config, security: { ...config.security, enable_auth: event.target.checked } })} />
+          <FormField label="Máximo de cargas concurrentes">{(id) => <Input id={id} type="number" min="1" max="100" value={config.security.max_concurrent_uploads} onChange={(event) => setConfig({ ...config, security: { ...config.security, max_concurrent_uploads: Number(event.target.value) } })} />}</FormField>
+        </div>
+        <FormField label="URLs permitidas por CORS" help="Una URL por línea. Se aceptan puertos y subdominios wildcard, por ejemplo https://*.dominio.com.">{(id) => <textarea id={id} className="input cors-textarea" rows={6} value={corsOrigins} onChange={(event) => setCorsOrigins(event.target.value)} placeholder={"https://app.ejemplo.com\nhttp://localhost:5173"} />}</FormField>
+      </Card>
     </div>
   </>;
 }
+
+const languageOptions = [{ code: "spa", label: "Español" }, { code: "eng", label: "Inglés" }, { code: "fra", label: "Francés" }, { code: "por", label: "Portugués" }];
+const toggleList = (values: string[], value: string, checked: boolean) => checked ? [...new Set([...values, value])] : values.filter((item) => item !== value);
+const parseCorsOrigins = (value: string) => [...new Set(value.split(/\r?\n|,/).map((item) => item.trim()).filter(Boolean))];

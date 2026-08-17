@@ -30,6 +30,22 @@ it("presenta los defaults de conversión", () => {
   expect(screen.getByLabelText("DPI")).toHaveValue(150);
 });
 
+it("muestra y permite editar OCR y los orígenes CORS", async () => {
+  const user = userEvent.setup();
+  const save = vi.spyOn(api, "saveConfig").mockResolvedValueOnce({ message: "ok" });
+  render(<ConfigPage initial={structuredClone(sampleConfig)} onSaved={() => undefined} />);
+  expect(screen.getByRole("heading", { name: "OCR e indexación" })).toBeInTheDocument();
+  expect(screen.getByLabelText("Workers concurrentes")).toHaveValue(2);
+  await user.click(screen.getByLabelText("Activar OCR"));
+  await user.clear(screen.getByLabelText("URLs permitidas por CORS"));
+  await user.type(screen.getByLabelText("URLs permitidas por CORS"), "https://app.example.com{enter}http://localhost:5173");
+  await user.click(screen.getByRole("button", { name: "Guardar cambios" }));
+  expect(save).toHaveBeenCalledWith(expect.objectContaining({
+    ocr: expect.objectContaining({ enabled: true }),
+    security: expect.objectContaining({ cors_origins: ["https://app.example.com", "http://localhost:5173"] }),
+  }));
+});
+
 it("cambia entre los campos específicos de MySQL y PostgreSQL", async () => {
   const user = userEvent.setup();
   render(<ConfigPage initial={structuredClone(sampleConfig)} onSaved={() => undefined} />);

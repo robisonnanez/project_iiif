@@ -5,6 +5,7 @@ import (
 	"context"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -714,6 +715,7 @@ type editableConfigPayload struct {
 		DefaultQuality int    `json:"default_quality"`
 		EnableOCR      bool   `json:"enable_ocr"`
 	} `json:"conversion"`
+	OCR      config.OCRConfig `json:"ocr"`
 	Projects struct {
 		Enabled             bool                   `json:"enabled"`
 		DefaultProject      string                 `json:"default_project"`
@@ -779,6 +781,44 @@ func applyEditableConfig(next, current *config.Config, payload editableConfigPay
 	}
 	if payload.Security.MaxConcurrentUploads <= 0 {
 		return &configError{"security.max_concurrent_uploads debe ser mayor que cero"}
+	}
+	if err := validateCORSOrigins(payload.Security.CorsOrigins); err != nil {
+		return err
+	}
+	if payload.OCR.DefaultMode != "" {
+		if !allowedValue(payload.OCR.DefaultMode, "hybrid", "exhaustive", "ocr_only") {
+			return &configError{"ocr.default_mode debe ser hybrid, exhaustive u ocr_only"}
+		}
+		if payload.OCR.Workers < 1 || payload.OCR.Workers > 16 {
+			return &configError{"ocr.workers debe estar entre 1 y 16"}
+		}
+		if payload.OCR.PageTimeoutSeconds < 10 || payload.OCR.PageTimeoutSeconds > 3600 {
+			return &configError{"ocr.page_timeout_seconds debe estar entre 10 y 3600"}
+		}
+		if payload.OCR.RetriesPerPage < 1 || payload.OCR.RetriesPerPage > 10 {
+			return &configError{"ocr.retries_per_page debe estar entre 1 y 10"}
+		}
+		if payload.OCR.RenderDPI < 150 || payload.OCR.RenderDPI > 600 {
+			return &configError{"ocr.render_dpi debe estar entre 150 y 600"}
+		}
+		if payload.OCR.MinTextChars < 1 || payload.OCR.MinTextChars > 10000 {
+			return &configError{"ocr.min_text_chars debe estar entre 1 y 10000"}
+		}
+		if err := validateOCRLanguages(payload.OCR.CandidateLanguages, payload.OCR.FallbackLanguages); err != nil {
+			return err
+		}
+		if payload.OCR.LanguageDetection.SamplePages < 1 || payload.OCR.LanguageDetection.SamplePages > 20 {
+			return &configError{"ocr.language_detection.sample_pages debe estar entre 1 y 20"}
+		}
+		if payload.OCR.LanguageDetection.MinSampleChars < 20 || payload.OCR.LanguageDetection.MinSampleChars > 10000 {
+			return &configError{"ocr.language_detection.min_sample_chars debe estar entre 20 y 10000"}
+		}
+		if payload.OCR.LanguageDetection.MinimumConfidence <= 0 || payload.OCR.LanguageDetection.MinimumConfidence > 1 {
+			return &configError{"ocr.language_detection.minimum_confidence debe ser mayor que 0 y máximo 1"}
+		}
+		if payload.OCR.LanguageDetection.MaxLanguages < 1 || payload.OCR.LanguageDetection.MaxLanguages > len(payload.OCR.CandidateLanguages) {
+			return &configError{"ocr.language_detection.max_languages debe ser válido para los idiomas seleccionados"}
+		}
 	}
 
 	next.Server.Port = payload.Server.Port
@@ -872,6 +912,10 @@ func applyEditableConfig(next, current *config.Config, payload editableConfigPay
 	}
 	next.Conversion.DefaultQuality = payload.Conversion.DefaultQuality
 	next.Conversion.EnableOCR = payload.Conversion.EnableOCR
+	if payload.OCR.DefaultMode != "" {
+		next.OCR = payload.OCR
+		next.Conversion.EnableOCR = payload.OCR.Enabled
+	}
 	next.Projects.Enabled = payload.Projects.Enabled
 	next.Projects.DefaultProject = payload.Projects.DefaultProject
 	next.Projects.RequireProject = payload.Projects.RequireProject
@@ -894,6 +938,57 @@ func validatePort(value, field string) error {
 	port, err := strconv.Atoi(value)
 	if err != nil || port < 1 || port > 65535 {
 		return &configError{field + " debe ser un puerto entre 1 y 65535"}
+	}
+	return nil
+}
+
+func validateCORSOrigins(origins []string) error {
+	seen := map[string]struct{}{}
+	for _, raw := range origins {
+		origin := strings.TrimSpace(raw)
+		if origin == "" {
+			return &configError{"security.cors_origins no puede contener valores vacíos"}
+		}
+		if _, exists := seen[origin]; exists {
+			continue
+		}
+		seen[origin] = struct{}{}
+		candidate := origin
+		if strings.Contains(candidate, "*") {
+			if strings.Count(candidate, "*") != 1 || !strings.Contains(candidate, "://*.") {
+				return &configError{"origen CORS wildcard inválido: " + origin}
+			}
+			candidate = strings.Replace(candidate, "*.", "wildcard.", 1)
+		}
+		parsed, err := url.Parse(candidate)
+		if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" || (parsed.Path != "" && parsed.Path != "/") || parsed.RawQuery != "" || parsed.Fragment != "" {
+			return &configError{"origen CORS inválido: " + origin}
+		}
+	}
+	return nil
+}
+
+func validateOCRLanguages(candidates, fallbacks []string) error {
+	allowed := map[string]bool{"spa": true, "eng": true, "fra": true, "por": true}
+	selected := map[string]bool{}
+	if len(candidates) == 0 {
+		return &configError{"ocr.candidate_languages debe incluir al menos un idioma"}
+	}
+	for _, language := range candidates {
+		if !allowed[language] || selected[language] {
+			return &configError{"idioma OCR candidato inválido o duplicado: " + language}
+		}
+		selected[language] = true
+	}
+	if len(fallbacks) == 0 {
+		return &configError{"ocr.fallback_languages debe incluir al menos un idioma"}
+	}
+	seenFallback := map[string]bool{}
+	for _, language := range fallbacks {
+		if !selected[language] || seenFallback[language] {
+			return &configError{"idioma OCR de respaldo inválido o no seleccionado: " + language}
+		}
+		seenFallback[language] = true
 	}
 	return nil
 }

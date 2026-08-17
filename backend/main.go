@@ -171,7 +171,15 @@ func main() {
 	{
 		documentV1.POST("/upload", apiHandler.UploadPDF)
 		registerDocumentRoutes(documentV1)
+		documentV1.GET("/:id/ocr", ocrHandler.GetSummary)
+		documentV1.GET("/:id/ocr/pages/:page", ocrHandler.GetPage)
+		documentV1.GET("/:id/ocr/search", ocrHandler.SearchDocument)
 	}
+	apiV1OCR := router.Group("/api/v1/ocr")
+	apiV1OCR.GET("/search", ocrHandler.Search)
+	apiV1IIIF := router.Group("/api/v1/iiif")
+	apiV1IIIF.GET("/:id/manifest", apiHandler.GetManifest)
+	apiV1IIIF.GET("/:id/manifest/v3", apiHandler.GetManifestV3)
 
 	legacyAPI := router.Group("/api")
 	{

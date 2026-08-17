@@ -305,11 +305,15 @@ func (h *WelcomeHandler) HealthCheck(c *gin.Context) {
 			"s3_bucket":   h.config.AWSBucket,
 		},
 		"endpoints": map[string]string{
-			"upload":    "/api/v1/documents/upload",
-			"documents": "/api/v1/documents",
-			"manifest":  "/api/iiif/{id}/manifest",
-			"image":     "/iiif/3/{identifier}/full/max/0/default.jpg",
-			"info":      "/iiif/3/{identifier}/info.json",
+			"upload":       "/api/v1/documents/upload",
+			"documents":    "/api/v1/documents",
+			"manifest_v2":  "/api/v1/iiif/{id}/manifest",
+			"manifest_v3":  "/api/v1/iiif/{id}/manifest/v3",
+			"ocr_document": "/api/v1/documents/{id}/ocr",
+			"ocr_page":     "/api/v1/documents/{id}/ocr/pages/{page}",
+			"ocr_search":   "/api/v1/ocr/search?q={text}&project={project}&tenant={tenant}",
+			"image":        "/iiif/3/{identifier}/full/max/0/default.jpg",
+			"info":         "/iiif/3/{identifier}/info.json",
 		},
 	})
 }

@@ -59,6 +59,17 @@ Endpoints administrativos:
 - `GET /api/v1/admin/ocr/search?q=texto&project=default`
 - `DELETE /api/v1/admin/documents/{id}/ocr`
 
+Endpoints públicos de lectura para integraciones externas:
+
+- `GET /api/v1/documents/{id}/ocr`
+- `GET /api/v1/documents/{id}/ocr/pages/{page}`
+- `GET /api/v1/documents/{id}/ocr/search?q=texto`
+- `GET /api/v1/ocr/search?q=texto&project=default&tenant=tenant`
+- `GET /api/v1/iiif/{id}/manifest`
+- `GET /api/v1/iiif/{id}/manifest/v3`
+
+Las llamadas desde un frontend ubicado en otro dominio deben agregar ese origen exacto en **Configuración → Seguridad y CORS**. CORS no afecta las integraciones servidor a servidor.
+
 Ejemplo de creación:
 
 ```json

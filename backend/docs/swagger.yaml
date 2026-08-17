@@ -1,5 +1,50 @@
 basePath: /
 definitions:
+  config.OCRConfig:
+    properties:
+      artifacts:
+        properties:
+          gzip:
+            type: boolean
+        type: object
+      auto_after_conversion:
+        type: boolean
+      candidate_languages:
+        items:
+          type: string
+        type: array
+      default_mode:
+        type: string
+      enabled:
+        type: boolean
+      fallback_languages:
+        items:
+          type: string
+        type: array
+      language_detection:
+        properties:
+          enabled:
+            type: boolean
+          max_languages:
+            type: integer
+          min_sample_chars:
+            type: integer
+          minimum_confidence:
+            type: number
+          sample_pages:
+            type: integer
+        type: object
+      min_text_chars:
+        type: integer
+      page_timeout_seconds:
+        type: integer
+      render_dpi:
+        type: integer
+      retries_per_page:
+        type: integer
+      workers:
+        type: integer
+    type: object
   config.ProjectConfig:
     properties:
       key:
@@ -133,6 +178,8 @@ definitions:
           max_width:
             type: integer
         type: object
+      ocr:
+        $ref: '#/definitions/config.OCRConfig'
       projects:
         properties:
           allow_dynamic_tenants:
@@ -627,6 +674,145 @@ definitions:
       title:
         type: string
     type: object
+  services.CreateOCRJobRequest:
+    properties:
+      force:
+        type: boolean
+      language_mode:
+        type: string
+      languages:
+        items:
+          type: string
+        type: array
+      mode:
+        type: string
+    type: object
+  services.OCRDocumentSummary:
+    properties:
+      active_generation:
+        type: string
+      document_id:
+        type: string
+      failed_pages:
+        type: integer
+      indexed_pages:
+        type: integer
+      languages:
+        items:
+          type: string
+        type: array
+      project_key:
+        type: string
+      status:
+        type: string
+      tenant_key:
+        type: string
+      total_pages:
+        type: integer
+      updated_at:
+        type: string
+    type: object
+  services.OCRJob:
+    properties:
+      cancel_requested:
+        type: boolean
+      created_at:
+        type: string
+      current_page:
+        type: integer
+      document_id:
+        type: string
+      error:
+        type: string
+      failed_pages:
+        type: integer
+      finished_at:
+        type: string
+      generation:
+        type: string
+      id:
+        type: string
+      language_mode:
+        type: string
+      languages:
+        items:
+          type: string
+        type: array
+      mode:
+        type: string
+      processed_pages:
+        type: integer
+      project_key:
+        type: string
+      started_at:
+        type: string
+      status:
+        type: string
+      tenant_key:
+        type: string
+      total_pages:
+        type: integer
+    type: object
+  services.OCRPage:
+    properties:
+      canvas_v2:
+        type: string
+      canvas_v3:
+        type: string
+      confidence:
+        type: number
+      created_at:
+        type: string
+      document_id:
+        type: string
+      engine:
+        type: string
+      error:
+        type: string
+      generation:
+        type: string
+      geometry_status:
+        type: string
+      height:
+        type: integer
+      language:
+        type: string
+      native_text:
+        type: string
+      ocr_text:
+        type: string
+      page_number:
+        type: integer
+      schema_version:
+        type: integer
+      source:
+        type: string
+      status:
+        type: string
+      text:
+        type: string
+      width:
+        type: integer
+      words:
+        items:
+          $ref: '#/definitions/services.OCRWord'
+        type: array
+    type: object
+  services.OCRWord:
+    properties:
+      confidence:
+        type: number
+      height:
+        type: integer
+      left:
+        type: integer
+      text:
+        type: string
+      top:
+        type: integer
+      width:
+        type: integer
+    type: object
 info:
   contact: {}
   description: API para conversion de PDF, IIIF Presentation v2 (con v3 compatible),
@@ -832,6 +1018,48 @@ paths:
       summary: Listar imagenes IIIF por documento
       tags:
       - Admin
+  /api/v1/admin/documents/{id}/ocr/jobs:
+    post:
+      consumes:
+      - application/json
+      description: Inicia una generación OCR híbrida, exhaustiva o solo OCR. Requiere
+        sesión administrativa.
+      parameters:
+      - description: ID del documento
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Configuración del trabajo
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/services.CreateOCRJobRequest'
+      produces:
+      - application/json
+      responses:
+        "202":
+          description: Accepted
+          schema:
+            $ref: '#/definitions/services.OCRJob'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.errorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.errorResponse'
+        "503":
+          description: Service Unavailable
+          schema:
+            $ref: '#/definitions/handlers.errorResponse'
+      security:
+      - SessionCookie: []
+      summary: Crear trabajo OCR
+      tags:
+      - OCR
   /api/v1/admin/migrations/local-to-db/start:
     post:
       consumes:
@@ -919,6 +1147,54 @@ paths:
       summary: Explorar directorios locales permitidos para migracion
       tags:
       - Admin
+  /api/v1/admin/ocr/jobs/{job_id}:
+    get:
+      parameters:
+      - description: ID del trabajo
+        in: path
+        name: job_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/services.OCRJob'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.errorResponse'
+      security:
+      - SessionCookie: []
+      summary: Consultar progreso OCR
+      tags:
+      - OCR
+  /api/v1/admin/ocr/jobs/{job_id}/cancel:
+    post:
+      parameters:
+      - description: ID del trabajo
+        in: path
+        name: job_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/services.OCRJob'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.errorResponse'
+      security:
+      - SessionCookie: []
+      summary: Cancelar trabajo OCR
+      tags:
+      - OCR
   /api/v1/admin/projects:
     get:
       produces:
@@ -1049,6 +1325,97 @@ paths:
       summary: Obtener documento por ID
       tags:
       - Documentos
+  /api/v1/documents/{id}/ocr:
+    get:
+      parameters:
+      - description: ID del documento
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/services.OCRDocumentSummary'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.errorResponse'
+      summary: Obtener estado OCR de un documento
+      tags:
+      - OCR
+  /api/v1/documents/{id}/ocr/pages/{page}:
+    get:
+      parameters:
+      - description: ID del documento
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Número de página
+        in: path
+        name: page
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/services.OCRPage'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.errorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.errorResponse'
+      summary: Obtener OCR y bounding boxes de una página
+      tags:
+      - OCR
+  /api/v1/documents/{id}/ocr/search:
+    get:
+      parameters:
+      - description: ID del documento
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Texto a buscar
+        in: query
+        name: q
+        required: true
+        type: string
+      - default: 20
+        description: Máximo de resultados
+        in: query
+        name: limit
+        type: integer
+      - default: 0
+        description: Desplazamiento
+        in: query
+        name: offset
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.errorResponse'
+      summary: Buscar texto OCR dentro de un documento
+      tags:
+      - OCR
   /api/v1/documents/upload:
     post:
       consumes:
@@ -1111,6 +1478,115 @@ paths:
       summary: Subir y convertir PDF
       tags:
       - Documentos
+  /api/v1/iiif/{id}/manifest:
+    get:
+      description: Devuelve un manifiesto v2 con secuencia, canvases y rangos jerarquicos
+        derivados de los marcadores PDF. El parametro pages permite seleccionar paginas
+        y poda rangos vacios.
+      parameters:
+      - description: ID del documento
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Paginas o rangos, por ejemplo 1-3,5
+        in: query
+        name: pages
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/models.IIIFManifestV2'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.errorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.errorResponse'
+      summary: Obtener manifiesto IIIF Presentation API v2
+      tags:
+      - IIIF
+  /api/v1/iiif/{id}/manifest/v3:
+    get:
+      description: Endpoint de compatibilidad para clientes IIIF Presentation v3.
+      parameters:
+      - description: ID del documento
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Paginas o rangos, por ejemplo 1-3,5
+        in: query
+        name: pages
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/models.IIIFManifest'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.errorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.errorResponse'
+      summary: Obtener manifiesto IIIF Presentation API v3
+      tags:
+      - IIIF
+  /api/v1/ocr/search:
+    get:
+      parameters:
+      - description: Texto a buscar
+        in: query
+        name: q
+        required: true
+        type: string
+      - description: Proyecto
+        in: query
+        name: project
+        type: string
+      - description: Tenant
+        in: query
+        name: tenant
+        type: string
+      - description: ID del documento
+        in: query
+        name: document_id
+        type: string
+      - default: 20
+        description: Máximo de resultados
+        in: query
+        name: limit
+        type: integer
+      - default: 0
+        description: Desplazamiento
+        in: query
+        name: offset
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.errorResponse'
+      summary: Buscar texto OCR por proyecto, tenant o documento
+      tags:
+      - OCR
   /auth/login:
     post:
       consumes:
