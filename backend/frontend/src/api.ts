@@ -18,6 +18,11 @@ export const api = {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(config),
   }),
+  restartService: (password: string) => request<{ ok: boolean; message: string; active: boolean }>("/api/v1/admin/service/restart", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ password }),
+  }),
   documents: () => request<DocumentRecord[]>("/api/v1/documents"),
   upload: (file: File, settings: UploadSettings, scope: UploadScope) => {
     const form = new FormData();

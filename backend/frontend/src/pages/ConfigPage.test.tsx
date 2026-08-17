@@ -62,3 +62,23 @@ it("muestra el error que devuelve la API al guardar", async () => {
   await user.click(screen.getByRole("button", { name: "Guardar cambios" }));
   expect(await screen.findByText("Configuración rechazada")).toBeInTheDocument();
 });
+
+it("solicita la contraseña y reinicia el servicio después de guardar", async () => {
+  const user = userEvent.setup();
+  vi.spyOn(api, "saveConfig").mockResolvedValueOnce({ message: "ok" });
+  const restart = vi.spyOn(api, "restartService").mockResolvedValueOnce({ ok: true, message: "ok", active: true });
+  render(<ConfigPage initial={structuredClone(sampleConfig)} onSaved={() => undefined} />);
+
+  await user.click(screen.getByRole("button", { name: "Guardar cambios" }));
+  expect(await screen.findByRole("heading", { name: "Reiniciar servicio" })).toBeInTheDocument();
+
+  await user.click(screen.getByRole("button", { name: "Reiniciar servicio" }));
+  expect(screen.getByText("Ingresa la contraseña del servidor para reiniciar el servicio.")).toBeInTheDocument();
+
+  await user.type(screen.getByLabelText("Contraseña del servidor"), "sudo-test");
+  await user.click(screen.getByRole("button", { name: "Reiniciar servicio" }));
+
+  expect(restart).toHaveBeenCalledWith("sudo-test");
+  expect(await screen.findByText(/Reinicio programado/)).toBeInTheDocument();
+  expect(screen.queryByRole("heading", { name: "Reiniciar servicio" })).not.toBeInTheDocument();
+});

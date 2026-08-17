@@ -1,8 +1,8 @@
-import { useState } from "react";
+import { useCallback, useState } from "react";
 import { api } from "../api";
 import { applyMongoURI, mongoURIFromConfig } from "../lib/validation";
 import type { AppConfig, BinaryMode, Engine } from "../types";
-import { Alert, Button, Card, Checkbox, FormField, Input, PageHeader, Select, Spinner } from "../components/ui";
+import { Alert, Button, Card, Checkbox, FormField, Input, Modal, PageHeader, Select, Spinner } from "../components/ui";
 
 export function ConfigPage({ initial, onSaved }: { initial: AppConfig; onSaved: (config: AppConfig) => void }) {
   const [config, setConfig] = useState(initial);
@@ -11,6 +11,10 @@ export function ConfigPage({ initial, onSaved }: { initial: AppConfig; onSaved: 
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
+  const [restartOpen, setRestartOpen] = useState(false);
+  const [sudoPassword, setSudoPassword] = useState("");
+  const [restartBusy, setRestartBusy] = useState(false);
+  const [restartError, setRestartError] = useState("");
   const engine = (config.storage.backend === "local" ? "mysql" : config.storage.backend) as Engine;
 
   const setEngine = (value: Engine) => setConfig((current) => ({ ...current, storage: { ...current.storage, backend: value }, database: { ...current.database, DB_CONNECTION: value } }));
@@ -34,10 +38,36 @@ export function ConfigPage({ initial, onSaved }: { initial: AppConfig; onSaved: 
       } };
       await api.saveConfig(payload);
       setConfig(payload); onSaved(payload);
-      setMessage("Configuración guardada. Los cambios de motor o almacenamiento requieren reiniciar el servicio.");
+      setMessage("Configuración guardada.");
+      setRestartError("");
+      setRestartOpen(true);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "No se pudo guardar la configuración.");
     } finally { setBusy(false); }
+  };
+
+  const closeRestart = useCallback(() => {
+    if (restartBusy) return;
+    setRestartOpen(false);
+    setSudoPassword("");
+    setRestartError("");
+  }, [restartBusy]);
+
+  const restart = async () => {
+    if (!sudoPassword.trim()) {
+      setRestartError("Ingresa la contraseña del servidor para reiniciar el servicio.");
+      return;
+    }
+    setRestartBusy(true); setRestartError("");
+    try {
+      await api.restartService(sudoPassword);
+      setRestartOpen(false);
+      setSudoPassword("");
+      setMessage("Configuración guardada. Reinicio programado; el servicio volverá a estar disponible en unos segundos.");
+    } catch (cause) {
+      setRestartError(cause instanceof Error ? cause.message : "No se pudo reiniciar el servicio.");
+      setSudoPassword("");
+    } finally { setRestartBusy(false); }
   };
 
   return <>
@@ -120,6 +150,13 @@ export function ConfigPage({ initial, onSaved }: { initial: AppConfig; onSaved: 
         <FormField label="URLs permitidas por CORS" help="Una URL por línea. Se aceptan puertos y subdominios wildcard, por ejemplo https://*.dominio.com.">{(id) => <textarea id={id} className="input cors-textarea" rows={6} value={corsOrigins} onChange={(event) => setCorsOrigins(event.target.value)} placeholder={"https://app.ejemplo.com\nhttp://localhost:5173"} />}</FormField>
       </Card>
     </div>
+    {restartOpen && <Modal title="Reiniciar servicio" description="La configuración ya fue guardada. Reinicia el servicio para aplicar los cambios." onClose={closeRestart}>
+      <form onSubmit={(event) => { event.preventDefault(); void restart(); }}>
+        <FormField label="Contraseña del servidor" help="Se usa únicamente para autorizar este reinicio y no se guarda.">{(id) => <Input id={id} type="password" value={sudoPassword} onChange={(event) => setSudoPassword(event.target.value)} autoComplete="current-password" disabled={restartBusy} />}</FormField>
+        {restartError && <Alert tone="danger">{restartError}</Alert>}
+        <div className="modal-actions"><Button type="button" variant="secondary" disabled={restartBusy} onClick={closeRestart}>Ahora no</Button><Button type="submit" disabled={restartBusy}>{restartBusy ? <Spinner label="Reiniciando" /> : "Reiniciar servicio"}</Button></div>
+      </form>
+    </Modal>}
   </>;
 }
 
