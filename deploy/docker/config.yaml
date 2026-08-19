@@ -93,6 +93,7 @@ frontend:
   path: "./frontend"
   require_auth: true
   username: "admin"
+  menu_orientation: "horizontal"
 projects:
   enabled: true
   default_project: "default"

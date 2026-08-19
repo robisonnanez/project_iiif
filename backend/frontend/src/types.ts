@@ -6,6 +6,7 @@ export interface ProjectConfig {
   name: string;
   multitenant: boolean;
   tenants: string[];
+  tenants_endpoint?: string;
 }
 
 export interface DocumentRecord {
@@ -62,7 +63,7 @@ export interface AppConfig {
       server_selection_timeout_ms: number;
     };
   };
-  frontend: { enabled: boolean; path: string; require_auth: boolean; username: string; password: string };
+  frontend: { enabled: boolean; path: string; require_auth: boolean; username: string; password: string; menu_orientation: "horizontal" | "vertical" };
   binary_storage: { mode: BinaryMode; temp_path: string };
   s3: {
     filesystem_disk: string;

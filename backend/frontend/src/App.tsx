@@ -8,9 +8,10 @@ import { ConfigPage } from "./pages/ConfigPage";
 import { ImagesPage } from "./pages/ImagesPage";
 import { MigrationPage } from "./pages/MigrationPage";
 import { OCRPage } from "./pages/OCRPage";
+import { ProjectsPage } from "./pages/ProjectsPage";
 import { UploadPage } from "./pages/UploadPage";
 
-type View = "dashboard" | "documents" | "iiif" | "upload" | "ocr" | "migration" | "config";
+type View = "dashboard" | "documents" | "iiif" | "upload" | "ocr" | "migration" | "projects" | "config";
 
 const nav: Array<{ view: View; label: string; path: string }> = [
   { view: "dashboard", label: "Dashboard", path: "/dashboard/inicio" },
@@ -19,6 +20,7 @@ const nav: Array<{ view: View; label: string; path: string }> = [
   { view: "ocr", label: "OCR", path: "/dashboard/ocr" },
   { view: "upload", label: "Subir PDF", path: "/dashboard/subir-pdf" },
   { view: "migration", label: "Migración", path: "/dashboard/migracion" },
+  { view: "projects", label: "Proyectos", path: "/dashboard/proyectos" },
   { view: "config", label: "Configuración", path: "/dashboard/configuracion" },
 ];
 
@@ -85,7 +87,8 @@ export default function App() {
   };
   const completed = documents.filter((document) => document.status === "completed").length;
 
-  return <div className="app-shell">
+  const menuOrientation = config?.frontend.menu_orientation === "vertical" ? "vertical" : "horizontal";
+  return <div className={`app-shell layout-${menuOrientation}`}>
     <a className="skip-link" href="#main-content">Saltar al contenido</a>
     <header className="topbar">
       <button className="brand" onClick={() => navigate(nav[0])} aria-label="Ir al dashboard"><span className="brand-mark">IIIF</span><span><strong>project_iiif</strong><small>PDF · Image · Presentation</small></span></button>
@@ -104,6 +107,7 @@ export default function App() {
         {view === "iiif" && <ImagesPage documents={documents} config={config} notify={notify} />}
         {view === "ocr" && <OCRPage documents={documents} config={config} notify={notify} />}
         {view === "migration" && <MigrationPage config={config} notify={notify} />}
+        {view === "projects" && (config ? <ProjectsPage config={config} onSaved={setConfig} notify={notify} /> : <Alert tone="danger">No se pudo cargar la configuración de proyectos.</Alert>)}
         {view === "config" && (config ? <ConfigPage initial={config} onSaved={setConfig} /> : <Alert tone="danger">No se pudo cargar la configuración.</Alert>)}
       </>}
     </main>

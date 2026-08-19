@@ -1,4 +1,4 @@
-import type { AppConfig, DocumentImagesResponse, DocumentRecord, MigrationDirectory, MigrationPayload, MigrationStatus, OCRJob, OCRSearchResponse, UploadScope, UploadSettings } from "./types";
+import type { AppConfig, DocumentImagesResponse, DocumentRecord, MigrationDirectory, MigrationPayload, MigrationStatus, OCRJob, OCRSearchResponse, ProjectConfig, UploadScope, UploadSettings } from "./types";
 
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
   const response = await fetch(url, { credentials: "same-origin", ...init });
@@ -18,6 +18,7 @@ export const api = {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(config),
   }),
+  syncProjectTenants: (projectKey: string) => request<ProjectConfig>(`/api/v1/admin/projects/${encodeURIComponent(projectKey)}/sync-tenants`, { method: "POST" }),
   restartService: (password: string) => request<{ ok: boolean; message: string; active: boolean }>("/api/v1/admin/service/restart", {
     method: "POST",
     headers: { "Content-Type": "application/json" },

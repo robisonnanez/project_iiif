@@ -118,11 +118,12 @@ type Config struct {
 	} `yaml:"security"`
 
 	Frontend struct {
-		Enabled     bool   `yaml:"enabled"`
-		Path        string `yaml:"path"`
-		RequireAuth bool   `yaml:"require_auth"`
-		Username    string `yaml:"username"`
-		Password    string `yaml:"password"`
+		Enabled         bool   `yaml:"enabled"`
+		Path            string `yaml:"path"`
+		RequireAuth     bool   `yaml:"require_auth"`
+		Username        string `yaml:"username"`
+		Password        string `yaml:"password"`
+		MenuOrientation string `yaml:"menu_orientation"`
 	} `yaml:"frontend"`
 
 	Projects struct {
@@ -175,10 +176,11 @@ type OCRConfig struct {
 }
 
 type ProjectConfig struct {
-	Key         string   `yaml:"key" json:"key"`
-	Name        string   `yaml:"name" json:"name"`
-	Multitenant bool     `yaml:"multitenant" json:"multitenant"`
-	Tenants     []string `yaml:"tenants" json:"tenants"`
+	Key             string   `yaml:"key" json:"key"`
+	Name            string   `yaml:"name" json:"name"`
+	Multitenant     bool     `yaml:"multitenant" json:"multitenant"`
+	Tenants         []string `yaml:"tenants" json:"tenants"`
+	TenantsEndpoint string   `yaml:"tenants_endpoint,omitempty" json:"tenants_endpoint,omitempty"`
 }
 
 func Load(filename string) (*Config, error) {
@@ -476,6 +478,9 @@ func applyDefaults(config *Config) {
 	if config.Frontend.Password == "" {
 		config.Frontend.Password = defaults.Frontend.Password
 	}
+	if config.Frontend.MenuOrientation != "vertical" {
+		config.Frontend.MenuOrientation = "horizontal"
+	}
 	if config.Projects.DefaultProject == "" {
 		config.Projects.DefaultProject = defaults.Projects.DefaultProject
 	}
@@ -703,17 +708,19 @@ func Default() *Config {
 			MaxConcurrentUploads: 5,
 		},
 		Frontend: struct {
-			Enabled     bool   `yaml:"enabled"`
-			Path        string `yaml:"path"`
-			RequireAuth bool   `yaml:"require_auth"`
-			Username    string `yaml:"username"`
-			Password    string `yaml:"password"`
+			Enabled         bool   `yaml:"enabled"`
+			Path            string `yaml:"path"`
+			RequireAuth     bool   `yaml:"require_auth"`
+			Username        string `yaml:"username"`
+			Password        string `yaml:"password"`
+			MenuOrientation string `yaml:"menu_orientation"`
 		}{
-			Enabled:     false,
-			Path:        "./frontend",
-			RequireAuth: true,
-			Username:    "admin",
-			Password:    "CAMBIAR_PASSWORD",
+			Enabled:         false,
+			Path:            "./frontend",
+			RequireAuth:     true,
+			Username:        "admin",
+			Password:        "CAMBIAR_PASSWORD",
+			MenuOrientation: "horizontal",
 		},
 		Projects: struct {
 			Enabled             bool            `yaml:"enabled"`

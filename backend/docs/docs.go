@@ -15,100 +15,6 @@ const docTemplate = `{
     "host": "{{.Host}}",
     "basePath": "{{.BasePath}}",
     "paths": {
-        "/api/iiif/v3/{id}/manifest": {
-            "get": {
-                "description": "Endpoint de compatibilidad para clientes IIIF Presentation v3.",
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "IIIF"
-                ],
-                "summary": "Obtener manifiesto IIIF Presentation API v3",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "ID del documento",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "type": "string",
-                        "description": "Paginas o rangos, por ejemplo 1-3,5",
-                        "name": "pages",
-                        "in": "query"
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/models.IIIFManifest"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.errorResponse"
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.errorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/api/iiif/{id}/manifest": {
-            "get": {
-                "description": "Devuelve un manifiesto v2 con secuencia, canvases y rangos jerarquicos derivados de los marcadores PDF. El parametro pages permite seleccionar paginas y poda rangos vacios.",
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "IIIF"
-                ],
-                "summary": "Obtener manifiesto IIIF Presentation API v2",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "ID del documento",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "type": "string",
-                        "description": "Paginas o rangos, por ejemplo 1-3,5",
-                        "name": "pages",
-                        "in": "query"
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/models.IIIFManifestV2"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.errorResponse"
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.errorResponse"
-                        }
-                    }
-                }
-            }
-        },
         "/api/v1/admin/config": {
             "get": {
                 "security": [
@@ -633,6 +539,58 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/v1/admin/projects/{key}/sync-tenants": {
+            "post": {
+                "security": [
+                    {
+                        "SessionCookie": []
+                    }
+                ],
+                "description": "Consulta el endpoint configurado para el proyecto, normaliza la lista y la persiste en config.yaml.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Admin"
+                ],
+                "summary": "Sincronizar tenants de un proyecto",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Clave del proyecto",
+                        "name": "key",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/config.ProjectConfig"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.errorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.errorResponse"
+                        }
+                    },
+                    "502": {
+                        "description": "Bad Gateway",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.errorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/admin/service/restart": {
             "post": {
                 "security": [
@@ -1035,53 +993,6 @@ const docTemplate = `{
         },
         "/api/v1/iiif/{id}/manifest": {
             "get": {
-                "description": "Devuelve un manifiesto v2 con secuencia, canvases y rangos jerarquicos derivados de los marcadores PDF. El parametro pages permite seleccionar paginas y poda rangos vacios.",
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "IIIF"
-                ],
-                "summary": "Obtener manifiesto IIIF Presentation API v2",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "ID del documento",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "type": "string",
-                        "description": "Paginas o rangos, por ejemplo 1-3,5",
-                        "name": "pages",
-                        "in": "query"
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/models.IIIFManifestV2"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.errorResponse"
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.errorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/api/v1/iiif/{id}/manifest/v3": {
-            "get": {
                 "description": "Endpoint de compatibilidad para clientes IIIF Presentation v3.",
                 "produces": [
                     "application/json"
@@ -1275,116 +1186,6 @@ const docTemplate = `{
                         "description": "OK",
                         "schema": {
                             "$ref": "#/definitions/handlers.sessionResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/iiif/2/{identifier}/info.json": {
-            "get": {
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "IIIF"
-                ],
-                "summary": "Obtener info IIIF Image API v2",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Identificador IIIF, por ejemplo documento_page_1",
-                        "name": "identifier",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/models.IIIFImageInfoV2"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.errorResponse"
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.errorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/iiif/2/{identifier}/{region}/{size}/{rotation}/{quality_format}": {
-            "get": {
-                "produces": [
-                    "image/jpeg",
-                    "image/png",
-                    "image/webp"
-                ],
-                "tags": [
-                    "IIIF"
-                ],
-                "summary": "Obtener imagen IIIF transformada",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "Identificador IIIF",
-                        "name": "identifier",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "type": "string",
-                        "description": "Region",
-                        "name": "region",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "type": "string",
-                        "description": "Tamano",
-                        "name": "size",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "type": "string",
-                        "description": "Rotacion",
-                        "name": "rotation",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "type": "string",
-                        "description": "quality.format",
-                        "name": "quality_format",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "type": "file"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.errorResponse"
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.errorResponse"
                         }
                     }
                 }
@@ -1588,6 +1389,9 @@ const docTemplate = `{
                     "items": {
                         "type": "string"
                     }
+                },
+                "tenants_endpoint": {
+                    "type": "string"
                 }
             }
         },
@@ -1737,6 +1541,9 @@ const docTemplate = `{
                     "properties": {
                         "enabled": {
                             "type": "boolean"
+                        },
+                        "menu_orientation": {
+                            "type": "string"
                         },
                         "password": {
                             "type": "string"
@@ -2070,26 +1877,6 @@ const docTemplate = `{
                 }
             }
         },
-        "models.IIIFAnnotationV2": {
-            "type": "object",
-            "properties": {
-                "@id": {
-                    "type": "string"
-                },
-                "@type": {
-                    "type": "string"
-                },
-                "motivation": {
-                    "type": "string"
-                },
-                "on": {
-                    "type": "string"
-                },
-                "resource": {
-                    "$ref": "#/definitions/models.IIIFResourceV2"
-                }
-            }
-        },
         "models.IIIFBody": {
             "type": "object",
             "properties": {
@@ -2127,32 +1914,6 @@ const docTemplate = `{
                 },
                 "label": {},
                 "type": {
-                    "type": "string"
-                },
-                "width": {
-                    "type": "integer"
-                }
-            }
-        },
-        "models.IIIFCanvasV2": {
-            "type": "object",
-            "properties": {
-                "@id": {
-                    "type": "string"
-                },
-                "@type": {
-                    "type": "string"
-                },
-                "height": {
-                    "type": "integer"
-                },
-                "images": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/models.IIIFAnnotationV2"
-                    }
-                },
-                "label": {
                     "type": "string"
                 },
                 "width": {
@@ -2198,41 +1959,6 @@ const docTemplate = `{
                 }
             }
         },
-        "models.IIIFImageInfoV2": {
-            "type": "object",
-            "properties": {
-                "@context": {
-                    "type": "string"
-                },
-                "@id": {
-                    "type": "string"
-                },
-                "height": {
-                    "type": "integer"
-                },
-                "profile": {
-                    "type": "string"
-                },
-                "protocol": {
-                    "type": "string"
-                },
-                "sizes": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/models.IIIFSize"
-                    }
-                },
-                "tiles": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/models.IIIFTile"
-                    }
-                },
-                "width": {
-                    "type": "integer"
-                }
-            }
-        },
         "models.IIIFManifest": {
             "type": "object",
             "properties": {
@@ -2257,139 +1983,6 @@ const docTemplate = `{
                 }
             }
         },
-        "models.IIIFManifestV2": {
-            "type": "object",
-            "properties": {
-                "@context": {
-                    "type": "string"
-                },
-                "@id": {
-                    "type": "string"
-                },
-                "@type": {
-                    "type": "string"
-                },
-                "attribution": {
-                    "type": "string"
-                },
-                "description": {
-                    "type": "string"
-                },
-                "label": {
-                    "type": "string"
-                },
-                "license": {
-                    "type": "string"
-                },
-                "metadata": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/models.IIIFMetadataV2"
-                    }
-                },
-                "sequences": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/models.IIIFSequenceV2"
-                    }
-                },
-                "structures": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/models.IIIFRangeV2"
-                    }
-                },
-                "thumbnail": {
-                    "$ref": "#/definitions/models.IIIFResourceV2"
-                }
-            }
-        },
-        "models.IIIFMetadataV2": {
-            "type": "object",
-            "properties": {
-                "label": {
-                    "type": "string"
-                },
-                "value": {
-                    "type": "string"
-                }
-            }
-        },
-        "models.IIIFRangeV2": {
-            "type": "object",
-            "properties": {
-                "@id": {
-                    "type": "string"
-                },
-                "@type": {
-                    "type": "string"
-                },
-                "canvases": {
-                    "type": "array",
-                    "items": {
-                        "type": "string"
-                    }
-                },
-                "label": {
-                    "type": "string"
-                },
-                "ranges": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/models.IIIFRangeV2"
-                    }
-                },
-                "within": {
-                    "type": "string"
-                }
-            }
-        },
-        "models.IIIFResourceV2": {
-            "type": "object",
-            "properties": {
-                "@id": {
-                    "type": "string"
-                },
-                "@type": {
-                    "type": "string"
-                },
-                "format": {
-                    "type": "string"
-                },
-                "height": {
-                    "type": "integer"
-                },
-                "service": {
-                    "$ref": "#/definitions/models.IIIFServiceV2"
-                },
-                "width": {
-                    "type": "integer"
-                }
-            }
-        },
-        "models.IIIFSequenceV2": {
-            "type": "object",
-            "properties": {
-                "@id": {
-                    "type": "string"
-                },
-                "@type": {
-                    "type": "string"
-                },
-                "canvases": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/models.IIIFCanvasV2"
-                    }
-                },
-                "label": {
-                    "type": "string"
-                },
-                "viewingHint": {
-                    "type": "string"
-                }
-            }
-        },
         "models.IIIFService": {
             "type": "object",
             "properties": {
@@ -2403,23 +1996,6 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "type": {
-                    "type": "string"
-                }
-            }
-        },
-        "models.IIIFServiceV2": {
-            "type": "object",
-            "properties": {
-                "@context": {
-                    "type": "string"
-                },
-                "@id": {
-                    "type": "string"
-                },
-                "profile": {
-                    "type": "string"
-                },
-                "protocol": {
                     "type": "string"
                 }
             }
@@ -2755,12 +2331,12 @@ const docTemplate = `{
 
 // SwaggerInfo holds exported Swagger Info so clients can modify it
 var SwaggerInfo = &swag.Spec{
-	Version:          "2.1",
+	Version:          "1.0",
 	Host:             "",
 	BasePath:         "/",
 	Schemes:          []string{},
 	Title:            "IIIF PDF Server API",
-	Description:      "API para conversion de PDF, IIIF Presentation v2 (con v3 compatible), IIIF Image API, administracion y migracion. Las rutas recomendadas usan /api/v1 y los endpoints legacy se mantienen por compatibilidad temporal.",
+	Description:      "API publica unificada: gestion documental v1 e interoperabilidad IIIF Image/Presentation API 3. Las rutas heredadas permanecen operativas pero no se anuncian en esta documentacion.",
 	InfoInstanceName: "swagger",
 	SwaggerTemplate:  docTemplate,
 	LeftDelim:        "{{",

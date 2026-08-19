@@ -11,7 +11,7 @@ export function ManifestDialog({ document, onClose, onOpen = (url) => window.ope
   const submit = () => {
     try {
       const query = mode === "selected" ? `?pages=${encodeURIComponent(normalizePageSelection(pages, document.totalPages))}` : "";
-      onOpen(`/api/iiif/${encodeURIComponent(document.id)}/manifest${query}`);
+      onOpen(`/api/v1/iiif/${encodeURIComponent(document.id)}/manifest${query}`);
       onClose();
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Selección inválida.");

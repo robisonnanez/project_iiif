@@ -9,7 +9,7 @@ export const sampleConfig: AppConfig = {
     postgres: { host: "postgres", port: "5432", user: "app", password: "", database: "project_iiif", sslmode: "disable", schema: "public" },
     mongodb: { host: "mongodb", port: "27017", user: "app", password: "********", password_configured: true, database: "project_iiif", auth_source: "admin", direct_connection: true, server_selection_timeout_ms: 2000 },
   },
-  frontend: { enabled: true, path: "./frontend", require_auth: false, username: "admin", password: "" },
+  frontend: { enabled: true, path: "./frontend", require_auth: false, username: "admin", password: "", menu_orientation: "horizontal" },
   binary_storage: { mode: "local", temp_path: "./data/temp" },
   s3: { filesystem_disk: "local", access_key_id: "", secret_access_key: "", region: "us-east-1", bucket: "project-iiif", endpoint: "http://rustfs:9000", use_path_style_endpoint: true },
   iiif: { base_url: "http://localhost:8080", api_version: "3", max_width: 2048, max_height: 2048, cache: true, cache_ttl: 3600 },

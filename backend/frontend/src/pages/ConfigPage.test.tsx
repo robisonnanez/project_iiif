@@ -30,6 +30,15 @@ it("presenta los defaults de conversión", () => {
   expect(screen.getByLabelText("DPI")).toHaveValue(150);
 });
 
+it("permite configurar el menú vertical", async () => {
+  const user = userEvent.setup();
+  const save = vi.spyOn(api, "saveConfig").mockResolvedValueOnce({ message: "ok" });
+  render(<ConfigPage initial={structuredClone(sampleConfig)} onSaved={() => undefined} />);
+  await user.selectOptions(screen.getByLabelText("Orientación del menú"), "vertical");
+  await user.click(screen.getByRole("button", { name: "Guardar cambios" }));
+  expect(save).toHaveBeenCalledWith(expect.objectContaining({ frontend: expect.objectContaining({ menu_orientation: "vertical" }) }));
+});
+
 it("muestra y permite editar OCR y los orígenes CORS", async () => {
   const user = userEvent.setup();
   const save = vi.spyOn(api, "saveConfig").mockResolvedValueOnce({ message: "ok" });

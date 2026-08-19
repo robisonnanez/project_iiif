@@ -3,12 +3,17 @@ package handlers
 import (
 	"bytes"
 	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -122,6 +127,140 @@ func (h *AdminHandler) GetProjects(c *gin.Context) {
 		"allow_dynamic_tenants": h.config.Projects.AllowDynamicTenants,
 		"items":                 h.config.Projects.Items,
 	})
+}
+
+// SyncProjectTenants godoc
+// @Summary Sincronizar tenants de un proyecto
+// @Description Consulta el endpoint configurado para el proyecto, normaliza la lista y la persiste en config.yaml.
+// @Tags Admin
+// @Security SessionCookie
+// @Produce json
+// @Param key path string true "Clave del proyecto"
+// @Success 200 {object} config.ProjectConfig
+// @Failure 400 {object} errorResponse
+// @Failure 404 {object} errorResponse
+// @Failure 502 {object} errorResponse
+// @Router /api/v1/admin/projects/{key}/sync-tenants [post]
+func (h *AdminHandler) SyncProjectTenants(c *gin.Context) {
+	key := strings.TrimSpace(c.Param("key"))
+	index := -1
+	for candidate := range h.config.Projects.Items {
+		if strings.EqualFold(h.config.Projects.Items[candidate].Key, key) {
+			index = candidate
+			break
+		}
+	}
+	if index < 0 {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Proyecto no encontrado"})
+		return
+	}
+	endpoint := strings.TrimSpace(h.config.Projects.Items[index].TenantsEndpoint)
+	parsed, err := url.Parse(endpoint)
+	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Configura una URL http/https válida para consultar tenants"})
+		return
+	}
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 12*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	req.Header.Set("Accept", "application/json")
+	client := &http.Client{Timeout: 12 * time.Second, CheckRedirect: func(next *http.Request, via []*http.Request) error {
+		if next.URL.Scheme != "http" && next.URL.Scheme != "https" {
+			return errors.New("redirección no permitida")
+		}
+		if len(via) >= 5 {
+			return errors.New("demasiadas redirecciones")
+		}
+		return nil
+	}}
+	response, err := client.Do(req)
+	if err != nil {
+		c.JSON(http.StatusBadGateway, gin.H{"error": "No se pudo consultar el endpoint de tenants: " + err.Error()})
+		return
+	}
+	defer response.Body.Close()
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		c.JSON(http.StatusBadGateway, gin.H{"error": fmt.Sprintf("El endpoint de tenants respondió HTTP %d", response.StatusCode)})
+		return
+	}
+	data, err := io.ReadAll(io.LimitReader(response.Body, 2<<20))
+	if err != nil {
+		c.JSON(http.StatusBadGateway, gin.H{"error": "No se pudo leer la respuesta de tenants"})
+		return
+	}
+	var payload any
+	if err := json.Unmarshal(data, &payload); err != nil {
+		c.JSON(http.StatusBadGateway, gin.H{"error": "El endpoint de tenants no devolvió JSON válido"})
+		return
+	}
+	tenants := extractTenantNames(payload)
+	if len(tenants) == 0 {
+		c.JSON(http.StatusBadGateway, gin.H{"error": "La respuesta no contiene tenants válidos"})
+		return
+	}
+	h.config.Projects.Items[index].Tenants = tenants
+	h.config.Projects.Items[index].Multitenant = true
+	configPath := h.config.SourcePath
+	if configPath == "" {
+		configPath = "config.yaml"
+	}
+	if err := config.Save(configPath, h.config); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "No se pudo guardar config.yaml: " + err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, h.config.Projects.Items[index])
+}
+
+func extractTenantNames(payload any) []string {
+	values := make([]string, 0)
+	var visit func(any)
+	visit = func(value any) {
+		switch current := value.(type) {
+		case string:
+			values = append(values, current)
+		case []any:
+			for _, item := range current {
+				visit(item)
+			}
+		case map[string]any:
+			for _, key := range []string{"tenants", "data", "items", "results"} {
+				if nested, ok := current[key]; ok {
+					visit(nested)
+					return
+				}
+			}
+			for _, key := range []string{"key", "id", "slug", "code", "name"} {
+				if text, ok := current[key].(string); ok {
+					values = append(values, text)
+					return
+				}
+			}
+		}
+	}
+	visit(payload)
+	seen := map[string]struct{}{}
+	result := make([]string, 0, len(values))
+	for _, raw := range values {
+		value := strings.TrimSpace(raw)
+		if !validScopeKey(value) {
+			continue
+		}
+		key := strings.ToLower(value)
+		if _, exists := seen[key]; exists {
+			continue
+		}
+		seen[key] = struct{}{}
+		result = append(result, value)
+		if len(result) == 500 {
+			break
+		}
+	}
+	sort.Strings(result)
+	return result
 }
 
 // RestartService godoc
@@ -569,11 +708,12 @@ func (h *AdminHandler) sanitizedConfig() gin.H {
 			},
 		},
 		"frontend": gin.H{
-			"enabled":      h.config.Frontend.Enabled,
-			"path":         h.config.Frontend.Path,
-			"require_auth": h.config.Frontend.RequireAuth,
-			"username":     h.config.Frontend.Username,
-			"password":     maskedSecret(h.config.Frontend.Password),
+			"enabled":          h.config.Frontend.Enabled,
+			"path":             h.config.Frontend.Path,
+			"require_auth":     h.config.Frontend.RequireAuth,
+			"username":         h.config.Frontend.Username,
+			"password":         maskedSecret(h.config.Frontend.Password),
+			"menu_orientation": h.config.Frontend.MenuOrientation,
 		},
 		"binary_storage": gin.H{
 			"mode":      h.config.BinaryStorage.Mode,
@@ -680,11 +820,12 @@ type editableConfigPayload struct {
 		} `json:"mongodb"`
 	} `json:"database"`
 	Frontend struct {
-		Enabled     bool   `json:"enabled"`
-		Path        string `json:"path"`
-		RequireAuth bool   `json:"require_auth"`
-		Username    string `json:"username"`
-		Password    string `json:"password"`
+		Enabled         bool   `json:"enabled"`
+		Path            string `json:"path"`
+		RequireAuth     bool   `json:"require_auth"`
+		Username        string `json:"username"`
+		Password        string `json:"password"`
+		MenuOrientation string `json:"menu_orientation"`
 	} `json:"frontend"`
 	BinaryStorage struct {
 		Mode     string `json:"mode"`
@@ -885,6 +1026,10 @@ func applyEditableConfig(next, current *config.Config, payload editableConfigPay
 	next.Frontend.RequireAuth = payload.Frontend.RequireAuth
 	next.Frontend.Username = payload.Frontend.Username
 	next.Frontend.Password = secretOrCurrent(payload.Frontend.Password, current.Frontend.Password)
+	next.Frontend.MenuOrientation = payload.Frontend.MenuOrientation
+	if next.Frontend.MenuOrientation != "vertical" {
+		next.Frontend.MenuOrientation = "horizontal"
+	}
 	next.BinaryStorage.Mode = payload.BinaryStorage.Mode
 	next.BinaryStorage.TempPath = payload.BinaryStorage.TempPath
 	next.FilesystemDisk = payload.S3.FilesystemDisk
@@ -931,7 +1076,57 @@ func applyEditableConfig(next, current *config.Config, payload editableConfigPay
 	if len(next.Projects.Items) == 0 {
 		next.Projects.Items = []config.ProjectConfig{{Key: "default", Name: "Proyecto por defecto", Multitenant: false, Tenants: []string{}}}
 	}
+	if err := validateProjects(next.Projects.Items, next.Projects.DefaultProject); err != nil {
+		return err
+	}
 	return nil
+}
+
+func validateProjects(items []config.ProjectConfig, defaultProject string) error {
+	seen := map[string]struct{}{}
+	defaultFound := false
+	for _, item := range items {
+		if !validScopeKey(item.Key) {
+			return &configError{"projects.items.key solo admite letras, números, punto, guion y guion bajo"}
+		}
+		key := strings.ToLower(item.Key)
+		if _, exists := seen[key]; exists {
+			return &configError{"projects.items contiene claves duplicadas"}
+		}
+		seen[key] = struct{}{}
+		if strings.EqualFold(item.Key, defaultProject) {
+			defaultFound = true
+		}
+		for _, tenant := range item.Tenants {
+			if !validScopeKey(tenant) {
+				return &configError{"projects.items.tenants contiene un identificador inválido"}
+			}
+		}
+		if endpoint := strings.TrimSpace(item.TenantsEndpoint); endpoint != "" {
+			parsed, err := url.Parse(endpoint)
+			if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" {
+				return &configError{"projects.items.tenants_endpoint debe ser una URL http/https válida"}
+			}
+		}
+	}
+	if !defaultFound {
+		return &configError{"projects.default_project debe existir en projects.items"}
+	}
+	return nil
+}
+
+func validScopeKey(value string) bool {
+	value = strings.TrimSpace(value)
+	if value == "" || len(value) > 128 || value == "." || value == ".." {
+		return false
+	}
+	for _, char := range value {
+		if (char >= 'a' && char <= 'z') || (char >= 'A' && char <= 'Z') || (char >= '0' && char <= '9') || char == '-' || char == '_' || char == '.' {
+			continue
+		}
+		return false
+	}
+	return true
 }
 
 func validatePort(value, field string) error {

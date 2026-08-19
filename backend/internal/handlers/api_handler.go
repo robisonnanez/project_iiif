@@ -307,18 +307,8 @@ func (h *APIHandler) UpdateProperties(c *gin.Context) {
 
 // IIIF Handlers - Formato Cantaloupe
 
-// GetManifest godoc
-// @Summary Obtener manifiesto IIIF Presentation API v2
-// @Description Devuelve un manifiesto v2 con secuencia, canvases y rangos jerarquicos derivados de los marcadores PDF. El parametro pages permite seleccionar paginas y poda rangos vacios.
-// @Tags IIIF
-// @Produce json
-// @Param id path string true "ID del documento"
-// @Param pages query string false "Paginas o rangos, por ejemplo 1-3,5"
-// @Success 200 {object} models.IIIFManifestV2
-// @Failure 400 {object} errorResponse
-// @Failure 404 {object} errorResponse
-// @Router /api/iiif/{id}/manifest [get]
-// @Router /api/v1/iiif/{id}/manifest [get]
+// GetManifest conserva el manifiesto Presentation API v2 para clientes heredados.
+// No se publica en Swagger: la API documentada usa exclusivamente IIIF v3.
 func (h *APIHandler) GetManifest(c *gin.Context) {
 	id := c.Param("id")
 	manifest, err := h.iiifService.GetManifest(id, c.Query("pages"))
@@ -346,8 +336,7 @@ func (h *APIHandler) GetManifest(c *gin.Context) {
 // @Success 200 {object} models.IIIFManifest
 // @Failure 400 {object} errorResponse
 // @Failure 404 {object} errorResponse
-// @Router /api/iiif/v3/{id}/manifest [get]
-// @Router /api/v1/iiif/{id}/manifest/v3 [get]
+// @Router /api/v1/iiif/{id}/manifest [get]
 func (h *APIHandler) GetManifestV3(c *gin.Context) {
 	id := c.Param("id")
 	manifest, err := h.iiifService.GetManifestV3(id, c.Query("pages"))
@@ -363,15 +352,8 @@ func (h *APIHandler) GetManifestV3(c *gin.Context) {
 	c.JSON(http.StatusOK, manifest)
 }
 
-// GetImageInfoV2 godoc
-// @Summary Obtener info IIIF Image API v2
-// @Tags IIIF
-// @Produce json
-// @Param identifier path string true "Identificador IIIF, por ejemplo documento_page_1"
-// @Success 200 {object} models.IIIFImageInfoV2
-// @Failure 400 {object} errorResponse
-// @Failure 404 {object} errorResponse
-// @Router /iiif/2/{identifier}/info.json [get]
+// GetImageInfoV2 conserva Image API v2 para clientes heredados.
+// No se publica en Swagger: la API documentada usa exclusivamente IIIF v3.
 func (h *APIHandler) GetImageInfoV2(c *gin.Context) {
 	docID, page, err := h.parseIdentifier(c.Param("identifier"))
 	if err != nil {
@@ -429,7 +411,6 @@ func (h *APIHandler) GetImageInfo(c *gin.Context) {
 // @Success 200 {file} file
 // @Failure 400 {object} errorResponse
 // @Failure 404 {object} errorResponse
-// @Router /iiif/2/{identifier}/{region}/{size}/{rotation}/{quality_format} [get]
 // @Router /iiif/3/{identifier}/{region}/{size}/{rotation}/{quality_format} [get]
 func (h *APIHandler) GetImage(c *gin.Context) {
 	identifier := c.Param("identifier")

@@ -20,8 +20,8 @@ import (
 )
 
 // @title IIIF PDF Server API
-// @version 2.1
-// @description API para conversion de PDF, IIIF Presentation v2 (con v3 compatible), IIIF Image API, administracion y migracion. Las rutas recomendadas usan /api/v1 y los endpoints legacy se mantienen por compatibilidad temporal.
+// @version 1.0
+// @description API publica unificada: gestion documental v1 e interoperabilidad IIIF Image/Presentation API 3. Las rutas heredadas permanecen operativas pero no se anuncian en esta documentacion.
 // @BasePath /
 // @securityDefinitions.apikey SessionCookie
 // @in cookie
@@ -105,6 +105,21 @@ func main() {
 	router.POST("/auth/logout", authHandler.Logout)
 	router.GET("/auth/me", authHandler.Me)
 	router.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))
+	router.NoRoute(func(c *gin.Context) {
+		path := c.Request.URL.Path
+		if strings.HasPrefix(path, "/api/") || strings.HasPrefix(path, "/auth/") || strings.HasPrefix(path, "/iiif/") {
+			c.JSON(404, gin.H{"error": "Ruta no encontrada", "path": path})
+			return
+		}
+		welcomeHandler.ErrorPage(c, 404, "Página no encontrada", "La dirección solicitada no existe o fue movida.")
+	})
+	router.NoMethod(func(c *gin.Context) {
+		if strings.HasPrefix(c.Request.URL.Path, "/api/") || strings.HasPrefix(c.Request.URL.Path, "/auth/") || strings.HasPrefix(c.Request.URL.Path, "/iiif/") {
+			c.JSON(405, gin.H{"error": "Método no permitido"})
+			return
+		}
+		welcomeHandler.ErrorPage(c, 405, "Acción no permitida", "El método utilizado no está disponible para esta dirección.")
+	})
 
 	if cfg.Frontend.Enabled {
 		dashboard := router.Group("/dashboard")
@@ -119,6 +134,7 @@ func main() {
 			dashboard.GET("/iiif", frontendHandler.Dashboard)
 			dashboard.GET("/configuracion", frontendHandler.Dashboard)
 			dashboard.GET("/migracion", frontendHandler.Dashboard)
+			dashboard.GET("/proyectos", frontendHandler.Dashboard)
 			dashboard.GET("/ocr", frontendHandler.Dashboard)
 			dashboard.Static("/assets", filepath.Join(cfg.Frontend.Path, "dist", "assets"))
 		}
@@ -129,6 +145,7 @@ func main() {
 			group.PUT("/config", adminHandler.UpdateConfig)
 			group.POST("/service/restart", adminHandler.RestartService)
 			group.GET("/projects", adminHandler.GetProjects)
+			group.POST("/projects/:key/sync-tenants", adminHandler.SyncProjectTenants)
 			group.GET("/documents/:id/images", adminHandler.GetDocumentImages)
 			group.GET("/migrations/sources/local/browse", adminHandler.BrowseLocalMigrationSource)
 			group.POST("/migrations/local-to-db/start", adminHandler.StartLocalToDBMigration)
@@ -178,7 +195,7 @@ func main() {
 	apiV1OCR := router.Group("/api/v1/ocr")
 	apiV1OCR.GET("/search", ocrHandler.Search)
 	apiV1IIIF := router.Group("/api/v1/iiif")
-	apiV1IIIF.GET("/:id/manifest", apiHandler.GetManifest)
+	apiV1IIIF.GET("/:id/manifest", apiHandler.GetManifestV3)
 	apiV1IIIF.GET("/:id/manifest/v3", apiHandler.GetManifestV3)
 
 	legacyAPI := router.Group("/api")

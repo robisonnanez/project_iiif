@@ -1,6 +1,11 @@
 package handlers
 
-import "testing"
+import (
+	"reflect"
+	"testing"
+
+	"iiif-pdf-server/internal/config"
+)
 
 func TestSecretOrCurrentPreservesExistingSecret(t *testing.T) {
 	current := "secret"
@@ -45,5 +50,27 @@ func TestValidateOCRLanguages(t *testing.T) {
 	}
 	if err := validateOCRLanguages([]string{"deu"}, []string{"deu"}); err == nil {
 		t.Fatal("expected unsupported language to fail")
+	}
+}
+
+func TestExtractTenantNamesSupportsCommonResponses(t *testing.T) {
+	payload := map[string]any{"data": []any{map[string]any{"slug": "sunat"}, map[string]any{"id": "demo"}, "uniguajira", "../invalid", "SUNAT"}}
+	got := extractTenantNames(payload)
+	want := []string{"demo", "sunat", "uniguajira"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("extractTenantNames() = %#v, want %#v", got, want)
+	}
+}
+
+func TestValidateProjectsRequiresSafeUniqueKeysAndDefault(t *testing.T) {
+	valid := []config.ProjectConfig{{Key: "default", Name: "Default"}, {Key: "metavisor", Name: "Metavisor", Multitenant: true, Tenants: []string{"sunat"}, TenantsEndpoint: "https://example.test/tenants"}}
+	if err := validateProjects(valid, "default"); err != nil {
+		t.Fatalf("validateProjects() error = %v", err)
+	}
+	if err := validateProjects([]config.ProjectConfig{{Key: "../escape"}}, "../escape"); err == nil {
+		t.Fatal("expected unsafe key to fail")
+	}
+	if err := validateProjects(valid, "missing"); err == nil {
+		t.Fatal("expected missing default to fail")
 	}
 }

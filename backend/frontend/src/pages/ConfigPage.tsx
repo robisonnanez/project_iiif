@@ -176,6 +176,10 @@ export function ConfigPage({ initial, onSaved }: { initial: AppConfig; onSaved: 
         </div>
         <FormField label="URLs permitidas por CORS" help="Una URL por línea. Se aceptan puertos y subdominios wildcard, por ejemplo https://*.dominio.com.">{(id) => <textarea id={id} className="input cors-textarea" rows={6} value={corsOrigins} onChange={(event) => setCorsOrigins(event.target.value)} placeholder={"https://app.ejemplo.com\nhttp://localhost:5173"} />}</FormField>
       </Card>
+
+      <Card><div className="section-heading"><span className="step">6</span><div><h2>Apariencia del panel</h2><p>Elige cómo se presenta la navegación principal en pantallas de escritorio.</p></div></div>
+        <FormField label="Orientación del menú" help="En móviles siempre se utiliza el menú compacto.">{(id) => <Select id={id} value={config.frontend.menu_orientation} onChange={(event) => setConfig({ ...config, frontend: { ...config.frontend, menu_orientation: event.target.value as AppConfig["frontend"]["menu_orientation"] } })}><option value="horizontal">Horizontal superior</option><option value="vertical">Vertical lateral</option></Select>}</FormField>
+      </Card>
     </div>
     {restartOpen && <Modal title="Reiniciar servicio" description="La configuración ya fue guardada. Reinicia el servicio para aplicar los cambios." onClose={closeRestart}>
       <form onSubmit={(event) => { event.preventDefault(); void restart(); }}>

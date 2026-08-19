@@ -132,6 +132,7 @@ frontend:
   require_auth: true
   username: "admin"
   password: "CAMBIAR_PASSWORD"
+  menu_orientation: "horizontal" # horizontal | vertical
 
 projects:
   enabled: true
@@ -146,6 +147,7 @@ projects:
     - key: "metavisor"
       name: "Metavisor"
       multitenant: true
+      tenants_endpoint: "https://api.ejemplo.com/tenants"
       tenants:
         - "sunat"
         - "demo"
