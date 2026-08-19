@@ -24,6 +24,10 @@ const nav: Array<{ view: View; label: string; path: string }> = [
   { view: "config", label: "Configuración", path: "/dashboard/configuracion" },
 ];
 
+export const browserNavigation = {
+  toHome: () => window.location.replace("/"),
+};
+
 function viewFromPath(): View {
   if (location.pathname === "/dashboard/imagenes") return "iiif";
   return nav.find((item) => location.pathname === item.path)?.view ?? "dashboard";
@@ -85,6 +89,10 @@ export default function App() {
   const navigate = (item: (typeof nav)[number]) => {
     history.pushState({}, "", item.path); setView(item.view); setMobileOpen(false);
   };
+  const logout = async () => {
+    try { await api.logout(); }
+    finally { browserNavigation.toHome(); }
+  };
   const completed = documents.filter((document) => document.status === "completed").length;
 
   const menuOrientation = config?.frontend.menu_orientation === "vertical" ? "vertical" : "horizontal";
@@ -96,7 +104,7 @@ export default function App() {
       <nav id="primary-navigation" className={mobileOpen ? "primary-nav open" : "primary-nav"} aria-label="Navegación principal">
         {nav.map((item) => <button key={item.view} className={view === item.view ? "nav-link active" : "nav-link"} aria-current={view === item.view ? "page" : undefined} onClick={() => navigate(item)}>{item.label}</button>)}
       </nav>
-      <div className="topbar-actions"><a className="button button-ghost" href="/swagger/index.html">API</a><Badge tone={error ? "danger" : "success"}>{error ? "Atención" : "Sistema activo"}</Badge><Button variant="ghost" onClick={async () => { await api.logout(); location.assign("/dashboard"); }}>Salir</Button></div>
+      <div className="topbar-actions"><a className="button button-ghost" href="/swagger/index.html">API</a><Badge tone={error ? "danger" : "success"}>{error ? "Atención" : "Sistema activo"}</Badge><Button variant="ghost" onClick={() => void logout()}>Salir</Button></div>
     </header>
     <main id="main-content" className="main-content">
       {error && <Alert tone="danger">{error}</Alert>}

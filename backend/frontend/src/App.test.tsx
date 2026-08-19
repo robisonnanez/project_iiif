@@ -2,7 +2,7 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { vi } from "vitest";
 import { api } from "./api";
-import App from "./App";
+import App, { browserNavigation } from "./App";
 import { sampleConfig } from "./test/fixtures";
 import type { DocumentRecord } from "./types";
 
@@ -35,4 +35,19 @@ it("confirma y elimina un documento con todos sus archivos", async () => {
   expect(remove).toHaveBeenCalledWith("book-id");
   expect(await screen.findByText("Sin documentos")).toBeInTheDocument();
   expect(screen.getByText(/todos sus archivos fueron eliminados/)).toBeInTheDocument();
+});
+
+it("cierra la sesión y regresa a la portada", async () => {
+  history.replaceState({}, "", "/dashboard/inicio");
+  const user = userEvent.setup();
+  vi.spyOn(api, "documents").mockResolvedValue([]);
+  vi.spyOn(api, "config").mockResolvedValue(structuredClone(sampleConfig));
+  const logout = vi.spyOn(api, "logout").mockResolvedValue();
+  const toHome = vi.spyOn(browserNavigation, "toHome").mockImplementation(() => undefined);
+  render(<App />);
+
+  await user.click(await screen.findByRole("button", { name: "Salir" }));
+
+  expect(logout).toHaveBeenCalledOnce();
+  expect(toHome).toHaveBeenCalledOnce();
 });
