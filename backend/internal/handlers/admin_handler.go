@@ -125,7 +125,7 @@ func (h *AdminHandler) GetProjects(c *gin.Context) {
 		"default_project":       h.config.Projects.DefaultProject,
 		"require_project":       h.config.Projects.RequireProject,
 		"allow_dynamic_tenants": h.config.Projects.AllowDynamicTenants,
-		"items":                 h.config.Projects.Items,
+		"items":                 sanitizedProjects(h.config.Projects.Items),
 	})
 }
 
@@ -154,7 +154,8 @@ func (h *AdminHandler) SyncProjectTenants(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Proyecto no encontrado"})
 		return
 	}
-	endpoint := strings.TrimSpace(h.config.Projects.Items[index].TenantsEndpoint)
+	project := h.config.Projects.Items[index]
+	endpoint := strings.TrimSpace(project.TenantsEndpoint)
 	parsed, err := url.Parse(endpoint)
 	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Configura una URL http/https válida para consultar tenants"})
@@ -168,12 +169,19 @@ func (h *AdminHandler) SyncProjectTenants(c *gin.Context) {
 		return
 	}
 	req.Header.Set("Accept", "application/json")
+	if err := applyTenantsAuthentication(req, project); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
 	client := &http.Client{Timeout: 12 * time.Second, CheckRedirect: func(next *http.Request, via []*http.Request) error {
 		if next.URL.Scheme != "http" && next.URL.Scheme != "https" {
 			return errors.New("redirección no permitida")
 		}
 		if len(via) >= 5 {
 			return errors.New("demasiadas redirecciones")
+		}
+		if !strings.EqualFold(next.URL.Host, parsed.Host) {
+			return errors.New("redirección a otro host no permitida para proteger las credenciales")
 		}
 		return nil
 	}}
@@ -212,7 +220,33 @@ func (h *AdminHandler) SyncProjectTenants(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "No se pudo guardar config.yaml: " + err.Error()})
 		return
 	}
-	c.JSON(http.StatusOK, h.config.Projects.Items[index])
+	c.JSON(http.StatusOK, sanitizedProject(h.config.Projects.Items[index]))
+}
+
+func applyTenantsAuthentication(req *http.Request, project config.ProjectConfig) error {
+	authType := strings.ToLower(strings.TrimSpace(project.TenantsAuthType))
+	switch authType {
+	case "", "none":
+		return nil
+	case "bearer":
+		if strings.TrimSpace(project.TenantsAuthToken) == "" {
+			return &configError{"Configura el Bearer token del endpoint de tenants"}
+		}
+		req.Header.Set("Authorization", "Bearer "+project.TenantsAuthToken)
+		return nil
+	case "api_key":
+		header := strings.TrimSpace(project.TenantsAuthHeader)
+		if !validHTTPHeaderName(header) {
+			return &configError{"Configura un nombre de cabecera HTTP válido para la API key"}
+		}
+		if strings.TrimSpace(project.TenantsAuthToken) == "" {
+			return &configError{"Configura la API key del endpoint de tenants"}
+		}
+		req.Header.Set(header, project.TenantsAuthToken)
+		return nil
+	default:
+		return &configError{"Tipo de autenticación del endpoint de tenants no válido"}
+	}
 }
 
 func extractTenantNames(payload any) []string {
@@ -735,7 +769,7 @@ func (h *AdminHandler) sanitizedConfig() gin.H {
 			"default_project":       h.config.Projects.DefaultProject,
 			"require_project":       h.config.Projects.RequireProject,
 			"allow_dynamic_tenants": h.config.Projects.AllowDynamicTenants,
-			"items":                 h.config.Projects.Items,
+			"items":                 sanitizedProjects(h.config.Projects.Items),
 		},
 		"iiif": gin.H{
 			"base_url":    h.config.IIIF.BaseURL,
@@ -767,6 +801,20 @@ func maskedSecret(value string) string {
 		return ""
 	}
 	return "********"
+}
+
+func sanitizedProject(project config.ProjectConfig) config.ProjectConfig {
+	project.TenantsTokenConfigured = project.TenantsAuthToken != ""
+	project.TenantsAuthToken = maskedSecret(project.TenantsAuthToken)
+	return project
+}
+
+func sanitizedProjects(projects []config.ProjectConfig) []config.ProjectConfig {
+	result := make([]config.ProjectConfig, len(projects))
+	for index, project := range projects {
+		result[index] = sanitizedProject(project)
+	}
+	return result
 }
 
 type editableConfigPayload struct {
@@ -1065,7 +1113,7 @@ func applyEditableConfig(next, current *config.Config, payload editableConfigPay
 	next.Projects.DefaultProject = payload.Projects.DefaultProject
 	next.Projects.RequireProject = payload.Projects.RequireProject
 	next.Projects.AllowDynamicTenants = payload.Projects.AllowDynamicTenants
-	next.Projects.Items = payload.Projects.Items
+	next.Projects.Items = mergeProjectSecrets(payload.Projects.Items, current.Projects.Items)
 	next.Security.EnableAuth = payload.Security.EnableAuth
 	next.Security.LogLevel = payload.Security.LogLevel
 	next.Security.CorsOrigins = payload.Security.CorsOrigins
@@ -1108,11 +1156,71 @@ func validateProjects(items []config.ProjectConfig, defaultProject string) error
 				return &configError{"projects.items.tenants_endpoint debe ser una URL http/https válida"}
 			}
 		}
+		authType := strings.ToLower(strings.TrimSpace(item.TenantsAuthType))
+		if !allowedValue(authType, "", "none", "bearer", "api_key") {
+			return &configError{"projects.items.tenants_auth_type debe ser none, bearer o api_key"}
+		}
+		if authType == "bearer" && strings.TrimSpace(item.TenantsAuthToken) == "" {
+			return &configError{"projects.items necesita un Bearer token para sincronizar tenants"}
+		}
+		if authType == "api_key" {
+			if !validHTTPHeaderName(item.TenantsAuthHeader) {
+				return &configError{"projects.items.tenants_auth_header debe ser una cabecera HTTP válida"}
+			}
+			if strings.TrimSpace(item.TenantsAuthToken) == "" {
+				return &configError{"projects.items necesita una API key para sincronizar tenants"}
+			}
+		}
 	}
 	if !defaultFound {
 		return &configError{"projects.default_project debe existir en projects.items"}
 	}
 	return nil
+}
+
+func mergeProjectSecrets(items, current []config.ProjectConfig) []config.ProjectConfig {
+	result := make([]config.ProjectConfig, len(items))
+	currentByKey := make(map[string]config.ProjectConfig, len(current))
+	for _, project := range current {
+		currentByKey[strings.ToLower(strings.TrimSpace(project.Key))] = project
+	}
+	for index, project := range items {
+		authType := strings.ToLower(strings.TrimSpace(project.TenantsAuthType))
+		if authType == "" {
+			authType = "none"
+		}
+		project.TenantsAuthType = authType
+		project.TenantsAuthHeader = strings.TrimSpace(project.TenantsAuthHeader)
+		if authType == "none" {
+			project.TenantsAuthHeader = ""
+			project.TenantsAuthToken = ""
+		} else {
+			previous := currentByKey[strings.ToLower(strings.TrimSpace(project.Key))]
+			project.TenantsAuthToken = secretOrCurrent(project.TenantsAuthToken, previous.TenantsAuthToken)
+			if authType == "bearer" {
+				project.TenantsAuthHeader = "Authorization"
+			} else if project.TenantsAuthHeader == "" {
+				project.TenantsAuthHeader = "X-API-Key"
+			}
+		}
+		project.TenantsTokenConfigured = false
+		result[index] = project
+	}
+	return result
+}
+
+func validHTTPHeaderName(value string) bool {
+	value = strings.TrimSpace(value)
+	if value == "" || len(value) > 128 {
+		return false
+	}
+	for _, char := range value {
+		if (char >= 'a' && char <= 'z') || (char >= 'A' && char <= 'Z') || (char >= '0' && char <= '9') || strings.ContainsRune("!#$%&'*+-.^_`|~", char) {
+			continue
+		}
+		return false
+	}
+	return true
 }
 
 func validScopeKey(value string) bool {

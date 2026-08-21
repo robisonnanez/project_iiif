@@ -19,7 +19,7 @@ export function ProjectsPage({ config, onSaved, notify }: { config: AppConfig; o
     const used = new Set(settings.items.map((item) => item.key));
     let suffix = settings.items.length + 1;
     while (used.has(`proyecto-${suffix}`)) suffix += 1;
-    setSettings((current) => ({ ...current, enabled: true, items: [...current.items, { key: `proyecto-${suffix}`, name: `Proyecto ${suffix}`, multitenant: false, tenants: [], tenants_endpoint: "" }] }));
+    setSettings((current) => ({ ...current, enabled: true, items: [...current.items, { key: `proyecto-${suffix}`, name: `Proyecto ${suffix}`, multitenant: false, tenants: [], tenants_endpoint: "", tenants_auth_type: "none", tenants_auth_header: "", tenants_auth_token: "" }] }));
   };
   const removeProject = (index: number) => setSettings((current) => {
     if (current.items.length === 1) return current;
@@ -37,7 +37,7 @@ export function ProjectsPage({ config, onSaved, notify }: { config: AppConfig; o
   const persist = async (successMessage = true) => {
     const validation = validate();
     if (validation) throw new Error(validation);
-    const projects = { ...settings, items: settings.items.map((item) => ({ ...item, key: item.key.trim(), name: item.name.trim() || item.key.trim(), tenants: [...new Set(item.tenants.map((tenant) => tenant.trim()).filter(Boolean))], tenants_endpoint: item.tenants_endpoint?.trim() || "" })) };
+    const projects = { ...settings, items: settings.items.map((item) => ({ ...item, key: item.key.trim(), name: item.name.trim() || item.key.trim(), tenants: [...new Set(item.tenants.map((tenant) => tenant.trim()).filter(Boolean))], tenants_endpoint: item.tenants_endpoint?.trim() || "", tenants_auth_type: item.tenants_auth_type || "none", tenants_auth_header: item.tenants_auth_header?.trim() || "", tenants_auth_token: item.tenants_auth_token || "" })) };
     const payload = { ...config, projects };
     await api.saveConfig(payload);
     setSettings(projects); onSaved(payload);
@@ -89,6 +89,11 @@ export function ProjectsPage({ config, onSaved, notify }: { config: AppConfig; o
         <Checkbox label="Proyecto multitenant" checked={project.multitenant} onChange={(event) => updateProject(index, { multitenant: event.target.checked, tenants: event.target.checked ? project.tenants : [] })} />
         {project.multitenant && <>
           <FormField label="Endpoint de tenants" help='Acepta JSON como ["tenant-a"] o {"tenants":[...]}.'>{(id) => <Input id={id} type="url" value={project.tenants_endpoint || ""} onChange={(event) => updateProject(index, { tenants_endpoint: event.target.value })} placeholder="https://api.ejemplo.com/tenants" />}</FormField>
+          <div className="form-grid two-columns tenant-auth-grid">
+            <FormField label="Autenticación del endpoint" help="Selecciona cómo autoriza la API la consulta de tenants.">{(id) => <Select id={id} value={project.tenants_auth_type || "none"} onChange={(event) => updateProject(index, { tenants_auth_type: event.target.value as ProjectConfig["tenants_auth_type"], tenants_auth_header: event.target.value === "bearer" ? "Authorization" : event.target.value === "api_key" ? (project.tenants_auth_header || "X-API-Key") : "", tenants_auth_token: event.target.value === "none" ? "" : project.tenants_auth_token })}><option value="none">Sin autenticación</option><option value="bearer">Bearer token</option><option value="api_key">API key en cabecera</option></Select>}</FormField>
+            {project.tenants_auth_type === "api_key" && <FormField label="Nombre de la cabecera" help="Por ejemplo: X-API-Key o Authorization.">{(id) => <Input id={id} value={project.tenants_auth_header || "X-API-Key"} onChange={(event) => updateProject(index, { tenants_auth_header: event.target.value })} placeholder="X-API-Key" />}</FormField>}
+            {(project.tenants_auth_type === "bearer" || project.tenants_auth_type === "api_key") && <FormField label={project.tenants_auth_type === "bearer" ? "Bearer token" : "API key"} help={project.tenants_token_configured ? "Ya existe un token guardado. Déjalo igual para conservarlo o escribe uno nuevo." : "Se guarda como secreto y nunca se devuelve completo desde la API."}>{(id) => <Input id={id} type="password" autoComplete="new-password" value={project.tenants_auth_token || ""} onChange={(event) => updateProject(index, { tenants_auth_token: event.target.value })} placeholder={project.tenants_token_configured ? "Token configurado" : "Pega aquí el token"} />}</FormField>}
+          </div>
           <div className="tenant-sync-row"><Button variant="secondary" disabled={Boolean(syncing) || !project.tenants_endpoint?.trim()} onClick={() => sync(index)}>{syncing === project.key ? <Spinner label="Consultando endpoint" /> : "Sincronizar tenants"}</Button><span>{project.tenants.length} configurado(s)</span></div>
           <FormField label="Tenants" help="Uno por línea. Puedes editarlos manualmente aunque uses sincronización.">{(id) => <textarea id={id} className="input tenants-textarea" rows={6} value={project.tenants.join("\n")} onChange={(event) => updateProject(index, { tenants: event.target.value.split(/\r?\n|,/).map((tenant) => tenant.trim()).filter(Boolean) })} placeholder={"sunat\ndemo\nuniguajira"} />}</FormField>
         </>}

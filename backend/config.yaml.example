@@ -148,6 +148,8 @@ projects:
       name: "Metavisor"
       multitenant: true
       tenants_endpoint: "https://api.ejemplo.com/tenants"
+      tenants_auth_type: "bearer"
+      tenants_auth_token: "cambia-este-token"
       tenants:
         - "sunat"
         - "demo"

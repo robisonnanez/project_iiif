@@ -176,11 +176,15 @@ type OCRConfig struct {
 }
 
 type ProjectConfig struct {
-	Key             string   `yaml:"key" json:"key"`
-	Name            string   `yaml:"name" json:"name"`
-	Multitenant     bool     `yaml:"multitenant" json:"multitenant"`
-	Tenants         []string `yaml:"tenants" json:"tenants"`
-	TenantsEndpoint string   `yaml:"tenants_endpoint,omitempty" json:"tenants_endpoint,omitempty"`
+	Key                    string   `yaml:"key" json:"key"`
+	Name                   string   `yaml:"name" json:"name"`
+	Multitenant            bool     `yaml:"multitenant" json:"multitenant"`
+	Tenants                []string `yaml:"tenants" json:"tenants"`
+	TenantsEndpoint        string   `yaml:"tenants_endpoint,omitempty" json:"tenants_endpoint,omitempty"`
+	TenantsAuthType        string   `yaml:"tenants_auth_type,omitempty" json:"tenants_auth_type,omitempty"`
+	TenantsAuthHeader      string   `yaml:"tenants_auth_header,omitempty" json:"tenants_auth_header,omitempty"`
+	TenantsAuthToken       string   `yaml:"tenants_auth_token,omitempty" json:"tenants_auth_token,omitempty"`
+	TenantsTokenConfigured bool     `yaml:"-" json:"tenants_token_configured,omitempty"`
 }
 
 func Load(filename string) (*Config, error) {

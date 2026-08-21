@@ -7,6 +7,10 @@ export interface ProjectConfig {
   multitenant: boolean;
   tenants: string[];
   tenants_endpoint?: string;
+  tenants_auth_type?: "none" | "bearer" | "api_key";
+  tenants_auth_header?: string;
+  tenants_auth_token?: string;
+  tenants_token_configured?: boolean;
 }
 
 export interface DocumentRecord {

@@ -1390,8 +1390,20 @@ const docTemplate = `{
                         "type": "string"
                     }
                 },
+                "tenants_auth_header": {
+                    "type": "string"
+                },
+                "tenants_auth_token": {
+                    "type": "string"
+                },
+                "tenants_auth_type": {
+                    "type": "string"
+                },
                 "tenants_endpoint": {
                     "type": "string"
+                },
+                "tenants_token_configured": {
+                    "type": "boolean"
                 }
             }
         },

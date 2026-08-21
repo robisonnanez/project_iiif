@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"net/http"
 	"reflect"
 	"testing"
 
@@ -63,7 +64,7 @@ func TestExtractTenantNamesSupportsCommonResponses(t *testing.T) {
 }
 
 func TestValidateProjectsRequiresSafeUniqueKeysAndDefault(t *testing.T) {
-	valid := []config.ProjectConfig{{Key: "default", Name: "Default"}, {Key: "metavisor", Name: "Metavisor", Multitenant: true, Tenants: []string{"sunat"}, TenantsEndpoint: "https://example.test/tenants"}}
+	valid := []config.ProjectConfig{{Key: "default", Name: "Default"}, {Key: "metavisor", Name: "Metavisor", Multitenant: true, Tenants: []string{"sunat"}, TenantsEndpoint: "https://example.test/tenants", TenantsAuthType: "bearer", TenantsAuthToken: "secret"}}
 	if err := validateProjects(valid, "default"); err != nil {
 		t.Fatalf("validateProjects() error = %v", err)
 	}
@@ -72,5 +73,39 @@ func TestValidateProjectsRequiresSafeUniqueKeysAndDefault(t *testing.T) {
 	}
 	if err := validateProjects(valid, "missing"); err == nil {
 		t.Fatal("expected missing default to fail")
+	}
+	invalidAuth := []config.ProjectConfig{{Key: "default", Name: "Default", TenantsEndpoint: "https://example.test/tenants", TenantsAuthType: "bearer"}}
+	if err := validateProjects(invalidAuth, "default"); err == nil {
+		t.Fatal("expected bearer authentication without token to fail")
+	}
+}
+
+func TestApplyTenantsAuthentication(t *testing.T) {
+	bearerRequest, _ := http.NewRequest(http.MethodGet, "https://example.test/tenants", nil)
+	if err := applyTenantsAuthentication(bearerRequest, config.ProjectConfig{TenantsAuthType: "bearer", TenantsAuthToken: "token-123"}); err != nil {
+		t.Fatalf("apply bearer authentication: %v", err)
+	}
+	if got := bearerRequest.Header.Get("Authorization"); got != "Bearer token-123" {
+		t.Fatalf("Authorization = %q", got)
+	}
+
+	apiKeyRequest, _ := http.NewRequest(http.MethodGet, "https://example.test/tenants", nil)
+	if err := applyTenantsAuthentication(apiKeyRequest, config.ProjectConfig{TenantsAuthType: "api_key", TenantsAuthHeader: "X-Project-Key", TenantsAuthToken: "key-456"}); err != nil {
+		t.Fatalf("apply api key authentication: %v", err)
+	}
+	if got := apiKeyRequest.Header.Get("X-Project-Key"); got != "key-456" {
+		t.Fatalf("X-Project-Key = %q", got)
+	}
+}
+
+func TestProjectTokensAreMaskedAndPreserved(t *testing.T) {
+	current := []config.ProjectConfig{{Key: "metavisor", TenantsAuthType: "bearer", TenantsAuthToken: "real-secret"}}
+	sanitized := sanitizedProjects(current)
+	if sanitized[0].TenantsAuthToken != "********" || !sanitized[0].TenantsTokenConfigured {
+		t.Fatalf("sanitized project leaked or lost token state: %#v", sanitized[0])
+	}
+	merged := mergeProjectSecrets([]config.ProjectConfig{{Key: "metavisor", TenantsAuthType: "bearer", TenantsAuthToken: "********"}}, current)
+	if merged[0].TenantsAuthToken != "real-secret" {
+		t.Fatalf("mergeProjectSecrets() token = %q", merged[0].TenantsAuthToken)
 	}
 }
