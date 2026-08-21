@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"net/http"
+	"os"
 	"path/filepath"
 
 	"iiif-pdf-server/internal/config"
@@ -18,7 +19,12 @@ func NewFrontendHandler(config *config.Config) *FrontendHandler {
 }
 
 func (h *FrontendHandler) Dashboard(c *gin.Context) {
-	c.File(filepath.Join(h.config.Frontend.Path, "index.html"))
+	indexPath := filepath.Join(h.config.Frontend.Path, "dist", "index.html")
+	if _, err := os.Stat(indexPath); err != nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "frontend no compilado; ejecuta npm run build"})
+		return
+	}
+	c.File(indexPath)
 }
 
 func (h *FrontendHandler) Disabled(c *gin.Context) {

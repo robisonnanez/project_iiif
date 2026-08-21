@@ -11,6 +11,7 @@ import (
 	_ "image/jpeg"
 	_ "image/png"
 	"log"
+	"net"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -27,6 +28,7 @@ import (
 	"github.com/google/uuid"
 	"go.mongodb.org/mongo-driver/mongo"
 	"golang.org/x/crypto/ssh"
+	"golang.org/x/crypto/ssh/knownhosts"
 )
 
 type stats struct {
@@ -59,6 +61,7 @@ type sourceConfig struct {
 		User       string
 		Path       string
 		PrivateKey string
+		KnownHosts string
 	}
 }
 
@@ -89,9 +92,13 @@ func newDatabaseStore(cfg *config.Config, engine string) (storage.Storage, error
 func main() {
 	log.SetFlags(0)
 
-	cfg, err := config.Load("config.yaml")
+	configPath := strings.TrimSpace(os.Getenv("CONFIG_PATH"))
+	if configPath == "" {
+		configPath = "config.yaml"
+	}
+	cfg, err := config.Load(configPath)
 	if err != nil {
-		log.Fatalf("ERROR no se pudo cargar config.yaml: %v", err)
+		log.Fatalf("ERROR no se pudo cargar %s: %v", configPath, err)
 	}
 	engine := strings.ToLower(strings.TrimSpace(cfg.Storage.Backend))
 	if engine == "postgresql" {
@@ -226,6 +233,7 @@ func readSourceConfig(cfg *config.Config) sourceConfig {
 	src.SSH.User = strings.TrimSpace(os.Getenv("MIGRATION_SOURCE_SSH_USER"))
 	src.SSH.Path = strings.TrimSpace(os.Getenv("MIGRATION_SOURCE_SSH_PATH"))
 	src.SSH.PrivateKey = os.Getenv("MIGRATION_SOURCE_SSH_PRIVATE_KEY")
+	src.SSH.KnownHosts = strings.TrimSpace(os.Getenv("MIGRATION_SOURCE_SSH_KNOWN_HOSTS"))
 	port, _ := strconv.Atoi(strings.TrimSpace(os.Getenv("MIGRATION_SOURCE_SSH_PORT")))
 	if port <= 0 {
 		port = 22
@@ -372,20 +380,26 @@ func migrateDocument(item sourceDocument, dbStore storage.Storage, s *stats) err
 		}
 	}
 
+	doc.Status = "processing"
 	if err := dbStore.SaveDocument(doc); err != nil {
 		return fmt.Errorf("no se pudo guardar metadata documento: %w", err)
 	}
-	s.MigratedDocs++
+	failures := make([]error, 0)
 
 	s.TotalPDFs++
 	if err := migratePDFBlob(doc, item.PDFBytes, dbStore, s); err != nil {
 		s.ErroredPDFs++
 		log.Printf("ERROR pdf documento %s: %v", doc.ID, err)
+		failures = append(failures, err)
+	} else if stored, err := dbStore.GetDocument(doc.ID); err == nil {
+		// S3 assigns the canonical s3:// reference while saving the object.
+		doc.FilePath = stored.FilePath
 	}
 
 	if len(item.Images) == 0 {
 		if err := fillFallbackImagesFromPDF(&item); err != nil {
 			log.Printf("WARN documento %s sin imagenes y no se pudo convertir fallback: %v", doc.ID, err)
+			failures = append(failures, fmt.Errorf("no se pudieron generar imagenes: %w", err))
 		} else {
 			s.ImagesFallback += len(item.Images)
 		}
@@ -421,12 +435,31 @@ func migrateDocument(item sourceDocument, dbStore storage.Storage, s *stats) err
 			}
 			s.ErroredImages++
 			log.Printf("ERROR imagen %s (doc=%s page=%d): %v", img.ID, doc.ID, img.PageNumber, err)
+			failures = append(failures, fmt.Errorf("imagen pagina %d: %w", img.PageNumber, err))
 			log.Printf("PROGRESS_IMG %s|%d|%d", doc.ID, s.MigratedImgs+s.SkippedImgs+s.ErroredImages, s.TotalImages)
 			continue
 		}
 		s.MigratedImgs++
 		log.Printf("PROGRESS_IMG %s|%d|%d", doc.ID, s.MigratedImgs+s.SkippedImgs+s.ErroredImages, s.TotalImages)
 	}
+	if len(item.Images) == 0 {
+		failures = append(failures, fmt.Errorf("documento sin imagenes migradas"))
+	}
+	if len(failures) > 0 {
+		doc.Status = "error"
+		if err := dbStore.UpdateDocument(doc); err != nil {
+			failures = append(failures, fmt.Errorf("no se pudo persistir estado error: %w", err))
+		}
+		return errors.Join(failures...)
+	}
+
+	doc.TotalPages = maxInt(doc.TotalPages, len(item.Images))
+	doc.ConvertedPages = len(item.Images)
+	doc.Status = "completed"
+	if err := dbStore.UpdateDocument(doc); err != nil {
+		return fmt.Errorf("no se pudo completar metadata documento: %w", err)
+	}
+	s.MigratedDocs++
 	return nil
 }
 
@@ -718,12 +751,20 @@ func newSSHClient(src sourceConfig) (*ssh.Client, error) {
 	if err != nil {
 		return nil, fmt.Errorf("llave privada invalida: %w", err)
 	}
+	if src.SSH.KnownHosts == "" {
+		return nil, fmt.Errorf("MIGRATION_SOURCE_SSH_KNOWN_HOSTS es obligatorio para verificar la identidad del servidor")
+	}
+	hostKeyCallback, err := knownhosts.New(src.SSH.KnownHosts)
+	if err != nil {
+		return nil, fmt.Errorf("known_hosts invalido: %w", err)
+	}
 	clientConfig := &ssh.ClientConfig{
 		User:            src.SSH.User,
 		Auth:            []ssh.AuthMethod{ssh.PublicKeys(signer)},
-		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
+		HostKeyCallback: hostKeyCallback,
+		Timeout:         15 * time.Second,
 	}
-	addr := fmt.Sprintf("%s:%d", src.SSH.Host, src.SSH.Port)
+	addr := net.JoinHostPort(src.SSH.Host, strconv.Itoa(src.SSH.Port))
 	return ssh.Dial("tcp", addr, clientConfig)
 }
 
@@ -952,6 +993,21 @@ func fillFallbackImagesFromPDF(item *sourceDocument) error {
 		return err
 	}
 	defer doc.Close()
+	if toc, err := doc.ToC(); err == nil {
+		item.Doc.Outline = make([]models.PDFOutlineItem, 0, len(toc))
+		for _, bookmark := range toc {
+			title := strings.TrimSpace(bookmark.Title)
+			page := bookmark.Page + 1
+			if title == "" || page < 1 || page > doc.NumPage() {
+				continue
+			}
+			level := bookmark.Level
+			if level < 1 {
+				level = 1
+			}
+			item.Doc.Outline = append(item.Doc.Outline, models.PDFOutlineItem{Level: level, Title: title, PageNumber: page})
+		}
+	}
 
 	total := doc.NumPage()
 	images := make([]*models.DocumentImage, 0, total)

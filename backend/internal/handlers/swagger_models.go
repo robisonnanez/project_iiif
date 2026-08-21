@@ -22,9 +22,9 @@ type migrationStartSourceSSH struct {
 }
 
 type migrationStartSource struct {
-	Type  string                  `json:"type" example:"local"`
+	Type  string                    `json:"type" example:"local"`
 	Local migrationStartSourceLocal `json:"local"`
-	SSH   migrationStartSourceSSH `json:"ssh"`
+	SSH   migrationStartSourceSSH   `json:"ssh"`
 }
 
 type migrationStartScope struct {

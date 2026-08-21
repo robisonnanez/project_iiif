@@ -3,6 +3,7 @@ package main
 import (
 	"log"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 
@@ -19,15 +20,19 @@ import (
 )
 
 // @title IIIF PDF Server API
-// @version 2.1
-// @description API para conversion de PDF a imagenes IIIF v3, administracion y migracion. Las rutas recomendadas usan /api/v1 y los endpoints legacy se mantienen por compatibilidad temporal.
+// @version 1.0
+// @description API publica unificada: gestion documental v1 e interoperabilidad IIIF Image/Presentation API 3. Las rutas heredadas permanecen operativas pero no se anuncian en esta documentacion.
 // @BasePath /
 // @securityDefinitions.apikey SessionCookie
 // @in cookie
 // @name project_iiif_session
 func main() {
 	// Cargar configuración
-	cfg, err := config.Load("config.yaml")
+	configPath := strings.TrimSpace(os.Getenv("CONFIG_PATH"))
+	if configPath == "" {
+		configPath = "config.yaml"
+	}
+	cfg, err := config.Load(configPath)
 	if err != nil {
 		log.Printf("Error cargando configuración: %v, usando valores por defecto", err)
 		cfg = config.Default()
@@ -35,6 +40,13 @@ func main() {
 
 	// Crear directorios necesarios
 	createDirectories(cfg)
+	if envEnabled("AUTO_MIGRATE") && cfg.Storage.Backend != "local" {
+		result, migrationErr := storage.RunDBMigrations(cfg, ".")
+		if migrationErr != nil {
+			log.Fatalf("Error ejecutando migraciones de %s: %v", result.Engine, migrationErr)
+		}
+		log.Printf("Migraciones %s: aplicadas=%d omitidas=%d", result.Engine, result.Applied, result.Skipped)
+	}
 
 	// Inicializar servicios
 	store, err := newStorage(cfg)
@@ -44,6 +56,17 @@ func main() {
 	pdfService := services.NewPDFService(cfg, store)
 	iiifService := services.NewIIIFService(cfg, store)
 	documentService := services.NewDocumentService(store)
+	ocrService, err := services.NewOCRService(cfg, store)
+	if err != nil {
+		log.Fatalf("Error inicializando OCR: %v", err)
+	}
+	if cfg.OCR.Enabled && cfg.OCR.AutoAfterConversion {
+		pdfService.SetCompletionHook(func(documentID string) {
+			if _, createErr := ocrService.CreateJob(documentID, services.CreateOCRJobRequest{Mode: cfg.OCR.DefaultMode, LanguageMode: "auto"}); createErr != nil {
+				log.Printf("No se pudo iniciar OCR automático document=%s: %v", documentID, createErr)
+			}
+		})
+	}
 
 	// Configurar router
 	if cfg.Server.Mode == "production" {
@@ -68,10 +91,11 @@ func main() {
 	router.Static("/static", cfg.Storage.DataPath)
 
 	// Inicializar handlers
-	apiHandler := handlers.NewAPIHandler(pdfService, iiifService, documentService, cfg)
+	apiHandler := handlers.NewAPIHandler(pdfService, iiifService, documentService, ocrService, cfg)
 	welcomeHandler := handlers.NewWelcomeHandler(cfg)
 	frontendHandler := handlers.NewFrontendHandler(cfg)
 	adminHandler := handlers.NewAdminHandler(cfg, documentService)
+	ocrHandler := handlers.NewOCRHandler(ocrService)
 	authHandler := handlers.NewAuthHandler(cfg)
 
 	// Ruta de bienvenida
@@ -81,6 +105,21 @@ func main() {
 	router.POST("/auth/logout", authHandler.Logout)
 	router.GET("/auth/me", authHandler.Me)
 	router.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))
+	router.NoRoute(func(c *gin.Context) {
+		path := c.Request.URL.Path
+		if strings.HasPrefix(path, "/api/") || strings.HasPrefix(path, "/auth/") || strings.HasPrefix(path, "/iiif/") {
+			c.JSON(404, gin.H{"error": "Ruta no encontrada", "path": path})
+			return
+		}
+		welcomeHandler.ErrorPage(c, 404, "Página no encontrada", "La dirección solicitada no existe o fue movida.")
+	})
+	router.NoMethod(func(c *gin.Context) {
+		if strings.HasPrefix(c.Request.URL.Path, "/api/") || strings.HasPrefix(c.Request.URL.Path, "/auth/") || strings.HasPrefix(c.Request.URL.Path, "/iiif/") {
+			c.JSON(405, gin.H{"error": "Método no permitido"})
+			return
+		}
+		welcomeHandler.ErrorPage(c, 405, "Acción no permitida", "El método utilizado no está disponible para esta dirección.")
+	})
 
 	if cfg.Frontend.Enabled {
 		dashboard := router.Group("/dashboard")
@@ -92,9 +131,12 @@ func main() {
 			dashboard.GET("/subir-pdf", frontendHandler.Dashboard)
 			dashboard.GET("/documentos", frontendHandler.Dashboard)
 			dashboard.GET("/imagenes", frontendHandler.Dashboard)
+			dashboard.GET("/iiif", frontendHandler.Dashboard)
 			dashboard.GET("/configuracion", frontendHandler.Dashboard)
 			dashboard.GET("/migracion", frontendHandler.Dashboard)
-			dashboard.Static("/assets", cfg.Frontend.Path+"/assets")
+			dashboard.GET("/proyectos", frontendHandler.Dashboard)
+			dashboard.GET("/ocr", frontendHandler.Dashboard)
+			dashboard.Static("/assets", filepath.Join(cfg.Frontend.Path, "dist", "assets"))
 		}
 
 		// Expone rutas admin versionadas y mantiene aliases legacy durante la transicion.
@@ -103,6 +145,7 @@ func main() {
 			group.PUT("/config", adminHandler.UpdateConfig)
 			group.POST("/service/restart", adminHandler.RestartService)
 			group.GET("/projects", adminHandler.GetProjects)
+			group.POST("/projects/:key/sync-tenants", adminHandler.SyncProjectTenants)
 			group.GET("/documents/:id/images", adminHandler.GetDocumentImages)
 			group.GET("/migrations/sources/local/browse", adminHandler.BrowseLocalMigrationSource)
 			group.POST("/migrations/local-to-db/start", adminHandler.StartLocalToDBMigration)
@@ -111,6 +154,14 @@ func main() {
 			group.GET("/migrations/local-to-mysql/status", adminHandler.GetLocalToMySQLMigrationStatus)
 			group.POST("/db/migrations/run", adminHandler.RunDBMigrations)
 			group.GET("/db/migrations/status", adminHandler.GetDBMigrationsStatus)
+			group.POST("/documents/:id/ocr/jobs", ocrHandler.CreateJob)
+			group.GET("/documents/:id/ocr", ocrHandler.GetSummary)
+			group.GET("/documents/:id/ocr/pages/:page", ocrHandler.GetPage)
+			group.GET("/documents/:id/ocr/search", ocrHandler.SearchDocument)
+			group.DELETE("/documents/:id/ocr", ocrHandler.Delete)
+			group.GET("/ocr/jobs/:job_id", ocrHandler.GetJob)
+			group.POST("/ocr/jobs/:job_id/cancel", ocrHandler.CancelJob)
+			group.GET("/ocr/search", ocrHandler.Search)
 		}
 
 		adminV1 := router.Group("/api/v1/admin")
@@ -137,7 +188,15 @@ func main() {
 	{
 		documentV1.POST("/upload", apiHandler.UploadPDF)
 		registerDocumentRoutes(documentV1)
+		documentV1.GET("/:id/ocr", ocrHandler.GetSummary)
+		documentV1.GET("/:id/ocr/pages/:page", ocrHandler.GetPage)
+		documentV1.GET("/:id/ocr/search", ocrHandler.SearchDocument)
 	}
+	apiV1OCR := router.Group("/api/v1/ocr")
+	apiV1OCR.GET("/search", ocrHandler.Search)
+	apiV1IIIF := router.Group("/api/v1/iiif")
+	apiV1IIIF.GET("/:id/manifest", apiHandler.GetManifestV3)
+	apiV1IIIF.GET("/:id/manifest/v3", apiHandler.GetManifestV3)
 
 	legacyAPI := router.Group("/api")
 	{
@@ -153,6 +212,14 @@ func main() {
 	// Formato: /iiif/{version}/{identifier}/{region}/{size}/{rotation}/{quality}.{format}
 	iiifGroup := router.Group("/iiif")
 	{
+		// IIIF Image API v2, used by Presentation API v2 manifests.
+		v2 := iiifGroup.Group("/2")
+		{
+			v2.GET("/:identifier/info.json", apiHandler.GetImageInfoV2)
+			v2.GET("/:identifier/:region/:size/:rotation/:quality_format", apiHandler.GetImage)
+			v2.GET("/:identifier/default.jpg", apiHandler.GetImageDefault)
+		}
+
 		// IIIF Image API v3
 		v3 := iiifGroup.Group("/" + cfg.IIIF.APIVersion)
 		{
@@ -169,6 +236,7 @@ func main() {
 
 	// Rutas de manifiestos (mantener compatibilidad)
 	legacyAPI.GET("/iiif/:id/manifest", apiHandler.GetManifest)
+	legacyAPI.GET("/iiif/v3/:id/manifest", apiHandler.GetManifestV3)
 
 	// Iniciar servidor
 	log.Printf("Servidor IIIF iniciado en puerto %s", cfg.Server.Port)
@@ -183,6 +251,11 @@ func main() {
 	log.Printf("  Imagen página 2: http://localhost:%s/iiif/3/documento.pdf_page_2/full/800,/0/default.jpg", cfg.Server.Port)
 
 	log.Fatal(router.Run(":" + cfg.Server.Port))
+}
+
+func envEnabled(name string) bool {
+	value := strings.TrimSpace(os.Getenv(name))
+	return value == "1" || strings.EqualFold(value, "true") || strings.EqualFold(value, "yes")
 }
 
 func createDirectories(cfg *config.Config) {

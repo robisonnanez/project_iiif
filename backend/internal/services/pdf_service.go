@@ -23,8 +23,9 @@ import (
 )
 
 type PDFService struct {
-	config  *config.Config
-	storage storage.Storage
+	config      *config.Config
+	storage     storage.Storage
+	onCompleted func(string)
 }
 
 func NewPDFService(config *config.Config, storage storage.Storage) *PDFService {
@@ -33,6 +34,8 @@ func NewPDFService(config *config.Config, storage storage.Storage) *PDFService {
 		storage: storage,
 	}
 }
+
+func (s *PDFService) SetCompletionHook(hook func(string)) { s.onCompleted = hook }
 
 func (s *PDFService) ProcessPDF(sourcePath string, filename string, settings models.ConversionSettings, scope *models.Scope) (*models.PDFDocument, error) {
 	if settings.Format == "" {
@@ -98,7 +101,17 @@ func (s *PDFService) ProcessPDF(sourcePath string, filename string, settings mod
 		doc.FilePath = storedDoc.FilePath
 	}
 
-	go s.convertPDFToImages(doc, sourcePath, settings)
+	workerPath := sourcePath
+	if s.usesDatabaseBlobs() {
+		workerPath, err = createProcessingCopy(s.config.PDF.TempPath, pdfData)
+		if err != nil {
+			doc.Status = "error"
+			_ = s.storage.UpdateDocument(doc)
+			return nil, fmt.Errorf("error preparing PDF conversion: %w", err)
+		}
+	}
+
+	go s.convertPDFToImages(doc, workerPath, settings)
 
 	return doc, nil
 }
@@ -112,7 +125,8 @@ func (s *PDFService) convertPDFToImages(doc *models.PDFDocument, sourcePath stri
 		}
 		if r := recover(); r != nil {
 			doc.Status = "error"
-			s.storage.UpdateDocument(doc)
+			_ = s.storage.UpdateDocument(doc)
+			log.Printf("PDF conversion failed document=%s stage=panic error=%v", doc.ID, r)
 		}
 	}()
 
@@ -124,12 +138,14 @@ func (s *PDFService) convertPDFToImages(doc *models.PDFDocument, sourcePath stri
 	pdf, err := fitz.New(openPath)
 	if err != nil {
 		doc.Status = "error"
-		s.storage.UpdateDocument(doc)
+		_ = s.storage.UpdateDocument(doc)
+		log.Printf("PDF conversion failed document=%s stage=open error=%v", doc.ID, err)
 		return
 	}
 	defer pdf.Close()
 
 	doc.TotalPages = pdf.NumPage()
+	doc.Outline = extractPDFOutline(pdf, doc.TotalPages)
 	s.storage.UpdateDocument(doc)
 
 	imageDir := ""
@@ -137,7 +153,8 @@ func (s *PDFService) convertPDFToImages(doc *models.PDFDocument, sourcePath stri
 		imageDir = filepath.Join(s.scopePath(s.config.Storage.ImagesPath, &models.Scope{ProjectKey: doc.ProjectKey, TenantKey: doc.TenantKey}), doc.ID)
 		if err := os.MkdirAll(imageDir, 0755); err != nil {
 			doc.Status = "error"
-			s.storage.UpdateDocument(doc)
+			_ = s.storage.UpdateDocument(doc)
+			log.Printf("PDF conversion failed document=%s stage=create_image_directory error=%v", doc.ID, err)
 			return
 		}
 	}
@@ -224,9 +241,41 @@ func (s *PDFService) convertPDFToImages(doc *models.PDFDocument, sourcePath stri
 	doc.ManifestURL = fmt.Sprintf("%s/api/iiif/%s/manifest", s.config.IIIF.BaseURL, doc.ID)
 
 	s.storage.UpdateDocument(doc)
+	if s.onCompleted != nil {
+		s.onCompleted(doc.ID)
+	}
 	log.Printf("PDF conversion completed document=%s pages=%d total=%s render=%s resize=%s encode=%s store=%s dpi=%d max=%dx%d format=%s",
 		doc.ID, doc.ConvertedPages, time.Since(startedAt), renderDuration, resizeDuration, encodeDuration, storeDuration,
 		settings.DPI, settings.MaxWidth, settings.MaxHeight, settings.Format)
+}
+
+func extractPDFOutline(pdf *fitz.Document, totalPages int) []models.PDFOutlineItem {
+	outline, err := pdf.ToC()
+	if err != nil {
+		return nil
+	}
+	return normalizePDFOutline(outline, totalPages)
+}
+
+func normalizePDFOutline(source []fitz.Outline, totalPages int) []models.PDFOutlineItem {
+	result := make([]models.PDFOutlineItem, 0, len(source))
+	for _, item := range source {
+		title := strings.TrimSpace(item.Title)
+		page := item.Page + 1 // go-fitz exposes MuPDF's zero-based page index.
+		if title == "" || page < 1 || page > totalPages {
+			continue
+		}
+		level := item.Level
+		if level < 1 {
+			level = 1
+		}
+		result = append(result, models.PDFOutlineItem{
+			Level:      level,
+			Title:      title,
+			PageNumber: page,
+		})
+	}
+	return result
 }
 
 func (s *PDFService) scopePath(base string, scope *models.Scope) string {
@@ -293,4 +342,25 @@ func copyFile(sourcePath, destinationPath string) error {
 
 	_, err = io.Copy(destination, source)
 	return err
+}
+
+func createProcessingCopy(tempPath string, data []byte) (string, error) {
+	if err := os.MkdirAll(tempPath, 0o750); err != nil {
+		return "", err
+	}
+	file, err := os.CreateTemp(tempPath, "processing-*.pdf")
+	if err != nil {
+		return "", err
+	}
+	path := file.Name()
+	if _, err = file.Write(data); err != nil {
+		_ = file.Close()
+		_ = os.Remove(path)
+		return "", err
+	}
+	if err = file.Close(); err != nil {
+		_ = os.Remove(path)
+		return "", err
+	}
+	return path, nil
 }

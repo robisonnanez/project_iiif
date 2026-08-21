@@ -6,7 +6,6 @@ import (
 	"io"
 	"net/http"
 	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -21,6 +20,7 @@ type APIHandler struct {
 	pdfService      *services.PDFService
 	iiifService     *services.IIIFService
 	documentService *services.DocumentService
+	ocrService      *services.OCRService
 	config          *config.Config
 }
 
@@ -34,12 +34,14 @@ func NewAPIHandler(
 	pdfService *services.PDFService,
 	iiifService *services.IIIFService,
 	documentService *services.DocumentService,
+	ocrService *services.OCRService,
 	config *config.Config,
 ) *APIHandler {
 	return &APIHandler{
 		pdfService:      pdfService,
 		iiifService:     iiifService,
 		documentService: documentService,
+		ocrService:      ocrService,
 		config:          config,
 	}
 }
@@ -84,23 +86,31 @@ func (h *APIHandler) UploadPDF(c *gin.Context) {
 		return
 	}
 
-	// Guardar archivo temporal
-	tempPath := filepath.Join(h.config.PDF.TempPath, "temp_"+filepath.Base(header.Filename))
-	tempFile, err := os.Create(tempPath)
+	// Usar un nombre aleatorio evita colisiones entre cargas concurrentes con el mismo nombre.
+	if err := os.MkdirAll(h.config.PDF.TempPath, 0o750); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Error preparando almacenamiento temporal"})
+		return
+	}
+	tempFile, err := os.CreateTemp(h.config.PDF.TempPath, "upload-*.pdf")
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Error guardando archivo"})
 		return
 	}
-	defer tempFile.Close()
+	tempPath := tempFile.Name()
+	defer os.Remove(tempPath)
 
 	if _, err := io.Copy(tempFile, file); err != nil {
+		tempFile.Close()
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Error copiando archivo"})
+		return
+	}
+	if err := tempFile.Close(); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Error cerrando archivo temporal"})
 		return
 	}
 
 	scope, err := h.requestScope(c)
 	if err != nil {
-		os.Remove(tempPath)
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
@@ -108,7 +118,6 @@ func (h *APIHandler) UploadPDF(c *gin.Context) {
 	// Procesar PDF
 	doc, err := h.pdfService.ProcessPDF(tempPath, header.Filename, settings, scope)
 	if err != nil {
-		os.Remove(tempPath)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Error procesando PDF"})
 		return
 	}
@@ -124,10 +133,16 @@ func (h *APIHandler) conversionSettings(c *gin.Context) (models.ConversionSettin
 	settings := models.ConversionSettings{
 		Format:    strings.ToLower(strings.TrimSpace(h.config.Conversion.DefaultFormat)),
 		Quality:   h.config.Conversion.DefaultQuality,
-		MaxWidth:  defaultUploadWidth,
-		MaxHeight: defaultUploadHeight,
+		MaxWidth:  h.config.Conversion.DefaultWidth,
+		MaxHeight: h.config.Conversion.DefaultHeight,
 		DPI:       dpi,
 		EnableOCR: h.config.Conversion.EnableOCR,
+	}
+	if settings.MaxWidth == 0 {
+		settings.MaxWidth = defaultUploadWidth
+	}
+	if settings.MaxHeight == 0 {
+		settings.MaxHeight = defaultUploadHeight
 	}
 	if settings.Format == "" {
 		settings.Format = "jpg"
@@ -244,11 +259,17 @@ func (h *APIHandler) GetDocument(c *gin.Context) {
 func (h *APIHandler) DeleteDocument(c *gin.Context) {
 	id := c.Param("id")
 	if err := h.documentService.DeleteDocument(id); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Error eliminando documento"})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Error eliminando documento: " + err.Error()})
 		return
 	}
+	if h.ocrService != nil {
+		if err := h.ocrService.Delete(id); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Documento eliminado, pero no se pudieron limpiar sus artefactos OCR: " + err.Error()})
+			return
+		}
+	}
 
-	c.JSON(http.StatusOK, gin.H{"message": "Documento eliminado"})
+	c.JSON(http.StatusOK, gin.H{"message": "Documento, binarios y OCR eliminados"})
 }
 
 func (h *APIHandler) GetProperties(c *gin.Context) {
@@ -286,6 +307,8 @@ func (h *APIHandler) UpdateProperties(c *gin.Context) {
 
 // IIIF Handlers - Formato Cantaloupe
 
+// GetManifest conserva el manifiesto Presentation API v2 para clientes heredados.
+// No se publica en Swagger: la API documentada usa exclusivamente IIIF v3.
 func (h *APIHandler) GetManifest(c *gin.Context) {
 	id := c.Param("id")
 	manifest, err := h.iiifService.GetManifest(id, c.Query("pages"))
@@ -301,6 +324,48 @@ func (h *APIHandler) GetManifest(c *gin.Context) {
 
 	c.Header("Content-Type", "application/json")
 	c.JSON(http.StatusOK, manifest)
+}
+
+// GetManifestV3 godoc
+// @Summary Obtener manifiesto IIIF Presentation API v3
+// @Description Endpoint de compatibilidad para clientes IIIF Presentation v3.
+// @Tags IIIF
+// @Produce json
+// @Param id path string true "ID del documento"
+// @Param pages query string false "Paginas o rangos, por ejemplo 1-3,5"
+// @Success 200 {object} models.IIIFManifest
+// @Failure 400 {object} errorResponse
+// @Failure 404 {object} errorResponse
+// @Router /api/v1/iiif/{id}/manifest [get]
+func (h *APIHandler) GetManifestV3(c *gin.Context) {
+	id := c.Param("id")
+	manifest, err := h.iiifService.GetManifestV3(id, c.Query("pages"))
+	if err != nil {
+		var selectionError *services.InvalidPageSelectionError
+		if errors.As(err, &selectionError) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": selectionError.Error()})
+			return
+		}
+		c.JSON(http.StatusNotFound, gin.H{"error": "Manifiesto no encontrado"})
+		return
+	}
+	c.JSON(http.StatusOK, manifest)
+}
+
+// GetImageInfoV2 conserva Image API v2 para clientes heredados.
+// No se publica en Swagger: la API documentada usa exclusivamente IIIF v3.
+func (h *APIHandler) GetImageInfoV2(c *gin.Context) {
+	docID, page, err := h.parseIdentifier(c.Param("identifier"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Identificador inválido"})
+		return
+	}
+	info, err := h.iiifService.GetImageInfoV2(docID, page)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Información de imagen no encontrada"})
+		return
+	}
+	c.JSON(http.StatusOK, info)
 }
 
 // GET /iiif/3/{identifier}/info.json

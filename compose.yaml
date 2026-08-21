@@ -1,0 +1,207 @@
+name: project-iiif
+
+x-app-base: &app-base
+  build:
+    context: .
+    dockerfile: Dockerfile
+  image: project-iiif:development
+  restart: unless-stopped
+  ports:
+    - "${APP_PORT:-18080}:8080"
+  volumes:
+    - app_config:/app/config
+    - app_data:/app/data
+  environment: &app-environment
+    AUTO_MIGRATE: "true"
+    CONFIG_PATH: "/app/config/config.yaml"
+    IIIF_BASE_URL: "${APP_BASE_URL:-http://localhost:18080}"
+    FILESYSTEM_DISK: "s3"
+    AWS_ENDPOINT: "http://rustfs:9000"
+    AWS_BUCKET: "project-iiif"
+    AWS_DEFAULT_REGION: "us-east-1"
+    AWS_USE_PATH_STYLE_ENDPOINT: "true"
+    AWS_ACCESS_KEY_ID: "${RUSTFS_ACCESS_KEY:?set RUSTFS_ACCESS_KEY in .env}"
+    AWS_SECRET_ACCESS_KEY: "${RUSTFS_SECRET_KEY:?set RUSTFS_SECRET_KEY in .env}"
+    FRONTEND_USERNAME: "${FRONTEND_USERNAME:-admin}"
+    FRONTEND_PASSWORD: "${FRONTEND_PASSWORD:?set FRONTEND_PASSWORD in .env}"
+  depends_on:
+    config-init:
+      condition: service_completed_successfully
+    rustfs:
+      condition: service_healthy
+  healthcheck:
+    test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8080/health"]
+    interval: 10s
+    timeout: 3s
+    retries: 12
+    start_period: 30s
+  security_opt:
+    - no-new-privileges:true
+
+services:
+  config-init:
+    image: busybox:1.37
+    command: ["sh", "-ec", "test -s /target/config.yaml || cp /source/config.yaml /target/config.yaml; chown -R 10001:10001 /target /data; chmod 600 /target/config.yaml"]
+    volumes:
+      - ./deploy/docker/config.yaml:/source/config.yaml:ro
+      - app_config:/target
+      - app_data:/data
+    restart: "no"
+
+  rustfs-permissions:
+    image: busybox:1.37
+    user: root
+    command: ["sh", "-ec", "chown -R 10001:10001 /data /logs"]
+    volumes:
+      - rustfs_data:/data
+      - rustfs_logs:/logs
+    restart: "no"
+
+  rustfs:
+    image: rustfs/rustfs:1.0.0-beta.6
+    restart: unless-stopped
+    ports:
+      - "${RUSTFS_API_PORT:-19000}:9000"
+      - "${RUSTFS_CONSOLE_PORT:-19001}:9001"
+    environment:
+      RUSTFS_VOLUMES: /data
+      RUSTFS_ADDRESS: 0.0.0.0:9000
+      RUSTFS_CONSOLE_ADDRESS: 0.0.0.0:9001
+      RUSTFS_CONSOLE_ENABLE: "true"
+      RUSTFS_ACCESS_KEY: "${RUSTFS_ACCESS_KEY:?set RUSTFS_ACCESS_KEY in .env}"
+      RUSTFS_SECRET_KEY: "${RUSTFS_SECRET_KEY:?set RUSTFS_SECRET_KEY in .env}"
+      RUSTFS_OBS_LOG_DIRECTORY: /logs
+    volumes:
+      - rustfs_data:/data
+      - rustfs_logs:/logs
+    depends_on:
+      rustfs-permissions:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "sh", "-ec", "curl -fsS http://127.0.0.1:9000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 18
+      start_period: 30s
+    security_opt:
+      - no-new-privileges:true
+
+  mysql:
+    image: mysql:8.4
+    profiles: ["mysql"]
+    restart: unless-stopped
+    environment:
+      MYSQL_DATABASE: project_iiif
+      MYSQL_USER: project_iiif
+      MYSQL_PASSWORD: "${DB_PASSWORD:?set DB_PASSWORD in .env}"
+      MYSQL_ROOT_PASSWORD: "${DB_PASSWORD:?set DB_PASSWORD in .env}"
+    volumes:
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -u project_iiif -p\"$${MYSQL_PASSWORD}\" --silent"]
+      interval: 5s
+      timeout: 5s
+      retries: 24
+      start_period: 30s
+
+  postgres:
+    image: postgres:17-bookworm
+    profiles: ["postgres"]
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: project_iiif
+      POSTGRES_USER: project_iiif
+      POSTGRES_PASSWORD: "${DB_PASSWORD:?set DB_PASSWORD in .env}"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U project_iiif -d project_iiif"]
+      interval: 5s
+      timeout: 5s
+      retries: 24
+      start_period: 20s
+
+  mongodb:
+    image: mongo:8.0
+    profiles: ["mongodb"]
+    restart: unless-stopped
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: project_iiif
+      MONGO_INITDB_ROOT_PASSWORD: "${DB_PASSWORD:?set DB_PASSWORD in .env}"
+    volumes:
+      - mongodb_data:/data/db
+    healthcheck:
+      test: ["CMD-SHELL", "mongosh --quiet --username project_iiif --password \"$${MONGO_INITDB_ROOT_PASSWORD}\" --authenticationDatabase admin --eval \"db.adminCommand('ping').ok\" | grep 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 24
+      start_period: 20s
+
+  app-mysql:
+    <<: *app-base
+    profiles: ["mysql"]
+    environment:
+      <<: *app-environment
+      STORAGE_BACKEND: mysql
+      DB_CONNECTION: mysql
+      DB_HOST: mysql
+      DB_PORT: "3306"
+      DB_DATABASE: project_iiif
+      DB_USERNAME: project_iiif
+      DB_PASSWORD: "${DB_PASSWORD:?set DB_PASSWORD in .env}"
+    depends_on:
+      config-init:
+        condition: service_completed_successfully
+      rustfs:
+        condition: service_healthy
+      mysql:
+        condition: service_healthy
+
+  app-postgres:
+    <<: *app-base
+    profiles: ["postgres"]
+    environment:
+      <<: *app-environment
+      STORAGE_BACKEND: postgres
+      DB_CONNECTION: postgres
+      DB_HOST: postgres
+      DB_PORT: "5432"
+      DB_DATABASE: project_iiif
+      DB_USERNAME: project_iiif
+      DB_PASSWORD: "${DB_PASSWORD:?set DB_PASSWORD in .env}"
+    depends_on:
+      config-init:
+        condition: service_completed_successfully
+      rustfs:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+
+  app-mongodb:
+    <<: *app-base
+    profiles: ["mongodb"]
+    environment:
+      <<: *app-environment
+      STORAGE_BACKEND: mongodb
+      DB_CONNECTION: mongodb
+      DB_HOST: mongodb
+      DB_PORT: "27017"
+      DB_DATABASE: project_iiif
+      DB_USERNAME: project_iiif
+      DB_PASSWORD: "${DB_PASSWORD:?set DB_PASSWORD in .env}"
+    depends_on:
+      config-init:
+        condition: service_completed_successfully
+      rustfs:
+        condition: service_healthy
+      mongodb:
+        condition: service_healthy
+
+volumes:
+  app_config:
+  app_data:
+  rustfs_data:
+  rustfs_logs:
+  mysql_data:
+  postgres_data:
+  mongodb_data:

@@ -2,6 +2,7 @@ package storage
 
 import (
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -55,20 +56,22 @@ func (ps *PostgresStorage) GetDocument(id string) (*models.PDFDocument, error) {
 	row := ps.db.QueryRow(`
 		SELECT id, original_name, COALESCE(project_key, 'default'), COALESCE(tenant_key, ''), COALESCE(migrated_from_local, false), status, total_pages, converted_pages,
 		       COALESCE(conversion_width, 1241), COALESCE(conversion_height, 1754), COALESCE(conversion_dpi, 150), COALESCE(conversion_format, 'jpg'), COALESCE(conversion_quality, 85),
-		       pdf_path, thumbnail_path, manifest_url, created_at
+		       COALESCE(outline_json, '[]'::jsonb)::text, pdf_path, thumbnail_path, manifest_url, created_at
 		FROM documents
 		WHERE id = $1
 	`, id)
 	doc := &models.PDFDocument{}
+	var outlineJSON string
 	var pdfPath, thumbnailPath, manifestURL sql.NullString
 	if err := row.Scan(
 		&doc.ID, &doc.Name, &doc.ProjectKey, &doc.TenantKey, &doc.MigratedFromLocal, &doc.Status,
 		&doc.TotalPages, &doc.ConvertedPages, &doc.ConversionWidth, &doc.ConversionHeight, &doc.ConversionDPI,
-		&doc.ConversionFormat, &doc.ConversionQuality, &pdfPath, &thumbnailPath, &manifestURL, &doc.UploadDate,
+		&doc.ConversionFormat, &doc.ConversionQuality, &outlineJSON, &pdfPath, &thumbnailPath, &manifestURL, &doc.UploadDate,
 	); err != nil {
 		return nil, fmt.Errorf("document not found: %w", err)
 	}
 	doc.FilePath = pdfPath.String
+	doc.Outline = decodeOutlineJSON(outlineJSON)
 	doc.ThumbnailURL = thumbnailPath.String
 	doc.ManifestURL = manifestURL.String
 	doc.ImagePaths = ps.getImagePaths(doc.ID)
@@ -83,7 +86,7 @@ func (ps *PostgresStorage) GetDocumentsByScope(projectKey, tenantKey string) ([]
 	query := `
 		SELECT id, original_name, COALESCE(project_key, 'default'), COALESCE(tenant_key, ''), COALESCE(migrated_from_local, false), status, total_pages, converted_pages,
 		       COALESCE(conversion_width, 1241), COALESCE(conversion_height, 1754), COALESCE(conversion_dpi, 150), COALESCE(conversion_format, 'jpg'), COALESCE(conversion_quality, 85),
-		       pdf_path, thumbnail_path, manifest_url, created_at
+		       COALESCE(outline_json, '[]'::jsonb)::text, pdf_path, thumbnail_path, manifest_url, created_at
 		FROM documents`
 	var conditions []string
 	var args []interface{}
@@ -112,15 +115,17 @@ func (ps *PostgresStorage) GetDocumentsByScope(projectKey, tenantKey string) ([]
 	docs := []*models.PDFDocument{}
 	for rows.Next() {
 		doc := &models.PDFDocument{}
+		var outlineJSON string
 		var pdfPath, thumbnailPath, manifestURL sql.NullString
 		if err := rows.Scan(
 			&doc.ID, &doc.Name, &doc.ProjectKey, &doc.TenantKey, &doc.MigratedFromLocal, &doc.Status,
 			&doc.TotalPages, &doc.ConvertedPages, &doc.ConversionWidth, &doc.ConversionHeight, &doc.ConversionDPI,
-			&doc.ConversionFormat, &doc.ConversionQuality, &pdfPath, &thumbnailPath, &manifestURL, &doc.UploadDate,
+			&doc.ConversionFormat, &doc.ConversionQuality, &outlineJSON, &pdfPath, &thumbnailPath, &manifestURL, &doc.UploadDate,
 		); err != nil {
 			return nil, err
 		}
 		doc.FilePath = pdfPath.String
+		doc.Outline = decodeOutlineJSON(outlineJSON)
 		doc.ThumbnailURL = thumbnailPath.String
 		doc.ManifestURL = manifestURL.String
 		doc.ImagePaths = ps.getImagePaths(doc.ID)
@@ -264,9 +269,13 @@ func (ps *PostgresStorage) upsertDocument(doc *models.PDFDocument) error {
 	if doc.UploadDate.IsZero() {
 		doc.UploadDate = time.Now()
 	}
-	_, err := ps.db.Exec(`
-		INSERT INTO documents (id, original_name, project_key, tenant_key, migrated_from_local, status, total_pages, converted_pages, conversion_width, conversion_height, conversion_dpi, conversion_format, conversion_quality, pdf_path, thumbnail_path, manifest_url, created_at, updated_at)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,NOW())
+	outlineJSON, err := json.Marshal(doc.Outline)
+	if err != nil {
+		return fmt.Errorf("error encoding PDF outline: %w", err)
+	}
+	_, err = ps.db.Exec(`
+		INSERT INTO documents (id, original_name, project_key, tenant_key, migrated_from_local, status, total_pages, converted_pages, conversion_width, conversion_height, conversion_dpi, conversion_format, conversion_quality, outline_json, pdf_path, thumbnail_path, manifest_url, created_at, updated_at)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14::jsonb,$15,$16,$17,$18,NOW())
 		ON CONFLICT (id) DO UPDATE SET
 			original_name = EXCLUDED.original_name,
 			project_key = EXCLUDED.project_key,
@@ -280,13 +289,14 @@ func (ps *PostgresStorage) upsertDocument(doc *models.PDFDocument) error {
 			conversion_dpi = EXCLUDED.conversion_dpi,
 			conversion_format = EXCLUDED.conversion_format,
 			conversion_quality = EXCLUDED.conversion_quality,
+			outline_json = EXCLUDED.outline_json,
 			pdf_path = EXCLUDED.pdf_path,
 			thumbnail_path = EXCLUDED.thumbnail_path,
 			manifest_url = EXCLUDED.manifest_url,
 			updated_at = NOW()
 	`, doc.ID, doc.Name, nullString(defaultProject(doc.ProjectKey)), nullString(doc.TenantKey), doc.MigratedFromLocal, doc.Status, doc.TotalPages, doc.ConvertedPages,
 		doc.ConversionWidth, doc.ConversionHeight, doc.ConversionDPI, nullString(doc.ConversionFormat), doc.ConversionQuality,
-		nullString(doc.FilePath), nullString(doc.ThumbnailURL), nullString(doc.ManifestURL), doc.UploadDate)
+		string(outlineJSON), nullString(doc.FilePath), nullString(doc.ThumbnailURL), nullString(doc.ManifestURL), doc.UploadDate)
 	return err
 }
 

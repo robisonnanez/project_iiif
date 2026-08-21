@@ -3,11 +3,17 @@ package handlers
 import (
 	"bytes"
 	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -119,8 +125,176 @@ func (h *AdminHandler) GetProjects(c *gin.Context) {
 		"default_project":       h.config.Projects.DefaultProject,
 		"require_project":       h.config.Projects.RequireProject,
 		"allow_dynamic_tenants": h.config.Projects.AllowDynamicTenants,
-		"items":                 h.config.Projects.Items,
+		"items":                 sanitizedProjects(h.config.Projects.Items),
 	})
+}
+
+// SyncProjectTenants godoc
+// @Summary Sincronizar tenants de un proyecto
+// @Description Consulta el endpoint configurado para el proyecto, normaliza la lista y la persiste en config.yaml.
+// @Tags Admin
+// @Security SessionCookie
+// @Produce json
+// @Param key path string true "Clave del proyecto"
+// @Success 200 {object} config.ProjectConfig
+// @Failure 400 {object} errorResponse
+// @Failure 404 {object} errorResponse
+// @Failure 502 {object} errorResponse
+// @Router /api/v1/admin/projects/{key}/sync-tenants [post]
+func (h *AdminHandler) SyncProjectTenants(c *gin.Context) {
+	key := strings.TrimSpace(c.Param("key"))
+	index := -1
+	for candidate := range h.config.Projects.Items {
+		if strings.EqualFold(h.config.Projects.Items[candidate].Key, key) {
+			index = candidate
+			break
+		}
+	}
+	if index < 0 {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Proyecto no encontrado"})
+		return
+	}
+	project := h.config.Projects.Items[index]
+	endpoint := strings.TrimSpace(project.TenantsEndpoint)
+	parsed, err := url.Parse(endpoint)
+	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Configura una URL http/https válida para consultar tenants"})
+		return
+	}
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 12*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	req.Header.Set("Accept", "application/json")
+	if err := applyTenantsAuthentication(req, project); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	client := &http.Client{Timeout: 12 * time.Second, CheckRedirect: func(next *http.Request, via []*http.Request) error {
+		if next.URL.Scheme != "http" && next.URL.Scheme != "https" {
+			return errors.New("redirección no permitida")
+		}
+		if len(via) >= 5 {
+			return errors.New("demasiadas redirecciones")
+		}
+		if !strings.EqualFold(next.URL.Host, parsed.Host) {
+			return errors.New("redirección a otro host no permitida para proteger las credenciales")
+		}
+		return nil
+	}}
+	response, err := client.Do(req)
+	if err != nil {
+		c.JSON(http.StatusBadGateway, gin.H{"error": "No se pudo consultar el endpoint de tenants: " + err.Error()})
+		return
+	}
+	defer response.Body.Close()
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		c.JSON(http.StatusBadGateway, gin.H{"error": fmt.Sprintf("El endpoint de tenants respondió HTTP %d", response.StatusCode)})
+		return
+	}
+	data, err := io.ReadAll(io.LimitReader(response.Body, 2<<20))
+	if err != nil {
+		c.JSON(http.StatusBadGateway, gin.H{"error": "No se pudo leer la respuesta de tenants"})
+		return
+	}
+	var payload any
+	if err := json.Unmarshal(data, &payload); err != nil {
+		c.JSON(http.StatusBadGateway, gin.H{"error": "El endpoint de tenants no devolvió JSON válido"})
+		return
+	}
+	tenants := extractTenantNames(payload)
+	if len(tenants) == 0 {
+		c.JSON(http.StatusBadGateway, gin.H{"error": "La respuesta no contiene tenants válidos"})
+		return
+	}
+	h.config.Projects.Items[index].Tenants = tenants
+	h.config.Projects.Items[index].Multitenant = true
+	configPath := h.config.SourcePath
+	if configPath == "" {
+		configPath = "config.yaml"
+	}
+	if err := config.Save(configPath, h.config); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "No se pudo guardar config.yaml: " + err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, sanitizedProject(h.config.Projects.Items[index]))
+}
+
+func applyTenantsAuthentication(req *http.Request, project config.ProjectConfig) error {
+	authType := strings.ToLower(strings.TrimSpace(project.TenantsAuthType))
+	switch authType {
+	case "", "none":
+		return nil
+	case "bearer":
+		if strings.TrimSpace(project.TenantsAuthToken) == "" {
+			return &configError{"Configura el Bearer token del endpoint de tenants"}
+		}
+		req.Header.Set("Authorization", "Bearer "+project.TenantsAuthToken)
+		return nil
+	case "api_key":
+		header := strings.TrimSpace(project.TenantsAuthHeader)
+		if !validHTTPHeaderName(header) {
+			return &configError{"Configura un nombre de cabecera HTTP válido para la API key"}
+		}
+		if strings.TrimSpace(project.TenantsAuthToken) == "" {
+			return &configError{"Configura la API key del endpoint de tenants"}
+		}
+		req.Header.Set(header, project.TenantsAuthToken)
+		return nil
+	default:
+		return &configError{"Tipo de autenticación del endpoint de tenants no válido"}
+	}
+}
+
+func extractTenantNames(payload any) []string {
+	values := make([]string, 0)
+	var visit func(any)
+	visit = func(value any) {
+		switch current := value.(type) {
+		case string:
+			values = append(values, current)
+		case []any:
+			for _, item := range current {
+				visit(item)
+			}
+		case map[string]any:
+			for _, key := range []string{"tenants", "data", "items", "results"} {
+				if nested, ok := current[key]; ok {
+					visit(nested)
+					return
+				}
+			}
+			for _, key := range []string{"key", "id", "slug", "code", "name"} {
+				if text, ok := current[key].(string); ok {
+					values = append(values, text)
+					return
+				}
+			}
+		}
+	}
+	visit(payload)
+	seen := map[string]struct{}{}
+	result := make([]string, 0, len(values))
+	for _, raw := range values {
+		value := strings.TrimSpace(raw)
+		if !validScopeKey(value) {
+			continue
+		}
+		key := strings.ToLower(value)
+		if _, exists := seen[key]; exists {
+			continue
+		}
+		seen[key] = struct{}{}
+		result = append(result, value)
+		if len(result) == 500 {
+			break
+		}
+	}
+	sort.Strings(result)
+	return result
 }
 
 // RestartService godoc
@@ -536,28 +710,31 @@ func (h *AdminHandler) sanitizedConfig() gin.H {
 			"DB_USERNAME":   h.config.DBUsername,
 			"DB_PASSWORD":   maskedSecret(h.config.DBPassword),
 			"mysql": gin.H{
-				"host":       h.config.Database.MySQL.Host,
-				"port":       h.config.Database.MySQL.Port,
-				"user":       h.config.Database.MySQL.User,
-				"password":   maskedSecret(h.config.Database.MySQL.Password),
-				"database":   h.config.Database.MySQL.Database,
-				"charset":    h.config.Database.MySQL.Charset,
-				"parse_time": h.config.Database.MySQL.ParseTime,
+				"host":                h.config.Database.MySQL.Host,
+				"port":                h.config.Database.MySQL.Port,
+				"user":                h.config.Database.MySQL.User,
+				"password":            maskedSecret(h.config.Database.MySQL.Password),
+				"password_configured": h.config.Database.MySQL.Password != "",
+				"database":            h.config.Database.MySQL.Database,
+				"charset":             h.config.Database.MySQL.Charset,
+				"parse_time":          h.config.Database.MySQL.ParseTime,
 			},
 			"postgres": gin.H{
-				"host":     h.config.Database.Postgres.Host,
-				"port":     h.config.Database.Postgres.Port,
-				"user":     h.config.Database.Postgres.User,
-				"password": maskedSecret(h.config.Database.Postgres.Password),
-				"database": h.config.Database.Postgres.Database,
-				"sslmode":  h.config.Database.Postgres.SSLMode,
-				"schema":   h.config.Database.Postgres.Schema,
+				"host":                h.config.Database.Postgres.Host,
+				"port":                h.config.Database.Postgres.Port,
+				"user":                h.config.Database.Postgres.User,
+				"password":            maskedSecret(h.config.Database.Postgres.Password),
+				"password_configured": h.config.Database.Postgres.Password != "",
+				"database":            h.config.Database.Postgres.Database,
+				"sslmode":             h.config.Database.Postgres.SSLMode,
+				"schema":              h.config.Database.Postgres.Schema,
 			},
 			"mongodb": gin.H{
 				"host":                        h.config.Database.MongoDB.Host,
 				"port":                        h.config.Database.MongoDB.Port,
 				"user":                        h.config.Database.MongoDB.User,
 				"password":                    maskedSecret(h.config.Database.MongoDB.Password),
+				"password_configured":         h.config.Database.MongoDB.Password != "",
 				"database":                    h.config.Database.MongoDB.Database,
 				"auth_source":                 h.config.Database.MongoDB.AuthSource,
 				"direct_connection":           h.config.Database.MongoDB.DirectConnection,
@@ -565,11 +742,12 @@ func (h *AdminHandler) sanitizedConfig() gin.H {
 			},
 		},
 		"frontend": gin.H{
-			"enabled":      h.config.Frontend.Enabled,
-			"path":         h.config.Frontend.Path,
-			"require_auth": h.config.Frontend.RequireAuth,
-			"username":     h.config.Frontend.Username,
-			"password":     maskedSecret(h.config.Frontend.Password),
+			"enabled":          h.config.Frontend.Enabled,
+			"path":             h.config.Frontend.Path,
+			"require_auth":     h.config.Frontend.RequireAuth,
+			"username":         h.config.Frontend.Username,
+			"password":         maskedSecret(h.config.Frontend.Password),
+			"menu_orientation": h.config.Frontend.MenuOrientation,
 		},
 		"binary_storage": gin.H{
 			"mode":      h.config.BinaryStorage.Mode,
@@ -579,6 +757,8 @@ func (h *AdminHandler) sanitizedConfig() gin.H {
 			"filesystem_disk":         h.config.FilesystemDisk,
 			"access_key_id":           maskedSecret(h.config.AWSAccessKeyID),
 			"secret_access_key":       maskedSecret(h.config.AWSSecretAccessKey),
+			"access_key_configured":   h.config.AWSAccessKeyID != "",
+			"secret_key_configured":   h.config.AWSSecretAccessKey != "",
 			"region":                  h.config.AWSDefaultRegion,
 			"bucket":                  h.config.AWSBucket,
 			"endpoint":                h.config.AWSEndpoint,
@@ -589,7 +769,7 @@ func (h *AdminHandler) sanitizedConfig() gin.H {
 			"default_project":       h.config.Projects.DefaultProject,
 			"require_project":       h.config.Projects.RequireProject,
 			"allow_dynamic_tenants": h.config.Projects.AllowDynamicTenants,
-			"items":                 h.config.Projects.Items,
+			"items":                 sanitizedProjects(h.config.Projects.Items),
 		},
 		"iiif": gin.H{
 			"base_url":    h.config.IIIF.BaseURL,
@@ -598,6 +778,15 @@ func (h *AdminHandler) sanitizedConfig() gin.H {
 			"max_height":  h.config.IIIF.MaxHeight,
 			"cache":       h.config.IIIF.CacheEnabled,
 		},
+		"conversion": gin.H{
+			"default_width":   h.config.Conversion.DefaultWidth,
+			"default_height":  h.config.Conversion.DefaultHeight,
+			"dpi":             h.config.Conversion.DPI,
+			"default_format":  h.config.Conversion.DefaultFormat,
+			"default_quality": h.config.Conversion.DefaultQuality,
+			"enable_ocr":      h.config.Conversion.EnableOCR,
+		},
+		"ocr": h.config.OCR,
 		"security": gin.H{
 			"enable_auth":            h.config.Security.EnableAuth,
 			"log_level":              h.config.Security.LogLevel,
@@ -612,6 +801,20 @@ func maskedSecret(value string) string {
 		return ""
 	}
 	return "********"
+}
+
+func sanitizedProject(project config.ProjectConfig) config.ProjectConfig {
+	project.TenantsTokenConfigured = project.TenantsAuthToken != ""
+	project.TenantsAuthToken = maskedSecret(project.TenantsAuthToken)
+	return project
+}
+
+func sanitizedProjects(projects []config.ProjectConfig) []config.ProjectConfig {
+	result := make([]config.ProjectConfig, len(projects))
+	for index, project := range projects {
+		result[index] = sanitizedProject(project)
+	}
+	return result
 }
 
 type editableConfigPayload struct {
@@ -665,11 +868,12 @@ type editableConfigPayload struct {
 		} `json:"mongodb"`
 	} `json:"database"`
 	Frontend struct {
-		Enabled     bool   `json:"enabled"`
-		Path        string `json:"path"`
-		RequireAuth bool   `json:"require_auth"`
-		Username    string `json:"username"`
-		Password    string `json:"password"`
+		Enabled         bool   `json:"enabled"`
+		Path            string `json:"path"`
+		RequireAuth     bool   `json:"require_auth"`
+		Username        string `json:"username"`
+		Password        string `json:"password"`
+		MenuOrientation string `json:"menu_orientation"`
 	} `json:"frontend"`
 	BinaryStorage struct {
 		Mode     string `json:"mode"`
@@ -692,6 +896,15 @@ type editableConfigPayload struct {
 		CacheEnabled bool   `json:"cache"`
 		CacheTTL     int    `json:"cache_ttl"`
 	} `json:"iiif"`
+	Conversion struct {
+		DefaultWidth   int    `json:"default_width"`
+		DefaultHeight  int    `json:"default_height"`
+		DPI            int    `json:"dpi"`
+		DefaultFormat  string `json:"default_format"`
+		DefaultQuality int    `json:"default_quality"`
+		EnableOCR      bool   `json:"enable_ocr"`
+	} `json:"conversion"`
+	OCR      config.OCRConfig `json:"ocr"`
 	Projects struct {
 		Enabled             bool                   `json:"enabled"`
 		DefaultProject      string                 `json:"default_project"`
@@ -743,8 +956,58 @@ func applyEditableConfig(next, current *config.Config, payload editableConfigPay
 	if payload.IIIF.MaxWidth <= 0 || payload.IIIF.MaxHeight <= 0 {
 		return &configError{"iiif.max_width y iiif.max_height deben ser mayores que cero"}
 	}
+	if payload.Conversion.DefaultWidth < 256 || payload.Conversion.DefaultWidth > 8192 || payload.Conversion.DefaultHeight < 256 || payload.Conversion.DefaultHeight > 8192 {
+		return &configError{"conversion.default_width y default_height deben estar entre 256 y 8192"}
+	}
+	if payload.Conversion.DPI < 72 || payload.Conversion.DPI > 600 {
+		return &configError{"conversion.dpi debe estar entre 72 y 600"}
+	}
+	if !allowedValue(payload.Conversion.DefaultFormat, "jpg", "jpeg", "png") {
+		return &configError{"conversion.default_format debe ser jpg o png"}
+	}
+	if payload.Conversion.DefaultQuality < 1 || payload.Conversion.DefaultQuality > 100 {
+		return &configError{"conversion.default_quality debe estar entre 1 y 100"}
+	}
 	if payload.Security.MaxConcurrentUploads <= 0 {
 		return &configError{"security.max_concurrent_uploads debe ser mayor que cero"}
+	}
+	if err := validateCORSOrigins(payload.Security.CorsOrigins); err != nil {
+		return err
+	}
+	if payload.OCR.DefaultMode != "" {
+		if !allowedValue(payload.OCR.DefaultMode, "hybrid", "exhaustive", "ocr_only") {
+			return &configError{"ocr.default_mode debe ser hybrid, exhaustive u ocr_only"}
+		}
+		if payload.OCR.Workers < 1 || payload.OCR.Workers > 16 {
+			return &configError{"ocr.workers debe estar entre 1 y 16"}
+		}
+		if payload.OCR.PageTimeoutSeconds < 10 || payload.OCR.PageTimeoutSeconds > 3600 {
+			return &configError{"ocr.page_timeout_seconds debe estar entre 10 y 3600"}
+		}
+		if payload.OCR.RetriesPerPage < 1 || payload.OCR.RetriesPerPage > 10 {
+			return &configError{"ocr.retries_per_page debe estar entre 1 y 10"}
+		}
+		if payload.OCR.RenderDPI < 150 || payload.OCR.RenderDPI > 600 {
+			return &configError{"ocr.render_dpi debe estar entre 150 y 600"}
+		}
+		if payload.OCR.MinTextChars < 1 || payload.OCR.MinTextChars > 10000 {
+			return &configError{"ocr.min_text_chars debe estar entre 1 y 10000"}
+		}
+		if err := validateOCRLanguages(payload.OCR.CandidateLanguages, payload.OCR.FallbackLanguages); err != nil {
+			return err
+		}
+		if payload.OCR.LanguageDetection.SamplePages < 1 || payload.OCR.LanguageDetection.SamplePages > 20 {
+			return &configError{"ocr.language_detection.sample_pages debe estar entre 1 y 20"}
+		}
+		if payload.OCR.LanguageDetection.MinSampleChars < 20 || payload.OCR.LanguageDetection.MinSampleChars > 10000 {
+			return &configError{"ocr.language_detection.min_sample_chars debe estar entre 20 y 10000"}
+		}
+		if payload.OCR.LanguageDetection.MinimumConfidence <= 0 || payload.OCR.LanguageDetection.MinimumConfidence > 1 {
+			return &configError{"ocr.language_detection.minimum_confidence debe ser mayor que 0 y máximo 1"}
+		}
+		if payload.OCR.LanguageDetection.MaxLanguages < 1 || payload.OCR.LanguageDetection.MaxLanguages > len(payload.OCR.CandidateLanguages) {
+			return &configError{"ocr.language_detection.max_languages debe ser válido para los idiomas seleccionados"}
+		}
 	}
 
 	next.Server.Port = payload.Server.Port
@@ -811,6 +1074,10 @@ func applyEditableConfig(next, current *config.Config, payload editableConfigPay
 	next.Frontend.RequireAuth = payload.Frontend.RequireAuth
 	next.Frontend.Username = payload.Frontend.Username
 	next.Frontend.Password = secretOrCurrent(payload.Frontend.Password, current.Frontend.Password)
+	next.Frontend.MenuOrientation = payload.Frontend.MenuOrientation
+	if next.Frontend.MenuOrientation != "vertical" {
+		next.Frontend.MenuOrientation = "horizontal"
+	}
 	next.BinaryStorage.Mode = payload.BinaryStorage.Mode
 	next.BinaryStorage.TempPath = payload.BinaryStorage.TempPath
 	next.FilesystemDisk = payload.S3.FilesystemDisk
@@ -829,11 +1096,24 @@ func applyEditableConfig(next, current *config.Config, payload editableConfigPay
 	next.IIIF.MaxHeight = payload.IIIF.MaxHeight
 	next.IIIF.CacheEnabled = payload.IIIF.CacheEnabled
 	next.IIIF.CacheTTL = payload.IIIF.CacheTTL
+	next.Conversion.DefaultWidth = payload.Conversion.DefaultWidth
+	next.Conversion.DefaultHeight = payload.Conversion.DefaultHeight
+	next.Conversion.DPI = payload.Conversion.DPI
+	next.Conversion.DefaultFormat = strings.ToLower(payload.Conversion.DefaultFormat)
+	if next.Conversion.DefaultFormat == "jpeg" {
+		next.Conversion.DefaultFormat = "jpg"
+	}
+	next.Conversion.DefaultQuality = payload.Conversion.DefaultQuality
+	next.Conversion.EnableOCR = payload.Conversion.EnableOCR
+	if payload.OCR.DefaultMode != "" {
+		next.OCR = payload.OCR
+		next.Conversion.EnableOCR = payload.OCR.Enabled
+	}
 	next.Projects.Enabled = payload.Projects.Enabled
 	next.Projects.DefaultProject = payload.Projects.DefaultProject
 	next.Projects.RequireProject = payload.Projects.RequireProject
 	next.Projects.AllowDynamicTenants = payload.Projects.AllowDynamicTenants
-	next.Projects.Items = payload.Projects.Items
+	next.Projects.Items = mergeProjectSecrets(payload.Projects.Items, current.Projects.Items)
 	next.Security.EnableAuth = payload.Security.EnableAuth
 	next.Security.LogLevel = payload.Security.LogLevel
 	next.Security.CorsOrigins = payload.Security.CorsOrigins
@@ -844,13 +1124,174 @@ func applyEditableConfig(next, current *config.Config, payload editableConfigPay
 	if len(next.Projects.Items) == 0 {
 		next.Projects.Items = []config.ProjectConfig{{Key: "default", Name: "Proyecto por defecto", Multitenant: false, Tenants: []string{}}}
 	}
+	if err := validateProjects(next.Projects.Items, next.Projects.DefaultProject); err != nil {
+		return err
+	}
 	return nil
+}
+
+func validateProjects(items []config.ProjectConfig, defaultProject string) error {
+	seen := map[string]struct{}{}
+	defaultFound := false
+	for _, item := range items {
+		if !validScopeKey(item.Key) {
+			return &configError{"projects.items.key solo admite letras, números, punto, guion y guion bajo"}
+		}
+		key := strings.ToLower(item.Key)
+		if _, exists := seen[key]; exists {
+			return &configError{"projects.items contiene claves duplicadas"}
+		}
+		seen[key] = struct{}{}
+		if strings.EqualFold(item.Key, defaultProject) {
+			defaultFound = true
+		}
+		for _, tenant := range item.Tenants {
+			if !validScopeKey(tenant) {
+				return &configError{"projects.items.tenants contiene un identificador inválido"}
+			}
+		}
+		if endpoint := strings.TrimSpace(item.TenantsEndpoint); endpoint != "" {
+			parsed, err := url.Parse(endpoint)
+			if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" {
+				return &configError{"projects.items.tenants_endpoint debe ser una URL http/https válida"}
+			}
+		}
+		authType := strings.ToLower(strings.TrimSpace(item.TenantsAuthType))
+		if !allowedValue(authType, "", "none", "bearer", "api_key") {
+			return &configError{"projects.items.tenants_auth_type debe ser none, bearer o api_key"}
+		}
+		if authType == "bearer" && strings.TrimSpace(item.TenantsAuthToken) == "" {
+			return &configError{"projects.items necesita un Bearer token para sincronizar tenants"}
+		}
+		if authType == "api_key" {
+			if !validHTTPHeaderName(item.TenantsAuthHeader) {
+				return &configError{"projects.items.tenants_auth_header debe ser una cabecera HTTP válida"}
+			}
+			if strings.TrimSpace(item.TenantsAuthToken) == "" {
+				return &configError{"projects.items necesita una API key para sincronizar tenants"}
+			}
+		}
+	}
+	if !defaultFound {
+		return &configError{"projects.default_project debe existir en projects.items"}
+	}
+	return nil
+}
+
+func mergeProjectSecrets(items, current []config.ProjectConfig) []config.ProjectConfig {
+	result := make([]config.ProjectConfig, len(items))
+	currentByKey := make(map[string]config.ProjectConfig, len(current))
+	for _, project := range current {
+		currentByKey[strings.ToLower(strings.TrimSpace(project.Key))] = project
+	}
+	for index, project := range items {
+		authType := strings.ToLower(strings.TrimSpace(project.TenantsAuthType))
+		if authType == "" {
+			authType = "none"
+		}
+		project.TenantsAuthType = authType
+		project.TenantsAuthHeader = strings.TrimSpace(project.TenantsAuthHeader)
+		if authType == "none" {
+			project.TenantsAuthHeader = ""
+			project.TenantsAuthToken = ""
+		} else {
+			previous := currentByKey[strings.ToLower(strings.TrimSpace(project.Key))]
+			project.TenantsAuthToken = secretOrCurrent(project.TenantsAuthToken, previous.TenantsAuthToken)
+			if authType == "bearer" {
+				project.TenantsAuthHeader = "Authorization"
+			} else if project.TenantsAuthHeader == "" {
+				project.TenantsAuthHeader = "X-API-Key"
+			}
+		}
+		project.TenantsTokenConfigured = false
+		result[index] = project
+	}
+	return result
+}
+
+func validHTTPHeaderName(value string) bool {
+	value = strings.TrimSpace(value)
+	if value == "" || len(value) > 128 {
+		return false
+	}
+	for _, char := range value {
+		if (char >= 'a' && char <= 'z') || (char >= 'A' && char <= 'Z') || (char >= '0' && char <= '9') || strings.ContainsRune("!#$%&'*+-.^_`|~", char) {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
+func validScopeKey(value string) bool {
+	value = strings.TrimSpace(value)
+	if value == "" || len(value) > 128 || value == "." || value == ".." {
+		return false
+	}
+	for _, char := range value {
+		if (char >= 'a' && char <= 'z') || (char >= 'A' && char <= 'Z') || (char >= '0' && char <= '9') || char == '-' || char == '_' || char == '.' {
+			continue
+		}
+		return false
+	}
+	return true
 }
 
 func validatePort(value, field string) error {
 	port, err := strconv.Atoi(value)
 	if err != nil || port < 1 || port > 65535 {
 		return &configError{field + " debe ser un puerto entre 1 y 65535"}
+	}
+	return nil
+}
+
+func validateCORSOrigins(origins []string) error {
+	seen := map[string]struct{}{}
+	for _, raw := range origins {
+		origin := strings.TrimSpace(raw)
+		if origin == "" {
+			return &configError{"security.cors_origins no puede contener valores vacíos"}
+		}
+		if _, exists := seen[origin]; exists {
+			continue
+		}
+		seen[origin] = struct{}{}
+		candidate := origin
+		if strings.Contains(candidate, "*") {
+			if strings.Count(candidate, "*") != 1 || !strings.Contains(candidate, "://*.") {
+				return &configError{"origen CORS wildcard inválido: " + origin}
+			}
+			candidate = strings.Replace(candidate, "*.", "wildcard.", 1)
+		}
+		parsed, err := url.Parse(candidate)
+		if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" || (parsed.Path != "" && parsed.Path != "/") || parsed.RawQuery != "" || parsed.Fragment != "" {
+			return &configError{"origen CORS inválido: " + origin}
+		}
+	}
+	return nil
+}
+
+func validateOCRLanguages(candidates, fallbacks []string) error {
+	allowed := map[string]bool{"spa": true, "eng": true, "fra": true, "por": true}
+	selected := map[string]bool{}
+	if len(candidates) == 0 {
+		return &configError{"ocr.candidate_languages debe incluir al menos un idioma"}
+	}
+	for _, language := range candidates {
+		if !allowed[language] || selected[language] {
+			return &configError{"idioma OCR candidato inválido o duplicado: " + language}
+		}
+		selected[language] = true
+	}
+	if len(fallbacks) == 0 {
+		return &configError{"ocr.fallback_languages debe incluir al menos un idioma"}
+	}
+	seenFallback := map[string]bool{}
+	for _, language := range fallbacks {
+		if !selected[language] || seenFallback[language] {
+			return &configError{"idioma OCR de respaldo inválido o no seleccionado: " + language}
+		}
+		seenFallback[language] = true
 	}
 	return nil
 }

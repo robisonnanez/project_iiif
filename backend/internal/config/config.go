@@ -99,12 +99,16 @@ type Config struct {
 	} `yaml:"iiif"`
 
 	Conversion struct {
+		DefaultWidth    int    `yaml:"default_width"`
+		DefaultHeight   int    `yaml:"default_height"`
 		DefaultFormat   string `yaml:"default_format"`
 		DefaultQuality  int    `yaml:"default_quality"`
 		EnableOCR       bool   `yaml:"enable_ocr"`
 		DPI             int    `yaml:"dpi"`
 		BackgroundColor string `yaml:"background_color"`
 	} `yaml:"conversion"`
+
+	OCR OCRConfig `yaml:"ocr"`
 
 	Security struct {
 		EnableAuth           bool     `yaml:"enable_auth"`
@@ -114,11 +118,12 @@ type Config struct {
 	} `yaml:"security"`
 
 	Frontend struct {
-		Enabled     bool   `yaml:"enabled"`
-		Path        string `yaml:"path"`
-		RequireAuth bool   `yaml:"require_auth"`
-		Username    string `yaml:"username"`
-		Password    string `yaml:"password"`
+		Enabled         bool   `yaml:"enabled"`
+		Path            string `yaml:"path"`
+		RequireAuth     bool   `yaml:"require_auth"`
+		Username        string `yaml:"username"`
+		Password        string `yaml:"password"`
+		MenuOrientation string `yaml:"menu_orientation"`
 	} `yaml:"frontend"`
 
 	Projects struct {
@@ -147,11 +152,39 @@ type Config struct {
 	} `yaml:"migration"`
 }
 
+type OCRConfig struct {
+	Enabled             bool     `yaml:"enabled" json:"enabled"`
+	AutoAfterConversion bool     `yaml:"auto_after_conversion" json:"auto_after_conversion"`
+	DefaultMode         string   `yaml:"default_mode" json:"default_mode"`
+	Workers             int      `yaml:"workers" json:"workers"`
+	PageTimeoutSeconds  int      `yaml:"page_timeout_seconds" json:"page_timeout_seconds"`
+	RetriesPerPage      int      `yaml:"retries_per_page" json:"retries_per_page"`
+	RenderDPI           int      `yaml:"render_dpi" json:"render_dpi"`
+	MinTextChars        int      `yaml:"min_text_chars" json:"min_text_chars"`
+	CandidateLanguages  []string `yaml:"candidate_languages" json:"candidate_languages"`
+	FallbackLanguages   []string `yaml:"fallback_languages" json:"fallback_languages"`
+	LanguageDetection   struct {
+		Enabled           bool    `yaml:"enabled" json:"enabled"`
+		SamplePages       int     `yaml:"sample_pages" json:"sample_pages"`
+		MinSampleChars    int     `yaml:"min_sample_chars" json:"min_sample_chars"`
+		MinimumConfidence float64 `yaml:"minimum_confidence" json:"minimum_confidence"`
+		MaxLanguages      int     `yaml:"max_languages" json:"max_languages"`
+	} `yaml:"language_detection" json:"language_detection"`
+	Artifacts struct {
+		Gzip bool `yaml:"gzip" json:"gzip"`
+	} `yaml:"artifacts" json:"artifacts"`
+}
+
 type ProjectConfig struct {
-	Key         string   `yaml:"key" json:"key"`
-	Name        string   `yaml:"name" json:"name"`
-	Multitenant bool     `yaml:"multitenant" json:"multitenant"`
-	Tenants     []string `yaml:"tenants" json:"tenants"`
+	Key                    string   `yaml:"key" json:"key"`
+	Name                   string   `yaml:"name" json:"name"`
+	Multitenant            bool     `yaml:"multitenant" json:"multitenant"`
+	Tenants                []string `yaml:"tenants" json:"tenants"`
+	TenantsEndpoint        string   `yaml:"tenants_endpoint,omitempty" json:"tenants_endpoint,omitempty"`
+	TenantsAuthType        string   `yaml:"tenants_auth_type,omitempty" json:"tenants_auth_type,omitempty"`
+	TenantsAuthHeader      string   `yaml:"tenants_auth_header,omitempty" json:"tenants_auth_header,omitempty"`
+	TenantsAuthToken       string   `yaml:"tenants_auth_token,omitempty" json:"tenants_auth_token,omitempty"`
+	TenantsTokenConfigured bool     `yaml:"-" json:"tenants_token_configured,omitempty"`
 }
 
 func Load(filename string) (*Config, error) {
@@ -177,12 +210,22 @@ func applyEnvironment(config *Config) {
 		name   string
 		target *string
 	}{
+		{"STORAGE_BACKEND", &config.StorageBackend},
+		{"DB_CONNECTION", &config.DBConnection},
+		{"DB_HOST", &config.DBHost},
+		{"DB_PORT", &config.DBPort},
+		{"DB_DATABASE", &config.DBDatabase},
+		{"DB_USERNAME", &config.DBUsername},
+		{"DB_PASSWORD", &config.DBPassword},
 		{"FILESYSTEM_DISK", &config.FilesystemDisk},
 		{"AWS_ACCESS_KEY_ID", &config.AWSAccessKeyID},
 		{"AWS_SECRET_ACCESS_KEY", &config.AWSSecretAccessKey},
 		{"AWS_DEFAULT_REGION", &config.AWSDefaultRegion},
 		{"AWS_BUCKET", &config.AWSBucket},
 		{"AWS_ENDPOINT", &config.AWSEndpoint},
+		{"FRONTEND_USERNAME", &config.Frontend.Username},
+		{"FRONTEND_PASSWORD", &config.Frontend.Password},
+		{"IIIF_BASE_URL", &config.IIIF.BaseURL},
 	}
 	for _, item := range stringValues {
 		if value, ok := os.LookupEnv(item.name); ok {
@@ -240,6 +283,45 @@ func (config *Config) ApplyDefaults() {
 
 func applyDefaults(config *Config) {
 	defaults := Default()
+	if config.OCR.DefaultMode == "" {
+		config.OCR.DefaultMode = defaults.OCR.DefaultMode
+	}
+	if config.OCR.Workers <= 0 {
+		config.OCR.Workers = defaults.OCR.Workers
+	}
+	if config.OCR.PageTimeoutSeconds <= 0 {
+		config.OCR.PageTimeoutSeconds = defaults.OCR.PageTimeoutSeconds
+	}
+	if config.OCR.RetriesPerPage <= 0 {
+		config.OCR.RetriesPerPage = defaults.OCR.RetriesPerPage
+	}
+	if config.OCR.RenderDPI <= 0 {
+		config.OCR.RenderDPI = defaults.OCR.RenderDPI
+	}
+	if config.OCR.MinTextChars <= 0 {
+		config.OCR.MinTextChars = defaults.OCR.MinTextChars
+	}
+	if len(config.OCR.CandidateLanguages) == 0 {
+		config.OCR.CandidateLanguages = defaults.OCR.CandidateLanguages
+	}
+	if len(config.OCR.FallbackLanguages) == 0 {
+		config.OCR.FallbackLanguages = defaults.OCR.FallbackLanguages
+	}
+	if config.OCR.LanguageDetection.SamplePages <= 0 {
+		config.OCR.LanguageDetection.SamplePages = defaults.OCR.LanguageDetection.SamplePages
+	}
+	if config.OCR.LanguageDetection.MinSampleChars <= 0 {
+		config.OCR.LanguageDetection.MinSampleChars = defaults.OCR.LanguageDetection.MinSampleChars
+	}
+	if config.OCR.LanguageDetection.MinimumConfidence <= 0 {
+		config.OCR.LanguageDetection.MinimumConfidence = defaults.OCR.LanguageDetection.MinimumConfidence
+	}
+	if config.OCR.LanguageDetection.MaxLanguages <= 0 {
+		config.OCR.LanguageDetection.MaxLanguages = defaults.OCR.LanguageDetection.MaxLanguages
+	}
+	if config.Conversion.EnableOCR {
+		config.OCR.Enabled = true
+	}
 	if config.FilesystemDisk == "" {
 		config.FilesystemDisk = "local"
 	}
@@ -399,6 +481,9 @@ func applyDefaults(config *Config) {
 	}
 	if config.Frontend.Password == "" {
 		config.Frontend.Password = defaults.Frontend.Password
+	}
+	if config.Frontend.MenuOrientation != "vertical" {
+		config.Frontend.MenuOrientation = "horizontal"
 	}
 	if config.Projects.DefaultProject == "" {
 		config.Projects.DefaultProject = defaults.Projects.DefaultProject
@@ -585,18 +670,36 @@ func Default() *Config {
 			ScaleFactors: []int{1, 2, 4, 8},
 		},
 		Conversion: struct {
+			DefaultWidth    int    `yaml:"default_width"`
+			DefaultHeight   int    `yaml:"default_height"`
 			DefaultFormat   string `yaml:"default_format"`
 			DefaultQuality  int    `yaml:"default_quality"`
 			EnableOCR       bool   `yaml:"enable_ocr"`
 			DPI             int    `yaml:"dpi"`
 			BackgroundColor string `yaml:"background_color"`
 		}{
+			DefaultWidth:    1241,
+			DefaultHeight:   1754,
 			DefaultFormat:   "jpg",
 			DefaultQuality:  85,
 			EnableOCR:       false,
 			DPI:             150,
 			BackgroundColor: "white",
 		},
+		OCR: func() OCRConfig {
+			value := OCRConfig{
+				Enabled: false, AutoAfterConversion: false, DefaultMode: "hybrid", Workers: 2,
+				PageTimeoutSeconds: 120, RetriesPerPage: 2, RenderDPI: 300, MinTextChars: 40,
+				CandidateLanguages: []string{"spa", "eng", "fra", "por"}, FallbackLanguages: []string{"spa"},
+			}
+			value.LanguageDetection.Enabled = true
+			value.LanguageDetection.SamplePages = 5
+			value.LanguageDetection.MinSampleChars = 200
+			value.LanguageDetection.MinimumConfidence = 0.70
+			value.LanguageDetection.MaxLanguages = 2
+			value.Artifacts.Gzip = true
+			return value
+		}(),
 		Security: struct {
 			EnableAuth           bool     `yaml:"enable_auth"`
 			LogLevel             string   `yaml:"log_level"`
@@ -609,17 +712,19 @@ func Default() *Config {
 			MaxConcurrentUploads: 5,
 		},
 		Frontend: struct {
-			Enabled     bool   `yaml:"enabled"`
-			Path        string `yaml:"path"`
-			RequireAuth bool   `yaml:"require_auth"`
-			Username    string `yaml:"username"`
-			Password    string `yaml:"password"`
+			Enabled         bool   `yaml:"enabled"`
+			Path            string `yaml:"path"`
+			RequireAuth     bool   `yaml:"require_auth"`
+			Username        string `yaml:"username"`
+			Password        string `yaml:"password"`
+			MenuOrientation string `yaml:"menu_orientation"`
 		}{
-			Enabled:     false,
-			Path:        "./frontend",
-			RequireAuth: true,
-			Username:    "admin",
-			Password:    "CAMBIAR_PASSWORD",
+			Enabled:         false,
+			Path:            "./frontend",
+			RequireAuth:     true,
+			Username:        "admin",
+			Password:        "CAMBIAR_PASSWORD",
+			MenuOrientation: "horizontal",
 		},
 		Projects: struct {
 			Enabled             bool            `yaml:"enabled"`
