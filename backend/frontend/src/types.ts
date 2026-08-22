@@ -47,6 +47,7 @@ export interface AppConfig {
     manifests_path: string;
   };
   database: {
+    auto_migrate: boolean;
     DB_CONNECTION: Engine | "local";
     DB_HOST: string;
     DB_PORT: string;
@@ -106,6 +107,19 @@ export interface OCRSearchResult {
 }
 
 export interface OCRSearchResponse { results: OCRSearchResult[]; total: number; limit: number; offset: number }
+
+export interface DBMigrationResult {
+  engine: string;
+  pending_before: number;
+  applied: number;
+  skipped: number;
+  duration_ms: number;
+  message: string;
+  errors?: string[];
+  applied_files?: string[];
+}
+
+export interface DBMigrationStatus { running: boolean; result: DBMigrationResult }
 
 export interface UploadSettings {
   width: number;

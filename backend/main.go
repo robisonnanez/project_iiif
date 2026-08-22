@@ -40,7 +40,7 @@ func main() {
 
 	// Crear directorios necesarios
 	createDirectories(cfg)
-	if envEnabled("AUTO_MIGRATE") && cfg.Storage.Backend != "local" {
+	if (cfg.Database.AutoMigrate || envEnabled("AUTO_MIGRATE")) && cfg.Storage.Backend != "local" {
 		result, migrationErr := storage.RunDBMigrations(cfg, ".")
 		if migrationErr != nil {
 			log.Fatalf("Error ejecutando migraciones de %s: %v", result.Engine, migrationErr)

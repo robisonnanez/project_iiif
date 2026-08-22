@@ -4,6 +4,7 @@ export const sampleConfig: AppConfig = {
   server: { port: "8080", mode: "debug" },
   storage: { backend: "mysql", data_path: "./data", pdfs_path: "./data/pdfs", images_path: "./data/images", documents_path: "./data/documents", thumbnails_path: "./data/thumbnails", manifests_path: "./data/manifests" },
   database: {
+    auto_migrate: false,
     DB_CONNECTION: "mysql", DB_HOST: "mysql", DB_PORT: "3306", DB_DATABASE: "project_iiif", DB_USERNAME: "app", DB_PASSWORD: "********",
     mysql: { host: "mysql", port: "3306", user: "app", password: "********", password_configured: true, database: "project_iiif", charset: "utf8mb4", parse_time: true },
     postgres: { host: "postgres", port: "5432", user: "app", password: "", database: "project_iiif", sslmode: "disable", schema: "public" },

@@ -1465,6 +1465,9 @@ const docTemplate = `{
                         "DB_USERNAME": {
                             "type": "string"
                         },
+                        "auto_migrate": {
+                            "type": "boolean"
+                        },
                         "mongodb": {
                             "type": "object",
                             "properties": {

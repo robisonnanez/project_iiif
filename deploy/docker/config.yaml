@@ -18,6 +18,7 @@ storage:
   thumbnails_path: "/app/data/thumbnails"
   manifests_path: "/app/data/manifests"
 database:
+  auto_migrate: false
   mysql:
     host: "mysql"
     port: "3306"

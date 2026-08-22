@@ -91,3 +91,16 @@ it("solicita la contraseña y reinicia el servicio después de guardar", async (
   expect(await screen.findByText(/Reinicio en curso/)).toBeInTheDocument();
   expect(screen.queryByRole("heading", { name: "Reiniciar servicio" })).not.toBeInTheDocument();
 });
+
+it("permite ejecutar las migraciones del motor activo", async () => {
+  const user = userEvent.setup();
+  vi.spyOn(api, "dbMigrationStatus").mockResolvedValueOnce({ running: false, result: { engine: "mysql", pending_before: 0, applied: 0, skipped: 0, duration_ms: 0, message: "sin ejecutar" } });
+  const run = vi.spyOn(api, "runDBMigrations").mockResolvedValueOnce({ engine: "mysql", pending_before: 2, applied: 2, skipped: 4, duration_ms: 25, message: "migraciones aplicadas" });
+  render(<ConfigPage initial={structuredClone(sampleConfig)} onSaved={() => undefined} />);
+
+  await user.click(screen.getByRole("button", { name: "Ejecutar migraciones ahora" }));
+
+  expect(run).toHaveBeenCalledOnce();
+  expect(await screen.findByText("2 migración(es) aplicadas en mysql.")).toBeInTheDocument();
+  expect(screen.getByText(/Aplicadas: 2 · Omitidas: 4/)).toBeInTheDocument();
+});

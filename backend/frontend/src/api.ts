@@ -1,4 +1,4 @@
-import type { AppConfig, DocumentImagesResponse, DocumentRecord, MigrationDirectory, MigrationPayload, MigrationStatus, OCRJob, OCRSearchResponse, ProjectConfig, UploadScope, UploadSettings } from "./types";
+import type { AppConfig, DBMigrationResult, DBMigrationStatus, DocumentImagesResponse, DocumentRecord, MigrationDirectory, MigrationPayload, MigrationStatus, OCRJob, OCRSearchResponse, ProjectConfig, UploadScope, UploadSettings } from "./types";
 
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
   const response = await fetch(url, { credentials: "same-origin", ...init });
@@ -12,7 +12,7 @@ async function request<T>(url: string, init?: RequestInit): Promise<T> {
 }
 
 export const api = {
-  config: () => request<AppConfig>("/api/v1/admin/config"),
+  config: async () => normalizeConfig(await request<AppConfig>("/api/v1/admin/config")),
   saveConfig: (config: AppConfig) => request<{ message: string }>("/api/v1/admin/config", {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
@@ -25,7 +25,12 @@ export const api = {
     body: JSON.stringify({ password }),
   }),
   serviceHealth: () => request<{ status: string }>("/health", { cache: "no-store" }),
-  documents: () => request<DocumentRecord[]>("/api/v1/documents"),
+  documents: async () => {
+    const documents = await request<DocumentRecord[] | null>("/api/v1/documents");
+    return Array.isArray(documents) ? documents : [];
+  },
+  dbMigrationStatus: () => request<DBMigrationStatus>("/api/v1/admin/db/migrations/status"),
+  runDBMigrations: () => request<DBMigrationResult>("/api/v1/admin/db/migrations/run", { method: "POST" }),
   deleteDocument: (documentId: string) => request<{ message: string }>(`/api/v1/documents/${encodeURIComponent(documentId)}`, { method: "DELETE" }),
   upload: (file: File, settings: UploadSettings, scope: UploadScope) => {
     const form = new FormData();
@@ -57,3 +62,20 @@ export const api = {
   },
   logout: () => request<void>("/auth/logout", { method: "POST" }),
 };
+
+function normalizeConfig(config: AppConfig): AppConfig {
+  return {
+    ...config,
+    database: { ...config.database, auto_migrate: Boolean(config.database.auto_migrate) },
+    security: { ...config.security, cors_origins: Array.isArray(config.security.cors_origins) ? config.security.cors_origins : [] },
+    projects: {
+      ...config.projects,
+      items: Array.isArray(config.projects.items) ? config.projects.items.map((project) => ({ ...project, tenants: Array.isArray(project.tenants) ? project.tenants : [] })) : [],
+    },
+    ocr: {
+      ...config.ocr,
+      candidate_languages: Array.isArray(config.ocr.candidate_languages) ? config.ocr.candidate_languages : [],
+      fallback_languages: Array.isArray(config.ocr.fallback_languages) ? config.ocr.fallback_languages : [],
+    },
+  };
+}
