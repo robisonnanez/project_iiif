@@ -46,7 +46,8 @@ type Config struct {
 	} `yaml:"storage"`
 
 	Database struct {
-		MySQL struct {
+		AutoMigrate bool `yaml:"auto_migrate"`
+		MySQL       struct {
 			Host      string `yaml:"host"`
 			Port      string `yaml:"port"`
 			User      string `yaml:"user"`
@@ -551,7 +552,8 @@ func Default() *Config {
 			ManifestsPath:  "./data/manifests",
 		},
 		Database: struct {
-			MySQL struct {
+			AutoMigrate bool `yaml:"auto_migrate"`
+			MySQL       struct {
 				Host      string `yaml:"host"`
 				Port      string `yaml:"port"`
 				User      string `yaml:"user"`

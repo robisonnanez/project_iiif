@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { api } from "../api";
 import { applyMongoURI, mongoURIFromConfig } from "../lib/validation";
-import type { AppConfig, BinaryMode, Engine } from "../types";
+import type { AppConfig, BinaryMode, DBMigrationResult, Engine } from "../types";
 import { Alert, Button, Card, Checkbox, FormField, Input, Modal, PageHeader, Select, Spinner } from "../components/ui";
 
 export function ConfigPage({ initial, onSaved }: { initial: AppConfig; onSaved: (config: AppConfig) => void }) {
@@ -16,6 +16,9 @@ export function ConfigPage({ initial, onSaved }: { initial: AppConfig; onSaved: 
   const [restartBusy, setRestartBusy] = useState(false);
   const [restartError, setRestartError] = useState("");
   const [restartScheduled, setRestartScheduled] = useState(false);
+  const [migrationResult, setMigrationResult] = useState<DBMigrationResult | null>(null);
+  const [migrationBusy, setMigrationBusy] = useState(false);
+  const [migrationError, setMigrationError] = useState("");
   const engine = (config.storage.backend === "local" ? "mysql" : config.storage.backend) as Engine;
 
   useEffect(() => {
@@ -42,6 +45,10 @@ export function ConfigPage({ initial, onSaved }: { initial: AppConfig; onSaved: 
     timer = window.setTimeout(check, 2000);
     return () => { cancelled = true; window.clearTimeout(timer); };
   }, [restartScheduled]);
+
+  useEffect(() => {
+    void api.dbMigrationStatus().then((status) => setMigrationResult(status.result)).catch(() => undefined);
+  }, []);
 
   const setEngine = (value: Engine) => setConfig((current) => ({ ...current, storage: { ...current.storage, backend: value }, database: { ...current.database, DB_CONNECTION: value } }));
   const setBinaryMode = (value: BinaryMode) => setConfig((current) => ({ ...current, binary_storage: { ...current.binary_storage, mode: value }, s3: { ...current.s3, filesystem_disk: value === "s3" ? "s3" : "local" } }));
@@ -97,6 +104,17 @@ export function ConfigPage({ initial, onSaved }: { initial: AppConfig; onSaved: 
     } finally { setRestartBusy(false); }
   };
 
+  const runMigrations = async () => {
+    setMigrationBusy(true); setMigrationError("");
+    try {
+      const result = await api.runDBMigrations();
+      setMigrationResult(result);
+      setMessage(result.applied > 0 ? `${result.applied} migración(es) aplicadas en ${result.engine}.` : `El esquema de ${result.engine} ya está actualizado.`);
+    } catch (cause) {
+      setMigrationError(cause instanceof Error ? cause.message : "No se pudieron ejecutar las migraciones.");
+    } finally { setMigrationBusy(false); }
+  };
+
   return <>
     <PageHeader eyebrow="Administración" title="Configuración" description="Metadata, almacenamiento, conversión, OCR y seguridad desde una sola vista." actions={<Button onClick={save} disabled={busy}>{busy ? <Spinner label="Guardando" /> : "Guardar cambios"}</Button>} />
     {message && <Alert tone="success">{message}</Alert>}{error && <Alert tone="danger">{error}</Alert>}
@@ -122,6 +140,13 @@ export function ConfigPage({ initial, onSaved }: { initial: AppConfig; onSaved: 
           <FormField label="Contraseña" help={config.database[engine].password_configured ? "Ya existe una contraseña. Déjala vacía para conservarla." : undefined}>{(id) => <Input id={id} type="password" value={config.database[engine].password === "********" ? "" : config.database[engine].password} onChange={(e) => updateDatabase("password", e.target.value)} autoComplete="new-password" />}</FormField>
           {engine === "postgres" && <FormField label="SSL mode">{(id) => <Select id={id} value={config.database.postgres.sslmode} onChange={(e) => updateDatabase("sslmode", e.target.value)}><option value="disable">disable</option><option value="require">require</option><option value="verify-full">verify-full</option></Select>}</FormField>}
         </div>}
+        <div className="config-subsection database-migrations">
+          <h3>Migraciones del esquema</h3>
+          <p>Crea y actualiza las tablas o índices del motor activo. Guarda primero cualquier cambio de conexión.</p>
+          <Checkbox label="Ejecutar migraciones pendientes al iniciar el servicio" checked={config.database.auto_migrate} onChange={(event) => setConfig({ ...config, database: { ...config.database, auto_migrate: event.target.checked } })} />
+          <div className="tenant-sync-row"><Button type="button" variant="secondary" disabled={migrationBusy || config.storage.backend === "local"} onClick={() => void runMigrations()}>{migrationBusy ? <Spinner label="Ejecutando migraciones" /> : "Ejecutar migraciones ahora"}</Button>{migrationResult && <span>Motor: {migrationResult.engine || "—"} · Aplicadas: {migrationResult.applied || 0} · Omitidas: {migrationResult.skipped || 0}</span>}</div>
+          {migrationError && <Alert tone="danger">{migrationError}</Alert>}
+        </div>
       </Card>
 
       <Card><div className="section-heading"><span className="step">2</span><div><h2>Binary storage</h2><p>Los PDFs e imágenes permanecen separados de la metadata.</p></div></div>

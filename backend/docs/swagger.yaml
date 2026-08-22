@@ -106,6 +106,8 @@ definitions:
             type: string
           DB_USERNAME:
             type: string
+          auto_migrate:
+            type: boolean
           mongodb:
             properties:
               auth_source:

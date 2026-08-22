@@ -703,6 +703,7 @@ func (h *AdminHandler) sanitizedConfig() gin.H {
 			"manifests_path":  h.config.Storage.ManifestsPath,
 		},
 		"database": gin.H{
+			"auto_migrate":  h.config.Database.AutoMigrate,
 			"DB_CONNECTION": h.config.DBConnection,
 			"DB_HOST":       h.config.DBHost,
 			"DB_PORT":       h.config.DBPort,
@@ -790,7 +791,7 @@ func (h *AdminHandler) sanitizedConfig() gin.H {
 		"security": gin.H{
 			"enable_auth":            h.config.Security.EnableAuth,
 			"log_level":              h.config.Security.LogLevel,
-			"cors_origins":           h.config.Security.CorsOrigins,
+			"cors_origins":           nonNilStrings(h.config.Security.CorsOrigins),
 			"max_concurrent_uploads": h.config.Security.MaxConcurrentUploads,
 		},
 	}
@@ -804,9 +805,17 @@ func maskedSecret(value string) string {
 }
 
 func sanitizedProject(project config.ProjectConfig) config.ProjectConfig {
+	project.Tenants = nonNilStrings(project.Tenants)
 	project.TenantsTokenConfigured = project.TenantsAuthToken != ""
 	project.TenantsAuthToken = maskedSecret(project.TenantsAuthToken)
 	return project
+}
+
+func nonNilStrings(values []string) []string {
+	if values == nil {
+		return []string{}
+	}
+	return values
 }
 
 func sanitizedProjects(projects []config.ProjectConfig) []config.ProjectConfig {
@@ -832,6 +841,7 @@ type editableConfigPayload struct {
 		ManifestsPath  string `json:"manifests_path"`
 	} `json:"storage"`
 	Database struct {
+		AutoMigrate  bool   `json:"auto_migrate"`
 		DBConnection string `json:"DB_CONNECTION"`
 		DBHost       string `json:"DB_HOST"`
 		DBPort       string `json:"DB_PORT"`
@@ -1042,6 +1052,7 @@ func applyEditableConfig(next, current *config.Config, payload editableConfigPay
 	next.Database.MongoDB.AuthSource = payload.Database.MongoDB.AuthSource
 	next.Database.MongoDB.DirectConnection = payload.Database.MongoDB.DirectConnection
 	next.Database.MongoDB.ServerSelectionTimeoutMS = payload.Database.MongoDB.ServerSelectionTimeoutMS
+	next.Database.AutoMigrate = payload.Database.AutoMigrate
 
 	next.DBConnection = payload.Database.DBConnection
 	next.DBHost = payload.Database.DBHost

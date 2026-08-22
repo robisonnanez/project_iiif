@@ -39,6 +39,8 @@ storage:
 
 # Tambien puedes usar las claves DB_* de arriba; si estan presentes, tienen prioridad.
 database:
+  # Ejecuta las migraciones pendientes de forma idempotente antes de iniciar el servidor.
+  auto_migrate: false
   mysql:
     host: "127.0.0.1"
     port: "3306"

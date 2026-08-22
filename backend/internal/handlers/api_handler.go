@@ -225,6 +225,9 @@ func (h *APIHandler) GetDocuments(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Error obteniendo documentos"})
 		return
 	}
+	if docs == nil {
+		docs = make([]*models.PDFDocument, 0)
+	}
 
 	c.JSON(http.StatusOK, docs)
 }
