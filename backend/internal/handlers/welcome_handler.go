@@ -23,9 +23,9 @@ func NewWelcomeHandler(config *config.Config) *WelcomeHandler {
 
 func (h *WelcomeHandler) Welcome(c *gin.Context) {
 	loginButton := ""
-	docsButton := `<a class="button secondary" href="/swagger/index.html">Documentacion API</a>`
+	docsButton := `<a class="button secondary" href="/swagger/index.html" target="_blank" rel="noopener noreferrer">Documentación API</a>`
 	if h.config.Frontend.Enabled {
-		loginButton = `<button class="button" id="login-open" type="button">Iniciar sesion</button>`
+		loginButton = `<button class="button" id="login-open" type="button">Iniciar sesión</button>`
 	}
 
 	htmlBody := fmt.Sprintf(`<!DOCTYPE html>
@@ -39,8 +39,8 @@ func (h *WelcomeHandler) Welcome(c *gin.Context) {
 </head>
 <body>
   <main class="shell">
-    <section class="hero"><div class="hero-copy"><div class="brand"><span class="logo">IIIF</span><span>project_iiif</span></div><span class="eyebrow">Plataforma de publicación documental</span><h1>Convierte, organiza y publica en IIIF.</h1><p class="subtitle">Transforma documentos PDF en imágenes interoperables, genera manifests y localiza texto por página desde una sola plataforma.</p><div class="hero-actions">%s%s</div></div><aside class="hero-side"><span class="status-pill">● SERVICIO DISPONIBLE</span><h2 class="side-title">API lista para integrar</h2><p class="side-copy">Endpoint base: <strong>%s</strong><br>Image API 3 · Presentation API 3</p></aside></section>
-    <section class="content"><article class="panel"><h2>Servidor</h2><p>Puerto <strong>%s</strong><br>Entorno <strong>%s</strong></p></article><article class="panel"><h2>Almacenamiento</h2><p>Metadata <strong>%s</strong><br>Datos <strong>%s</strong></p></article><article class="panel"><h2>IIIF</h2><p>Versión pública <strong>%s</strong><br>Resolución máxima <strong>%s</strong></p></article><article class="panel endpoints"><h2>Endpoints principales</h2><div class="endpoint"><span class="method">GET</span><span>/iiif/3/{identifier}/info.json</span></div><div class="endpoint"><span class="method">GET</span><span>/iiif/3/{identifier}/full/max/0/default.jpg</span></div><div class="endpoint"><span class="method">GET</span><span>/api/v1/documents</span></div><div class="endpoint"><span class="method">GET</span><span>/health</span></div></article></section>
+    <section class="hero"><div class="hero-copy"><div class="brand"><span class="logo">IIIF</span><span>project_iiif</span></div><span class="eyebrow">Plataforma de publicación documental</span><h1>Convierte, organiza y publica en IIIF.</h1><p class="subtitle">Transforma documentos PDF en imágenes interoperables, genera manifiestos y localiza texto por página desde una sola plataforma.</p><div class="hero-actions">%s%s</div></div><aside class="hero-side"><span class="status-pill">● SERVICIO DISPONIBLE</span><h2 class="side-title">API lista para integrar</h2><p class="side-copy">Endpoint base: <strong>%s</strong><br>Image API 3 · Presentation API 3</p></aside></section>
+    <section class="content"><article class="panel"><h2>Servidor</h2><p>Puerto <strong>%s</strong><br>Entorno <strong>%s</strong></p></article><article class="panel"><h2>Almacenamiento</h2><p>Metadatos <strong>%s</strong><br>Datos <strong>%s</strong></p></article><article class="panel"><h2>IIIF</h2><p>Versión pública <strong>%s</strong><br>Resolución máxima <strong>%s</strong></p></article><article class="panel endpoints"><h2>Endpoints principales</h2><div class="endpoint"><span class="method">GET</span><span>/iiif/3/{identifier}/info.json</span></div><div class="endpoint"><span class="method">GET</span><span>/iiif/3/{identifier}/full/max/0/default.jpg</span></div><div class="endpoint"><span class="method">GET</span><span>/api/v1/documents</span></div><div class="endpoint"><span class="method">GET</span><span>/health</span></div></article></section>
     <p class="footer">IIIF Image API 3.0 · Presentation API 3.0 · API de gestión v1</p>
     </main>
     <div class="modal-backdrop" id="login-modal" aria-hidden="true">
@@ -87,7 +87,7 @@ func (h *WelcomeHandler) Welcome(c *gin.Context) {
                 return;
             }
             const data = await response.json().catch(() => ({}));
-            error.textContent = data.error || "No se pudo iniciar sesion";
+            error.textContent = data.error || "No se pudo iniciar sesión";
         });
     </script>
 </body>

@@ -9,13 +9,13 @@ Dashboard React / cliente IIIF
               |
           API Go
         /         \
-metadata          binarios
+metadatos         binarios
 MySQL             local
 PostgreSQL        BLOB/GridFS
 MongoDB           RustFS/S3
 ```
 
-La base de metadata conserva documentos, páginas, dimensiones, estado, configuración de conversión, outline y referencias. S3 conserva los bytes de PDF e imágenes. Las referencias `s3://bucket/key` son internas y nunca se publican en el manifiesto.
+La base de metadatos conserva documentos, páginas, dimensiones, estado, configuración de conversión, outline y referencias. S3 conserva los bytes de PDF e imágenes. Las referencias `s3://bucket/key` son internas y nunca se publican en el manifiesto.
 
 ## Funcionalidad
 
@@ -98,7 +98,7 @@ Si el PDF no contiene outline, `structures` se omite. Si contiene bookmarks, cad
 
 ## S3 / RustFS
 
-Con `binary_storage.mode: s3`, metadata y binarios permanecen desacoplados. Para comprobar el cliente contra el endpoint configurado:
+Con `binary_storage.mode: s3`, los metadatos y los binarios permanecen desacoplados. Para comprobar el cliente contra el endpoint configurado:
 
 ```bash
 cd backend
@@ -117,6 +117,7 @@ El smoke test crea un objeto temporal, lo lee y lo elimina. No borra documentos 
 - Especificación: `backend/docs/swagger.json` y `backend/docs/swagger.yaml`.
 - Servicio Linux: [docs/INSTALL_SERVICE.md](docs/INSTALL_SERVICE.md).
 - Docker: [docs/DOCKER.md](docs/DOCKER.md).
+- Avisos de actualización: `deploy/project-iiif-check-update` y las unidades systemd asociadas consultan diariamente `origin/master`, escriben el resultado en `journalctl` y nunca instalan cambios automáticamente. Consulta la sección 21 del manual del servicio Linux.
 
 ## Pruebas
 

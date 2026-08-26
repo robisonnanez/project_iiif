@@ -116,10 +116,10 @@ export function ConfigPage({ initial, onSaved }: { initial: AppConfig; onSaved: 
   };
 
   return <>
-    <PageHeader eyebrow="Administración" title="Configuración" description="Metadata, almacenamiento, conversión, OCR y seguridad desde una sola vista." actions={<Button onClick={save} disabled={busy}>{busy ? <Spinner label="Guardando" /> : "Guardar cambios"}</Button>} />
+    <PageHeader eyebrow="Administración" title="Configuración" description="Metadatos, almacenamiento, conversión, OCR y seguridad desde una sola vista." actions={<Button onClick={save} disabled={busy}>{busy ? <Spinner label="Guardando" /> : "Guardar cambios"}</Button>} />
     {message && <Alert tone="success">{message}</Alert>}{error && <Alert tone="danger">{error}</Alert>}
     <div className="settings-grid">
-      <Card><div className="section-heading"><span className="step">1</span><div><h2>Motor de metadata</h2><p>Selecciona dónde se guardan documentos y metadatos.</p></div></div>
+      <Card><div className="section-heading"><span className="step">1</span><div><h2>Motor de metadatos</h2><p>Selecciona dónde se guardan documentos y metadatos.</p></div></div>
         <FormField label="Motor">{(id) => <Select id={id} value={engine} onChange={(e) => setEngine(e.target.value as Engine)}><option value="mysql">MySQL</option><option value="postgres">PostgreSQL</option><option value="mongodb">MongoDB</option></Select>}</FormField>
         {engine === "mongodb" ? (
           <FormField label="Mongo URI" help="Deja la contraseña vacía para conservar la configurada.">
@@ -149,19 +149,19 @@ export function ConfigPage({ initial, onSaved }: { initial: AppConfig; onSaved: 
         </div>
       </Card>
 
-      <Card><div className="section-heading"><span className="step">2</span><div><h2>Binary storage</h2><p>Los PDFs e imágenes permanecen separados de la metadata.</p></div></div>
+      <Card><div className="section-heading"><span className="step">2</span><div><h2>Almacenamiento binario</h2><p>Los PDF y las imágenes permanecen separados de los metadatos.</p></div></div>
         <FormField label="Modo">{(id) => <Select id={id} value={config.binary_storage.mode} onChange={(e) => setBinaryMode(e.target.value as BinaryMode)}><option value="local">Local</option><option value="database">Base de datos</option><option value="s3">S3 / RustFS</option></Select>}</FormField>
         {config.binary_storage.mode === "s3" && <div className="form-grid two-columns" data-testid="s3-fields">
           <FormField label="Endpoint">{(id) => <Input id={id} type="url" value={config.s3.endpoint} onChange={(e) => setConfig({ ...config, s3: { ...config.s3, endpoint: e.target.value } })} placeholder="http://rustfs:9000" />}</FormField>
           <FormField label="Bucket">{(id) => <Input id={id} value={config.s3.bucket} onChange={(e) => setConfig({ ...config, s3: { ...config.s3, bucket: e.target.value } })} />}</FormField>
           <FormField label="Región">{(id) => <Input id={id} value={config.s3.region} onChange={(e) => setConfig({ ...config, s3: { ...config.s3, region: e.target.value } })} />}</FormField>
-          <FormField label="Access key" help={config.s3.access_key_configured ? "Configurada; deja vacío para conservarla." : undefined}>{(id) => <Input id={id} type="password" value={config.s3.access_key_id === "********" ? "" : config.s3.access_key_id} onChange={(e) => setConfig({ ...config, s3: { ...config.s3, access_key_id: e.target.value } })} />}</FormField>
-          <FormField label="Secret key" help={config.s3.secret_key_configured ? "Configurada; deja vacío para conservarla." : undefined}>{(id) => <Input id={id} type="password" value={config.s3.secret_access_key === "********" ? "" : config.s3.secret_access_key} onChange={(e) => setConfig({ ...config, s3: { ...config.s3, secret_access_key: e.target.value } })} />}</FormField>
-          <Checkbox label="Usar path-style" checked={config.s3.use_path_style_endpoint} onChange={(e) => setConfig({ ...config, s3: { ...config.s3, use_path_style_endpoint: e.target.checked } })} />
+          <FormField label="Clave de acceso" help={config.s3.access_key_configured ? "Configurada; deja vacío para conservarla." : undefined}>{(id) => <Input id={id} type="password" value={config.s3.access_key_id === "********" ? "" : config.s3.access_key_id} onChange={(e) => setConfig({ ...config, s3: { ...config.s3, access_key_id: e.target.value } })} />}</FormField>
+          <FormField label="Clave secreta" help={config.s3.secret_key_configured ? "Configurada; deja vacío para conservarla." : undefined}>{(id) => <Input id={id} type="password" value={config.s3.secret_access_key === "********" ? "" : config.s3.secret_access_key} onChange={(e) => setConfig({ ...config, s3: { ...config.s3, secret_access_key: e.target.value } })} />}</FormField>
+          <Checkbox label="Usar direcciones con estilo de ruta" checked={config.s3.use_path_style_endpoint} onChange={(e) => setConfig({ ...config, s3: { ...config.s3, use_path_style_endpoint: e.target.checked } })} />
         </div>}
       </Card>
 
-      <Card><div className="section-heading"><span className="step">3</span><div><h2>Conversión PDF</h2><p>Ancho y alto son límites; el aspect ratio se conserva.</p></div></div>
+      <Card><div className="section-heading"><span className="step">3</span><div><h2>Conversión de PDF</h2><p>El ancho y el alto son límites; se conserva la relación de aspecto.</p></div></div>
         <div className="form-grid two-columns">
           <FormField label="Ancho máximo">{(id) => <Input id={id} type="number" min="256" max="8192" value={config.conversion.default_width} onChange={(e) => setConfig({ ...config, conversion: { ...config.conversion, default_width: Number(e.target.value) } })} />}</FormField>
           <FormField label="Alto máximo">{(id) => <Input id={id} type="number" min="256" max="8192" value={config.conversion.default_height} onChange={(e) => setConfig({ ...config, conversion: { ...config.conversion, default_height: Number(e.target.value) } })} />}</FormField>
@@ -176,9 +176,9 @@ export function ConfigPage({ initial, onSaved }: { initial: AppConfig; onSaved: 
           <Checkbox label="Activar OCR" checked={config.ocr.enabled} onChange={(event) => setConfig({ ...config, ocr: { ...config.ocr, enabled: event.target.checked }, conversion: { ...config.conversion, enable_ocr: event.target.checked } })} />
           <Checkbox label="Ejecutar después de convertir" checked={config.ocr.auto_after_conversion} disabled={!config.ocr.enabled} onChange={(event) => setConfig({ ...config, ocr: { ...config.ocr, auto_after_conversion: event.target.checked } })} />
           <FormField label="Modo predeterminado">{(id) => <Select id={id} value={config.ocr.default_mode} onChange={(event) => setConfig({ ...config, ocr: { ...config.ocr, default_mode: event.target.value as AppConfig["ocr"]["default_mode"] } })}><option value="hybrid">Híbrido por página</option><option value="exhaustive">Exhaustivo</option><option value="ocr_only">Solo OCR</option></Select>}</FormField>
-          <FormField label="Workers concurrentes" help="Para este servidor se recomiendan 2.">{(id) => <Input id={id} type="number" min="1" max="16" value={config.ocr.workers} onChange={(event) => setConfig({ ...config, ocr: { ...config.ocr, workers: Number(event.target.value) } })} />}</FormField>
+          <FormField label="Procesos concurrentes" help="Para este servidor se recomiendan 2.">{(id) => <Input id={id} type="number" min="1" max="16" value={config.ocr.workers} onChange={(event) => setConfig({ ...config, ocr: { ...config.ocr, workers: Number(event.target.value) } })} />}</FormField>
           <FormField label="DPI para OCR">{(id) => <Input id={id} type="number" min="150" max="600" value={config.ocr.render_dpi} onChange={(event) => setConfig({ ...config, ocr: { ...config.ocr, render_dpi: Number(event.target.value) } })} />}</FormField>
-          <FormField label="Timeout por página (segundos)">{(id) => <Input id={id} type="number" min="10" max="3600" value={config.ocr.page_timeout_seconds} onChange={(event) => setConfig({ ...config, ocr: { ...config.ocr, page_timeout_seconds: Number(event.target.value) } })} />}</FormField>
+          <FormField label="Tiempo límite por página (segundos)">{(id) => <Input id={id} type="number" min="10" max="3600" value={config.ocr.page_timeout_seconds} onChange={(event) => setConfig({ ...config, ocr: { ...config.ocr, page_timeout_seconds: Number(event.target.value) } })} />}</FormField>
           <FormField label="Reintentos por página">{(id) => <Input id={id} type="number" min="1" max="10" value={config.ocr.retries_per_page} onChange={(event) => setConfig({ ...config, ocr: { ...config.ocr, retries_per_page: Number(event.target.value) } })} />}</FormField>
           <FormField label="Caracteres mínimos de capa PDF">{(id) => <Input id={id} type="number" min="1" max="10000" value={config.ocr.min_text_chars} onChange={(event) => setConfig({ ...config, ocr: { ...config.ocr, min_text_chars: Number(event.target.value) } })} />}</FormField>
         </div>
@@ -199,7 +199,7 @@ export function ConfigPage({ initial, onSaved }: { initial: AppConfig; onSaved: 
           <Checkbox label="Activar autenticación de API" checked={config.security.enable_auth} onChange={(event) => setConfig({ ...config, security: { ...config.security, enable_auth: event.target.checked } })} />
           <FormField label="Máximo de cargas concurrentes">{(id) => <Input id={id} type="number" min="1" max="100" value={config.security.max_concurrent_uploads} onChange={(event) => setConfig({ ...config, security: { ...config.security, max_concurrent_uploads: Number(event.target.value) } })} />}</FormField>
         </div>
-        <FormField label="URLs permitidas por CORS" help="Una URL por línea. Se aceptan puertos y subdominios wildcard, por ejemplo https://*.dominio.com.">{(id) => <textarea id={id} className="input cors-textarea" rows={6} value={corsOrigins} onChange={(event) => setCorsOrigins(event.target.value)} placeholder={"https://app.ejemplo.com\nhttp://localhost:5173"} />}</FormField>
+        <FormField label="Direcciones URL permitidas por CORS" help="Una URL por línea. Se aceptan puertos y subdominios con comodín, por ejemplo https://*.dominio.com.">{(id) => <textarea id={id} className="input cors-textarea" rows={6} value={corsOrigins} onChange={(event) => setCorsOrigins(event.target.value)} placeholder={"https://app.ejemplo.com\nhttp://localhost:5173"} />}</FormField>
       </Card>
 
       <Card><div className="section-heading"><span className="step">6</span><div><h2>Apariencia del panel</h2><p>Elige cómo se presenta la navegación principal en pantallas de escritorio.</p></div></div>

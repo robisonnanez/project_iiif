@@ -51,3 +51,14 @@ it("cierra la sesión y regresa a la portada", async () => {
   expect(logout).toHaveBeenCalledOnce();
   expect(toHome).toHaveBeenCalledOnce();
 });
+
+it("abre la documentación de la API en una pestaña nueva", async () => {
+  history.replaceState({}, "", "/dashboard/inicio");
+  vi.spyOn(api, "documents").mockResolvedValue([]);
+  vi.spyOn(api, "config").mockResolvedValue(structuredClone(sampleConfig));
+  render(<App />);
+
+  const link = await screen.findByRole("link", { name: "API" });
+  expect(link).toHaveAttribute("target", "_blank");
+  expect(link).toHaveAttribute("rel", "noopener noreferrer");
+});

@@ -1,0 +1,61 @@
+#!/usr/bin/env bash
+set -uo pipefail
+
+SOURCE="${PROJECT_IIIF_SOURCE:-/home/robison/projects/project_iiif}"
+REMOTE_NAME="${PROJECT_IIIF_REMOTE:-origin}"
+BRANCH="${PROJECT_IIIF_BRANCH:-master}"
+LOGGER_BIN="${PROJECT_IIIF_LOGGER_BIN:-logger}"
+LOGGER_TAG="project-iiif-update"
+
+log_message() {
+  local priority="$1"
+  shift
+  if ! "${LOGGER_BIN}" -p "${priority}" -t "${LOGGER_TAG}" -- "$*"; then
+    printf '%s\n' "$*" >&2
+  fi
+}
+
+fail() {
+  log_message daemon.err "$*"
+  exit 20
+}
+
+[[ -d "${SOURCE}/.git" ]] || fail "No existe un repositorio Git en ${SOURCE}"
+cd "${SOURCE}" || fail "No se pudo acceder a ${SOURCE}"
+
+FETCH_ERROR="$(git fetch --quiet "${REMOTE_NAME}" "${BRANCH}" 2>&1)" || \
+  fail "Falló la consulta de ${REMOTE_NAME}/${BRANCH}: ${FETCH_ERROR}"
+
+LOCAL_REF="refs/heads/${BRANCH}"
+REMOTE_REF="refs/remotes/${REMOTE_NAME}/${BRANCH}"
+git show-ref --verify --quiet "${LOCAL_REF}" || \
+  fail "No existe la referencia local ${LOCAL_REF}"
+git show-ref --verify --quiet "${REMOTE_REF}" || \
+  fail "No existe la referencia remota ${REMOTE_REF}"
+
+LOCAL_SHA="$(git rev-parse --verify "${LOCAL_REF}")" || \
+  fail "No se pudo resolver ${LOCAL_REF}"
+REMOTE_SHA="$(git rev-parse --verify "${REMOTE_REF}")" || \
+  fail "No se pudo resolver ${REMOTE_REF}"
+
+read -r LOCAL_AHEAD REMOTE_AHEAD < <(
+  git rev-list --left-right --count "${LOCAL_SHA}...${REMOTE_SHA}"
+) || fail "No se pudo comparar ${LOCAL_REF} con ${REMOTE_REF}"
+
+if [[ "${LOCAL_AHEAD}" -eq 0 && "${REMOTE_AHEAD}" -eq 0 ]]; then
+  log_message daemon.info \
+    "master está actualizada: local ${LOCAL_SHA}, remoto ${REMOTE_SHA}"
+  exit 0
+fi
+
+if [[ "${LOCAL_AHEAD}" -eq 0 && "${REMOTE_AHEAD}" -gt 0 ]]; then
+  log_message daemon.warning \
+    "Actualización disponible en master: ${REMOTE_AHEAD} commit(s), local ${LOCAL_SHA}, remoto ${REMOTE_SHA}"
+  exit 10
+fi
+
+if [[ "${LOCAL_AHEAD}" -gt 0 && "${REMOTE_AHEAD}" -eq 0 ]]; then
+  fail "master local está adelantada ${LOCAL_AHEAD} commit(s): local ${LOCAL_SHA}, remoto ${REMOTE_SHA}; requiere revisión manual"
+fi
+
+fail "master local y ${REMOTE_NAME}/master divergieron: ${LOCAL_AHEAD} commit(s) locales y ${REMOTE_AHEAD} remotos; local ${LOCAL_SHA}, remoto ${REMOTE_SHA}; requiere revisión manual"

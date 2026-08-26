@@ -14,7 +14,7 @@ it("restaura explorador, confirmación de scope, estado, logs y progreso", async
   expect(await screen.findByText("/var/lib/project_iiif/pdfs")).toBeInTheDocument();
   await user.click(screen.getByRole("button", { name: "Iniciar migración" }));
   expect(screen.getByRole("dialog", { name: "Contexto de migración" })).toBeInTheDocument();
-  expect(screen.getByLabelText("Ruta origen")).toHaveValue("/var/lib/project_iiif");
+  expect(screen.getByLabelText("Ruta de origen")).toHaveValue("/var/lib/project_iiif");
   await user.click(screen.getByRole("button", { name: "Cancelar" }));
   await user.click(screen.getByRole("button", { name: "Ver progreso" }));
   expect(screen.getByRole("dialog", { name: "Progreso de migración" })).toBeInTheDocument();

@@ -215,7 +215,7 @@ Hay dos métodos soportados. Las migraciones son versionadas e idempotentes.
 
 1. Inicie sesión.
 2. Abra `Configuración`.
-3. En `Motor de metadata`, guarde la conexión correcta.
+3. En `Motor de metadatos`, guarde la conexión correcta.
 4. Pulse `Ejecutar migraciones ahora` en `Migraciones del esquema`.
 5. Revise motor, migraciones aplicadas y omitidas.
 
@@ -234,7 +234,7 @@ Antes de habilitar migraciones automáticas en una actualización, haga backup. 
 
 ## 8. RustFS o S3
 
-La metadata puede estar en una base y los binarios en RustFS/S3:
+Los metadatos pueden estar en una base y los binarios en RustFS/S3:
 
 ```yaml
 FILESYSTEM_DISK: "s3"
@@ -415,22 +415,22 @@ No incluya `git reset --hard`, no sobrescriba `/var/lib/project_iiif/config.yaml
 ### Opción 1: comprobación manual
 
 ```bash
-cd /opt/project_iiif/source
+cd /home/robison/projects/project_iiif
 git fetch origin master
-git log --oneline HEAD..origin/master
+git log --oneline master..origin/master
 ```
 
-Es la opción más simple y no cambia producción.
+Es la opción más simple y no cambia la rama activa ni el árbol de trabajo.
 
 ### Opción 2: systemd timer de solo lectura - recomendada
 
-Un script ejecuta `git fetch`, compara commits y escribe el resultado en el journal. Un timer diario puede avisar por correo o webhook sin instalar nada. La cuenta solo necesita lectura del repositorio y acceso de salida a GitHub.
+Un script ejecuta `git fetch origin master`, compara `refs/heads/master` con `refs/remotes/origin/master` y escribe el resultado en el journal. La comparación es independiente de la rama activa, por lo que `development` puede seguir en uso sin producir avisos falsos. Un timer diario puede avisar por correo o webhook sin instalar nada. La cuenta solo necesita lectura del repositorio y acceso de salida a GitHub.
 
 No use el timer para ejecutar `git pull`, compilar, migrar y reiniciar sin supervisión.
 
 ### Opción 3: aviso dentro del panel
 
-Requiere un endpoint de versión que compare el commit desplegado contra GitHub y un banner en el frontend. Debe usar timeout, cache de varias horas y estados `disponible`, `actualizado` o `sin conexión`. No debe instalar automáticamente.
+Requiere un endpoint de versión que compare el commit desplegado contra GitHub y un banner en el frontend. Debe usar un tiempo límite, una caché de varias horas y los estados `disponible`, `actualizado` o `sin conexión`. No debe instalar automáticamente.
 
 ### Opción 4: GitHub Releases
 
@@ -599,61 +599,43 @@ El rollback restaura el binario y el frontend anteriores, pero no deshace migrac
 
 ## 21. Timer para avisar sin actualizar
 
-Cree `/usr/local/sbin/project-iiif-check-update`:
+El repositorio incluye el script y las unidades en `deploy/`. Estos artefactos corresponden al perfil de `servidor-prueba`: ejecutan la consulta como `robison`, leen `/home/robison/projects/project_iiif` y supervisan `master` aunque el checkout activo sea `development`.
+
+Instálelos desde la raíz del repositorio sin modificar sus rutas ni la rama supervisada:
 
 ```bash
-#!/usr/bin/env bash
-set -euo pipefail
-SOURCE="/opt/project_iiif/source"
-BRANCH="master"
-cd "${SOURCE}"
-git fetch --quiet origin "${BRANCH}"
-LOCAL="$(git rev-parse HEAD)"
-REMOTE="$(git rev-parse "origin/${BRANCH}")"
-if [[ "${LOCAL}" == "${REMOTE}" ]]; then
-  logger -t project-iiif-update "Sin actualizaciones pendientes"
-  exit 0
-fi
-COUNT="$(git rev-list --count "HEAD..origin/${BRANCH}")"
-logger -t project-iiif-update \
-  "Actualización disponible: ${COUNT} commit(s), remoto ${REMOTE}"
-exit 10
+sudo install -o root -g robison -m 0750 \
+  deploy/project-iiif-check-update \
+  /usr/local/sbin/project-iiif-check-update
+sudo install -o root -g root -m 0644 \
+  deploy/project-iiif-update-check.service \
+  /etc/systemd/system/project-iiif-update-check.service
+sudo install -o root -g root -m 0644 \
+  deploy/project-iiif-update-check.timer \
+  /etc/systemd/system/project-iiif-update-check.timer
 ```
 
-Cree `/etc/systemd/system/project-iiif-update-check.service`:
+La unidad ejecuta el comprobador como `robison` y supervisa exclusivamente:
 
-```ini
-[Unit]
-Description=Comprobar actualizaciones de project_iiif
-After=network-online.target
-
-[Service]
-Type=oneshot
-ExecStart=/usr/local/sbin/project-iiif-check-update
-SuccessExitStatus=0 10
+```text
+Repositorio: /home/robison/projects/project_iiif
+Remoto: origin
+Rama: master
 ```
 
-Cree `/etc/systemd/system/project-iiif-update-check.timer`:
+En una instalación estable bajo `/opt/project_iiif/source`, cree una unidad específica para el usuario propietario de ese clon y ajuste `WorkingDirectory` y `PROJECT_IIIF_SOURCE`. El usuario elegido debe poder actualizar las referencias remotas dentro de `.git`; no reutilice sin revisión el perfil de `servidor-prueba`.
 
-```ini
-[Unit]
-Description=Comprobar diariamente actualizaciones de project_iiif
+El script registra en `journalctl` si `master` está actualizada, si el remoto está adelantado, si las referencias divergieron o si falló la consulta. El código `10` significa que hay una actualización disponible y systemd lo considera correcto. Cualquier inconsistencia o error de red termina con código `20`.
 
-[Timer]
-OnCalendar=daily
-RandomizedDelaySec=30m
-Persistent=true
-
-[Install]
-WantedBy=timers.target
-```
+Habilite el timer y ejecute una primera comprobación manual:
 
 ```bash
-sudo chmod 0750 /usr/local/sbin/project-iiif-check-update
 sudo systemctl daemon-reload
 sudo systemctl enable --now project-iiif-update-check.timer
+sudo systemctl start project-iiif-update-check.service
+sudo systemctl status project-iiif-update-check.service --no-pager
 sudo systemctl list-timers project-iiif-update-check.timer
 sudo journalctl -t project-iiif-update --no-pager
 ```
 
-Para correo o webhook, conecte una unidad `OnFailure=` o un monitor externo al resultado. Mantenga este timer en modo de solo lectura; la instalación de la actualización debe seguir siendo supervisada.
+La comprobación actualiza únicamente las referencias remotas de Git; no cambia de rama, no mueve `refs/heads/master`, no ejecuta `git pull`, no compila, no migra y no reinicia el servicio. Para correo o webhook, conecte una unidad `OnFailure=` o un monitor externo al resultado. La instalación de la actualización debe seguir siendo supervisada.

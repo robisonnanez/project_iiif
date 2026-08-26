@@ -23,6 +23,26 @@ it("guarda proyectos y sincroniza tenants desde el endpoint configurado", async 
 
   expect(saveConfig).toHaveBeenCalledWith(expect.objectContaining({ projects: expect.objectContaining({ items: [expect.objectContaining({ tenants_auth_type: "bearer", tenants_auth_token: "nuevo-token" })] }) }));
   expect(sync).toHaveBeenCalledWith("metavisor");
-  expect(await screen.findByText("2 tenant(s) sincronizados para Metavisor.")).toBeInTheDocument();
+  expect(await screen.findByText("2 tenants sincronizados para Metavisor.")).toBeInTheDocument();
   expect(onSaved).toHaveBeenLastCalledWith(expect.objectContaining({ projects: expect.objectContaining({ items: [expect.objectContaining({ tenants: ["demo", "sunat"] })] }) }));
+});
+
+it("mantiene el foco mientras se edita la clave y el nombre del proyecto", async () => {
+  const user = userEvent.setup();
+  const config = structuredClone(sampleConfig);
+  config.projects.items = [{ key: "proyecto", name: "Proyecto", multitenant: false, tenants: [] }];
+  config.projects.default_project = "proyecto";
+  render(<ProjectsPage config={config} onSaved={vi.fn()} notify={vi.fn()} />);
+
+  const keyInput = screen.getByLabelText("Clave");
+  await user.clear(keyInput);
+  await user.type(keyInput, "metavisor");
+  expect(keyInput).toHaveValue("metavisor");
+  expect(keyInput).toHaveFocus();
+
+  const nameInput = screen.getByLabelText("Nombre visible");
+  await user.clear(nameInput);
+  await user.type(nameInput, "Proyecto de prueba");
+  expect(nameInput).toHaveValue("Proyecto de prueba");
+  expect(nameInput).toHaveFocus();
 });

@@ -84,6 +84,7 @@ p { color: var(--muted); line-height: 1.55; }
 .button-secondary { color: #273142; border-color: #d7dde6; background: white; }
 .button-secondary:hover:not(:disabled), .button-ghost:hover:not(:disabled) { background: #f1f4f8; }
 .button-ghost { color: inherit; background: transparent; }
+.topbar .button-ghost:hover:not(:disabled) { color: white; background: rgba(255,255,255,.12); }
 .button-danger { color: white; background: #c8344c; }
 
 .badge { display: inline-flex; align-items: center; width: max-content; padding: 5px 9px; border-radius: 999px; font-size: .72rem; font-weight: 800; text-transform: capitalize; }

@@ -1,0 +1,18 @@
+[Unit]
+Description=Comprobar actualizaciones de project_iiif en master
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=robison
+Group=robison
+WorkingDirectory=/home/robison/projects/project_iiif
+Environment=PROJECT_IIIF_SOURCE=/home/robison/projects/project_iiif
+Environment=PROJECT_IIIF_REMOTE=origin
+Environment=PROJECT_IIIF_BRANCH=master
+ExecStart=/usr/local/sbin/project-iiif-check-update
+SuccessExitStatus=0 10
+TimeoutStartSec=2min
+NoNewPrivileges=true
+PrivateTmp=true
