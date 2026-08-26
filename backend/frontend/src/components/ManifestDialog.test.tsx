@@ -10,7 +10,7 @@ it("genera una URL parcial normalizada", async () => {
   render(<ManifestDialog document={document} onClose={() => undefined} onOpen={open} />);
   await user.click(screen.getByLabelText("Páginas seleccionadas"));
   await user.type(screen.getByLabelText("Páginas"), "1-3, 3,5");
-  await user.click(screen.getByRole("button", { name: "Abrir manifest" }));
+  await user.click(screen.getByRole("button", { name: "Abrir manifiesto" }));
   expect(open).toHaveBeenCalledWith("/api/v1/iiif/doc-1/manifest?pages=1%2C2%2C3%2C5");
 });
 
@@ -19,6 +19,6 @@ it("muestra errores de páginas fuera del documento", async () => {
   render(<ManifestDialog document={document} onClose={() => undefined} onOpen={() => undefined} />);
   await user.click(screen.getByLabelText("Páginas seleccionadas"));
   await user.type(screen.getByLabelText("Páginas"), "7");
-  await user.click(screen.getByRole("button", { name: "Abrir manifest" }));
+  await user.click(screen.getByRole("button", { name: "Abrir manifiesto" }));
   expect(screen.getByText(/entre 1 y 6/)).toBeInTheDocument();
 });

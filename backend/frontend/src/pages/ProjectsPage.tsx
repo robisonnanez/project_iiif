@@ -62,7 +62,8 @@ export function ProjectsPage({ config, onSaved, notify }: { config: AppConfig; o
       const synced = await api.syncProjectTenants(project.key);
       const projects = { ...saved.projects, items: saved.projects.items.map((item) => item.key === synced.key ? synced : item) };
       setSettings(projects); onSaved({ ...saved, projects });
-      setMessage(`${synced.tenants.length} tenant(s) sincronizados para ${synced.name || synced.key}.`);
+      const tenantLabel = synced.tenants.length === 1 ? "tenant sincronizado" : "tenants sincronizados";
+      setMessage(`${synced.tenants.length} ${tenantLabel} para ${synced.name || synced.key}.`);
       notify(`Tenants de “${synced.name || synced.key}” sincronizados.`, "success");
     } catch (cause) { setError(cause instanceof Error ? cause.message : "No se pudieron sincronizar los tenants."); }
     finally { setSyncing(""); }
@@ -80,7 +81,7 @@ export function ProjectsPage({ config, onSaved, notify }: { config: AppConfig; o
       </div>
     </Card>
     <div className="project-editor-grid">
-      {settings.items.map((project, index) => <Card key={`${index}-${project.key}`} className="project-editor">
+      {settings.items.map((project, index) => <Card key={index} className="project-editor">
         <div className="card-heading"><div><span className="eyebrow">Proyecto {index + 1}</span><h2>{project.name || project.key}</h2></div><Button variant="danger" disabled={settings.items.length === 1 || Boolean(syncing)} onClick={() => removeProject(index)}>Eliminar</Button></div>
         <div className="form-grid two-columns">
           <FormField label="Clave" help="Se utiliza en rutas, filtros y almacenamiento.">{(id) => <Input id={id} value={project.key} onChange={(event) => updateProject(index, { key: event.target.value })} placeholder="metavisor" />}</FormField>
@@ -94,7 +95,7 @@ export function ProjectsPage({ config, onSaved, notify }: { config: AppConfig; o
             {project.tenants_auth_type === "api_key" && <FormField label="Nombre de la cabecera" help="Por ejemplo: X-API-Key o Authorization.">{(id) => <Input id={id} value={project.tenants_auth_header || "X-API-Key"} onChange={(event) => updateProject(index, { tenants_auth_header: event.target.value })} placeholder="X-API-Key" />}</FormField>}
             {(project.tenants_auth_type === "bearer" || project.tenants_auth_type === "api_key") && <FormField label={project.tenants_auth_type === "bearer" ? "Bearer token" : "API key"} help={project.tenants_token_configured ? "Ya existe un token guardado. Déjalo igual para conservarlo o escribe uno nuevo." : "Se guarda como secreto y nunca se devuelve completo desde la API."}>{(id) => <Input id={id} type="password" autoComplete="new-password" value={project.tenants_auth_token || ""} onChange={(event) => updateProject(index, { tenants_auth_token: event.target.value })} placeholder={project.tenants_token_configured ? "Token configurado" : "Pega aquí el token"} />}</FormField>}
           </div>
-          <div className="tenant-sync-row"><Button variant="secondary" disabled={Boolean(syncing) || !project.tenants_endpoint?.trim()} onClick={() => sync(index)}>{syncing === project.key ? <Spinner label="Consultando endpoint" /> : "Sincronizar tenants"}</Button><span>{project.tenants.length} configurado(s)</span></div>
+          <div className="tenant-sync-row"><Button variant="secondary" disabled={Boolean(syncing) || !project.tenants_endpoint?.trim()} onClick={() => sync(index)}>{syncing === project.key ? <Spinner label="Consultando endpoint" /> : "Sincronizar tenants"}</Button><span>{project.tenants.length} {project.tenants.length === 1 ? "tenant configurado" : "tenants configurados"}</span></div>
           <FormField label="Tenants" help="Uno por línea. Puedes editarlos manualmente aunque uses sincronización.">{(id) => <textarea id={id} className="input tenants-textarea" rows={6} value={project.tenants.join("\n")} onChange={(event) => updateProject(index, { tenants: event.target.value.split(/\r?\n|,/).map((tenant) => tenant.trim()).filter(Boolean) })} placeholder={"sunat\ndemo\nuniguajira"} />}</FormField>
         </>}
       </Card>)}

@@ -1,0 +1,11 @@
+[Unit]
+Description=Comprobar diariamente actualizaciones de project_iiif en master
+
+[Timer]
+OnCalendar=daily
+RandomizedDelaySec=30m
+Persistent=true
+Unit=project-iiif-update-check.service
+
+[Install]
+WantedBy=timers.target

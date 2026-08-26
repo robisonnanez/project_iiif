@@ -18,8 +18,8 @@ export function ManifestDialog({ document, onClose, onOpen = (url) => window.ope
     }
   };
 
-  return <Modal title="Generar manifest IIIF" description={document.name} onClose={onClose}>
-    <div className="segmented" role="radiogroup" aria-label="Páginas del manifest">
+  return <Modal title="Generar manifiesto IIIF" description={document.name} onClose={onClose}>
+    <div className="segmented" role="radiogroup" aria-label="Páginas del manifiesto">
       <label><input type="radio" name="manifest-mode" checked={mode === "all"} onChange={() => setMode("all")} />Todas las páginas</label>
       <label><input type="radio" name="manifest-mode" checked={mode === "selected"} onChange={() => setMode("selected")} />Páginas seleccionadas</label>
     </div>
@@ -27,6 +27,6 @@ export function ManifestDialog({ document, onClose, onOpen = (url) => window.ope
       {(id) => <Input id={id} value={pages} onChange={(event) => { setPages(event.target.value); setError(""); }} placeholder="1-5,8,10-12" aria-invalid={Boolean(error)} />}
     </FormField>}
     {error && mode === "all" && <Alert tone="danger">{error}</Alert>}
-    <div className="modal-actions"><Button variant="secondary" onClick={onClose}>Cancelar</Button><Button onClick={submit}>Abrir manifest</Button></div>
+    <div className="modal-actions"><Button variant="secondary" onClick={onClose}>Cancelar</Button><Button onClick={submit}>Abrir manifiesto</Button></div>
   </Modal>;
 }

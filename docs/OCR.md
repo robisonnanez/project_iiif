@@ -85,7 +85,7 @@ Los trabajos y artefactos son durables bajo `{storage.data_path}/ocr`. Cada pág
 
 ## Recuperación
 
-- Una página puede reintentarse dos veces y tiene un timeout independiente de 120 segundos.
+- Una página puede reintentarse dos veces y tiene un tiempo límite independiente de 120 segundos.
 - Cancelar un trabajo conserva las páginas ya procesadas, pero no activa esa generación.
 - Para reprocesar un documento con OCR activo, marque la opción de nueva generación (`force: true`).
 - Para detener consumo de CPU sin borrar resultados, cambie `ocr.enabled` a `false` y reinicie.

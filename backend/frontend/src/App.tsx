@@ -104,7 +104,7 @@ export default function App() {
       <nav id="primary-navigation" className={mobileOpen ? "primary-nav open" : "primary-nav"} aria-label="Navegación principal">
         {nav.map((item) => <button key={item.view} className={view === item.view ? "nav-link active" : "nav-link"} aria-current={view === item.view ? "page" : undefined} onClick={() => navigate(item)}>{item.label}</button>)}
       </nav>
-      <div className="topbar-actions"><a className="button button-ghost" href="/swagger/index.html">API</a><Badge tone={error ? "danger" : "success"}>{error ? "Atención" : "Sistema activo"}</Badge><Button variant="ghost" onClick={() => void logout()}>Salir</Button></div>
+      <div className="topbar-actions"><a className="button button-ghost" href="/swagger/index.html" target="_blank" rel="noopener noreferrer">API</a><Badge tone={error ? "danger" : "success"}>{error ? "Atención" : "Sistema activo"}</Badge><Button variant="ghost" onClick={() => void logout()}>Salir</Button></div>
     </header>
     <main id="main-content" className="main-content">
       {error && <Alert tone="danger">{error}</Alert>}
@@ -129,7 +129,7 @@ function Dashboard({ documents, completed, config, onRefresh }: { documents: Doc
     <div className="metric-grid">
       <Card className="metric-card"><span>Documentos</span><strong>{documents.length}</strong><small>registrados</small></Card>
       <Card className="metric-card accent"><span>Completados</span><strong>{completed}</strong><small>listos para IIIF</small></Card>
-      <Card className="metric-card"><span>Metadata</span><strong className="metric-word">{config?.storage.backend ?? "—"}</strong><small>motor activo</small></Card>
+      <Card className="metric-card"><span>Metadatos</span><strong className="metric-word">{config?.storage.backend ?? "—"}</strong><small>motor activo</small></Card>
       <Card className="metric-card dark"><span>Binarios</span><strong className="metric-word">{config?.binary_storage.mode ?? "—"}</strong><small>modo activo</small></Card>
     </div>
     <Card><div className="card-heading"><div><h2>Últimos documentos</h2><p>Actividad reciente del sistema.</p></div></div><DocumentTable documents={documents.slice(0, 6)} compact /></Card>
@@ -155,10 +155,10 @@ function DocumentsPage({ documents, onRefresh, notify }: { documents: DocumentRe
     } finally { setDeleteBusy(false); }
   };
   return <>
-    <PageHeader eyebrow="Biblioteca" title="Documentos" description="Consulta conversiones y genera manifests completos o parciales." actions={<Button variant="secondary" onClick={onRefresh}>Actualizar</Button>} />
+    <PageHeader eyebrow="Biblioteca" title="Documentos" description="Consulta conversiones y genera manifiestos completos o parciales." actions={<Button variant="secondary" onClick={onRefresh}>Actualizar</Button>} />
     <Card><DocumentTable documents={documents} onManifest={setSelected} onDelete={(document) => { setDeleteError(""); setDeleting(document); }} /></Card>
     {selected && <ManifestDialog document={selected} onClose={() => setSelected(null)} />}
-    {deleting && <Modal title="Eliminar documento" description="Esta acción elimina metadata, PDF, imágenes, miniaturas, manifests y artefactos OCR asociados." onClose={() => !deleteBusy && setDeleting(null)}>
+    {deleting && <Modal title="Eliminar documento" description="Esta acción elimina metadatos, PDF, imágenes, miniaturas, manifiestos y artefactos OCR asociados." onClose={() => !deleteBusy && setDeleting(null)}>
       <p>¿Deseas eliminar definitivamente <strong>{deleting.name}</strong>?</p>
       <p className="table-secondary">ID: {deleting.id}{deleting.projectKey ? ` · Proyecto: ${deleting.projectKey}` : ""}{deleting.tenantKey ? ` · Tenant: ${deleting.tenantKey}` : ""}</p>
       {deleteError && <Alert tone="danger">{deleteError}</Alert>}
@@ -169,5 +169,5 @@ function DocumentsPage({ documents, onRefresh, notify }: { documents: DocumentRe
 
 function DocumentTable({ documents, onManifest, onDelete, compact = false }: { documents: DocumentRecord[]; onManifest?: (document: DocumentRecord) => void; onDelete?: (document: DocumentRecord) => void; compact?: boolean }) {
   if (!documents.length) return <EmptyState title="Sin documentos" description="Sube un PDF para comenzar." />;
-  return <div className="table-wrap"><table><thead><tr><th>Documento</th><th>Estado</th><th>Páginas</th>{!compact && <th>Origen</th>}{(onManifest || onDelete) && <th><span className="sr-only">Acciones</span></th>}</tr></thead><tbody>{documents.map((document) => <tr key={document.id}><td><strong>{document.name}</strong><small className="table-secondary">{document.id}</small></td><td><Badge tone={document.status === "completed" ? "success" : document.status === "error" ? "danger" : "warning"}>{document.status}</Badge></td><td>{document.convertedPages} / {document.totalPages}</td>{!compact && <td>{document.migratedFromLocal ? "Migrado" : "Subido"}</td>}{(onManifest || onDelete) && <td><div className="button-row">{onManifest && <Button variant="secondary" disabled={document.status !== "completed"} onClick={() => onManifest(document)}>Generar manifest</Button>}{onDelete && <Button variant="danger" onClick={() => onDelete(document)}>Eliminar</Button>}</div></td>}</tr>)}</tbody></table></div>;
+  return <div className="table-wrap"><table><thead><tr><th>Documento</th><th>Estado</th><th>Páginas</th>{!compact && <th>Origen</th>}{(onManifest || onDelete) && <th><span className="sr-only">Acciones</span></th>}</tr></thead><tbody>{documents.map((document) => <tr key={document.id}><td><strong>{document.name}</strong><small className="table-secondary">{document.id}</small></td><td><Badge tone={document.status === "completed" ? "success" : document.status === "error" ? "danger" : "warning"}>{document.status}</Badge></td><td>{document.convertedPages} / {document.totalPages}</td>{!compact && <td>{document.migratedFromLocal ? "Migrado" : "Subido"}</td>}{(onManifest || onDelete) && <td><div className="button-row">{onManifest && <Button variant="secondary" disabled={document.status !== "completed"} onClick={() => onManifest(document)}>Generar manifiesto</Button>}{onDelete && <Button variant="danger" onClick={() => onDelete(document)}>Eliminar</Button>}</div></td>}</tr>)}</tbody></table></div>;
 }

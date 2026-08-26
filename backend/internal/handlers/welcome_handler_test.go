@@ -27,6 +27,11 @@ func TestWelcomeUsesModernLoginWithoutConfigReference(t *testing.T) {
 			t.Fatalf("missing %q", required)
 		}
 	}
+	for _, required := range []string{`target="_blank"`, `rel="noopener noreferrer"`, "Documentación API", "Iniciar sesión"} {
+		if !strings.Contains(body, required) {
+			t.Fatalf("missing %q", required)
+		}
+	}
 	if strings.Contains(body, "config.yaml") {
 		t.Fatal("login must not expose config.yaml implementation detail")
 	}

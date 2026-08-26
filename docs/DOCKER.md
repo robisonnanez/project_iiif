@@ -1,6 +1,6 @@
 # Docker y Docker Compose
 
-Esta guía levanta `project_iiif` desde cero con RustFS y uno de los tres motores de metadata. Compose usa perfiles para evitar duplicación.
+Esta guía levanta `project_iiif` desde cero con RustFS y uno de los tres motores de metadatos. Compose usa perfiles para evitar duplicación.
 
 ## 1. Requisitos
 
@@ -142,7 +142,7 @@ curl -f http://127.0.0.1:18080/api/iiif/{id}/manifest
 
 ## 11. Backups
 
-Detén escrituras antes de una copia consistente. Usa `mysqldump`, `pg_dump` o `mongodump` para metadata. Para configuración y objetos:
+Detén las escrituras antes de una copia consistente. Usa `mysqldump`, `pg_dump` o `mongodump` para los metadatos. Para la configuración y los objetos:
 
 ```bash
 docker run --rm -v project-iiif_rustfs_data:/source:ro \
