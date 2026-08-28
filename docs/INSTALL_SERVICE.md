@@ -247,7 +247,18 @@ AWS_USE_PATH_STYLE_ENDPOINT: true
 binary_storage:
   mode: "s3"
   temp_path: "/var/lib/project_iiif/temp"
+security:
+  max_concurrent_uploads: 5
+projects:
+  items:
+    - key: "default"
+      name: "Proyecto por defecto"
+      bulk_upload: true
+      multitenant: false
+      tenants: []
 ```
+
+`bulk_upload` se configura por proyecto y solo actúa con S3/RustFS. Cuando está activo, todas las páginas se convierten primero bajo `binary_storage.temp_path` y luego se suben en paralelo. Reserve espacio temporal para el documento completo. `max_concurrent_uploads` acepta valores de 1 a 100, limita globalmente todos los documentos y requiere reiniciar el servicio cuando cambia. Si una página falla, el documento queda en estado `error`, las cargas correctas se conservan y los temporales se eliminan.
 
 Después del primer release:
 

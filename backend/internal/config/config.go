@@ -179,6 +179,7 @@ type OCRConfig struct {
 type ProjectConfig struct {
 	Key                    string   `yaml:"key" json:"key"`
 	Name                   string   `yaml:"name" json:"name"`
+	BulkUpload             bool     `yaml:"bulk_upload" json:"bulk_upload"`
 	Multitenant            bool     `yaml:"multitenant" json:"multitenant"`
 	Tenants                []string `yaml:"tenants" json:"tenants"`
 	TenantsEndpoint        string   `yaml:"tenants_endpoint,omitempty" json:"tenants_endpoint,omitempty"`
@@ -485,6 +486,11 @@ func applyDefaults(config *Config) {
 	}
 	if config.Frontend.MenuOrientation != "vertical" {
 		config.Frontend.MenuOrientation = "horizontal"
+	}
+	if config.Security.MaxConcurrentUploads <= 0 {
+		config.Security.MaxConcurrentUploads = defaults.Security.MaxConcurrentUploads
+	} else if config.Security.MaxConcurrentUploads > 100 {
+		config.Security.MaxConcurrentUploads = 100
 	}
 	if config.Projects.DefaultProject == "" {
 		config.Projects.DefaultProject = defaults.Projects.DefaultProject

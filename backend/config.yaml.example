@@ -144,10 +144,12 @@ projects:
   items:
     - key: "default"
       name: "Proyecto por defecto"
+      bulk_upload: false
       multitenant: false
       tenants: []
     - key: "metavisor"
       name: "Metavisor"
+      bulk_upload: true # Solo se aplica cuando binary_storage.mode es s3.
       multitenant: true
       tenants_endpoint: "https://api.ejemplo.com/tenants"
       tenants_auth_type: "bearer"

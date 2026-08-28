@@ -46,3 +46,32 @@ it("mantiene el foco mientras se edita la clave y el nombre del proyecto", async
   expect(nameInput).toHaveValue("Proyecto de prueba");
   expect(nameInput).toHaveFocus();
 });
+
+it("muestra y guarda la carga masiva únicamente con S3 o RustFS", async () => {
+  const user = userEvent.setup();
+  const config = structuredClone(sampleConfig);
+  config.binary_storage.mode = "s3";
+  config.s3.filesystem_disk = "s3";
+  config.projects.enabled = true;
+  config.projects.items = [{ key: "metavisor", name: "Metavisor", bulk_upload: false, multitenant: false, tenants: [] }];
+  config.projects.default_project = "metavisor";
+  const saveConfig = vi.spyOn(api, "saveConfig").mockResolvedValue({ message: "ok" });
+  render(<ProjectsPage config={config} onSaved={vi.fn()} notify={vi.fn()} />);
+
+  const checkbox = screen.getByRole("checkbox", { name: "Subir masivamente a S3 / RustFS" });
+  await user.click(checkbox);
+  await user.click(screen.getByRole("button", { name: "Guardar proyectos" }));
+
+  expect(saveConfig).toHaveBeenCalledWith(expect.objectContaining({
+    projects: expect.objectContaining({ items: [expect.objectContaining({ bulk_upload: true })] }),
+  }));
+});
+
+it("oculta la carga masiva cuando los binarios no usan S3", () => {
+  const config = structuredClone(sampleConfig);
+  config.projects.enabled = true;
+  config.projects.items = [{ key: "default", name: "Proyecto por defecto", bulk_upload: true, multitenant: false, tenants: [] }];
+  render(<ProjectsPage config={config} onSaved={vi.fn()} notify={vi.fn()} />);
+
+  expect(screen.queryByRole("checkbox", { name: "Subir masivamente a S3 / RustFS" })).not.toBeInTheDocument();
+});

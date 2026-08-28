@@ -41,6 +41,13 @@ type ImageBlobChecker interface {
 	HasImageBlob(imageID string) (bool, error)
 }
 
+// DocumentImageAssetWriter stores an image object and its metadata as one
+// logical operation. Implementations should avoid leaving metadata that points
+// to an object that was never stored.
+type DocumentImageAssetWriter interface {
+	SaveDocumentImageAsset(image *models.DocumentImage, data []byte, mediaType string) error
+}
+
 func NewMetadataStorage(cfg *config.Config) (Storage, error) {
 	switch strings.ToLower(strings.TrimSpace(cfg.Storage.Backend)) {
 	case "", "local":

@@ -1375,6 +1375,9 @@ const docTemplate = `{
         "config.ProjectConfig": {
             "type": "object",
             "properties": {
+                "bulk_upload": {
+                    "type": "boolean"
+                },
                 "key": {
                     "type": "string"
                 },
