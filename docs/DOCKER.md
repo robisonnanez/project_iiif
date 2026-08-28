@@ -95,6 +95,8 @@ docker compose --profile mysql exec -T app-mysql \
 
 Debe imprimir `S3/RustFS OK: escritura, lectura y eliminación verificadas`.
 
+En **Proyectos y tenants** puede habilitar **Subir masivamente a S3 / RustFS** para cada proyecto. El backend prepara todas las imágenes en el volumen temporal y después las sube en paralelo, respetando `security.max_concurrent_uploads` como límite global. El valor predeterminado es 5; se admite de 1 a 100 y un cambio requiere reiniciar el contenedor de la aplicación. Dimensione el almacenamiento temporal para todas las páginas del PDF. Si alguna falla, el documento termina en estado `error` y no inicia el OCR automático.
+
 ## 8. Migraciones
 
 `AUTO_MIGRATE=true` ejecuta migraciones pendientes antes de aceptar tráfico. SQL registra versiones en `schema_migrations`; MongoDB inicializa colecciones e índices de forma idempotente.

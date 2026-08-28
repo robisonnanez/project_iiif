@@ -119,6 +119,10 @@ func (s *S3Storage) SaveDocumentImageData(imageID string, data []byte, mediaType
 	if err != nil {
 		return err
 	}
+	return s.SaveDocumentImageAsset(image, data, mediaType)
+}
+
+func (s *S3Storage) SaveDocumentImageAsset(image *models.DocumentImage, data []byte, mediaType string) error {
 	key := imageObjectKey(image)
 	if err := s.putObject(key, data, mediaType); err != nil {
 		return err
@@ -126,7 +130,15 @@ func (s *S3Storage) SaveDocumentImageData(imageID string, data []byte, mediaType
 	image.ImagePath = s.reference(key)
 	image.MediaType = mediaType
 	image.ByteSize = int64(len(data))
-	return s.Storage.SaveDocumentImage(image)
+	if err := s.Storage.SaveDocumentImage(image); err != nil {
+		cleanupCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		if _, cleanupErr := s.client.DeleteObject(cleanupCtx, &s3.DeleteObjectInput{Bucket: aws.String(s.bucket), Key: aws.String(key)}); cleanupErr != nil {
+			return fmt.Errorf("no se pudo guardar metadata de %s: %w; tampoco se pudo eliminar el objeto S3: %v", image.ID, err, cleanupErr)
+		}
+		return fmt.Errorf("no se pudo guardar metadata de %s: %w", image.ID, err)
+	}
+	return nil
 }
 
 func (s *S3Storage) GetDocumentPDFData(documentID string) (*models.BinaryAsset, error) {

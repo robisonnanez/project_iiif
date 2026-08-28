@@ -107,6 +107,10 @@ CONFIG_PATH=config.yaml go run ./cmd/s3-smoke
 
 El smoke test crea un objeto temporal, lo lee y lo elimina. No borra documentos del proyecto.
 
+Cada elemento de `projects.items` admite `bulk_upload: true`. Esta opción solo se aplica con S3/RustFS: convierte primero todas las páginas en `binary_storage.temp_path` y después las sube en paralelo. `security.max_concurrent_uploads` limita globalmente las cargas simultáneas de todos los documentos; su valor debe estar entre 1 y 100 y requiere reiniciar el servicio para cambiar el límite. Sin `bulk_upload`, las imágenes se almacenan secuencialmente. El PDF original se guarda al inicio en ambos modos.
+
+La carga masiva necesita espacio temporal suficiente para todas las imágenes del PDF. Si una página no puede convertirse, escribirse temporalmente o subirse, el documento termina con estado `error`, conserva las páginas correctas, limpia los temporales y no inicia el OCR automático.
+
 ## Migraciones
 
 `AUTO_MIGRATE=true` aplica migraciones SQL al iniciar en Docker. El migrador admite origen local, base activa y SSH, y destino MySQL/PostgreSQL/MongoDB más S3. Para SSH es obligatorio `MIGRATION_SOURCE_SSH_KNOWN_HOSTS`; no se aceptan hosts sin verificar.

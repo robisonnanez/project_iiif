@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"iiif-pdf-server/internal/config"
@@ -26,12 +27,32 @@ type PDFService struct {
 	config      *config.Config
 	storage     storage.Storage
 	onCompleted func(string)
+	uploadSlots chan struct{}
+}
+
+type stagedDocumentImage struct {
+	image     *models.DocumentImage
+	path      string
+	mediaType string
+}
+
+type stagedUploadResult struct {
+	item stagedDocumentImage
+	err  error
 }
 
 func NewPDFService(config *config.Config, storage storage.Storage) *PDFService {
+	maxConcurrentUploads := config.Security.MaxConcurrentUploads
+	if maxConcurrentUploads < 1 {
+		maxConcurrentUploads = 5
+	}
+	if maxConcurrentUploads > 100 {
+		maxConcurrentUploads = 100
+	}
 	return &PDFService{
-		config:  config,
-		storage: storage,
+		config:      config,
+		storage:     storage,
+		uploadSlots: make(chan struct{}, maxConcurrentUploads),
 	}
 }
 
@@ -118,7 +139,7 @@ func (s *PDFService) ProcessPDF(sourcePath string, filename string, settings mod
 
 func (s *PDFService) convertPDFToImages(doc *models.PDFDocument, sourcePath string, settings models.ConversionSettings) {
 	startedAt := time.Now()
-	var renderDuration, resizeDuration, encodeDuration, storeDuration time.Duration
+	var renderDuration, resizeDuration, encodeDuration, stageDuration, uploadDuration time.Duration
 	defer func() {
 		if s.usesDatabaseBlobs() {
 			_ = os.Remove(sourcePath)
@@ -142,11 +163,35 @@ func (s *PDFService) convertPDFToImages(doc *models.PDFDocument, sourcePath stri
 		log.Printf("PDF conversion failed document=%s stage=open error=%v", doc.ID, err)
 		return
 	}
-	defer pdf.Close()
+	pdfClosed := false
+	defer func() {
+		if !pdfClosed {
+			pdf.Close()
+		}
+	}()
 
 	doc.TotalPages = pdf.NumPage()
 	doc.Outline = extractPDFOutline(pdf, doc.TotalPages)
-	s.storage.UpdateDocument(doc)
+	_ = s.storage.UpdateDocument(doc)
+
+	bulkUpload := s.bulkUploadEnabled(doc.ProjectKey)
+	stagingDir := ""
+	if bulkUpload {
+		if err := os.MkdirAll(s.config.BinaryStorage.TempPath, 0o750); err != nil {
+			doc.Status = "error"
+			_ = s.storage.UpdateDocument(doc)
+			log.Printf("PDF conversion failed document=%s stage=prepare_bulk_temp error=%v", doc.ID, err)
+			return
+		}
+		stagingDir, err = os.MkdirTemp(s.config.BinaryStorage.TempPath, "bulk-"+doc.ID+"-")
+		if err != nil {
+			doc.Status = "error"
+			_ = s.storage.UpdateDocument(doc)
+			log.Printf("PDF conversion failed document=%s stage=create_bulk_temp error=%v", doc.ID, err)
+			return
+		}
+		defer os.RemoveAll(stagingDir)
+	}
 
 	imageDir := ""
 	if !s.usesDatabaseBlobs() {
@@ -160,12 +205,17 @@ func (s *PDFService) convertPDFToImages(doc *models.PDFDocument, sourcePath stri
 	}
 
 	var imagePaths []string
+	stagedImages := make([]stagedDocumentImage, 0, doc.TotalPages)
+	failedPages := 0
 
 	for i := 0; i < pdf.NumPage(); i++ {
+		pageNumber := i + 1
 		stageStarted := time.Now()
 		img, err := pdf.ImageDPI(i, float64(settings.DPI))
 		renderDuration += time.Since(stageStarted)
 		if err != nil {
+			failedPages++
+			log.Printf("PDF page failed document=%s page=%d stage=render error=%v", doc.ID, pageNumber, err)
 			continue
 		}
 		var pageImage image.Image = img
@@ -180,16 +230,21 @@ func (s *PDFService) convertPDFToImages(doc *models.PDFDocument, sourcePath stri
 		imageData, mediaType, err := s.encodeImage(pageImage, settings)
 		encodeDuration += time.Since(stageStarted)
 		if err != nil {
+			failedPages++
+			log.Printf("PDF page failed document=%s page=%d stage=encode error=%v", doc.ID, pageNumber, err)
 			continue
 		}
 
-		stageStarted = time.Now()
 		imagePath := ""
 		if !s.usesDatabaseBlobs() {
-			imagePath = filepath.Join(imageDir, fmt.Sprintf("page_%d.%s", i+1, settings.Format))
+			stageStarted = time.Now()
+			imagePath = filepath.Join(imageDir, fmt.Sprintf("page_%d.%s", pageNumber, settings.Format))
 			if err := os.WriteFile(imagePath, imageData, 0664); err != nil {
+				failedPages++
+				log.Printf("PDF page failed document=%s page=%d stage=write_local error=%v", doc.ID, pageNumber, err)
 				continue
 			}
+			stageDuration += time.Since(stageStarted)
 		}
 
 		bounds := pageImage.Bounds()
@@ -199,7 +254,7 @@ func (s *PDFService) convertPDFToImages(doc *models.PDFDocument, sourcePath stri
 			ProjectKey:        doc.ProjectKey,
 			TenantKey:         doc.TenantKey,
 			MigratedFromLocal: false,
-			PageNumber:        i + 1,
+			PageNumber:        pageNumber,
 			ImagePath:         imagePath,
 			Width:             bounds.Dx(),
 			Height:            bounds.Dy(),
@@ -208,15 +263,27 @@ func (s *PDFService) convertPDFToImages(doc *models.PDFDocument, sourcePath stri
 			ByteSize:          int64(len(imageData)),
 			CreatedAt:         time.Now(),
 		}
-		if err := s.storage.SaveDocumentImage(image); err != nil {
-			continue
-		}
-		if s.usesDatabaseBlobs() {
-			if err := s.storage.SaveDocumentImageData(image.ID, imageData, mediaType); err != nil {
+
+		if bulkUpload {
+			stageStarted = time.Now()
+			stagedPath := filepath.Join(stagingDir, fmt.Sprintf("page_%06d.%s", pageNumber, settings.Format))
+			if err := os.WriteFile(stagedPath, imageData, 0o600); err != nil {
+				failedPages++
+				log.Printf("PDF page failed document=%s page=%d stage=stage_bulk error=%v", doc.ID, pageNumber, err)
 				continue
 			}
+			stageDuration += time.Since(stageStarted)
+			stagedImages = append(stagedImages, stagedDocumentImage{image: image, path: stagedPath, mediaType: mediaType})
+			continue
 		}
-		storeDuration += time.Since(stageStarted)
+
+		stageStarted = time.Now()
+		if err := s.persistDocumentImage(image, imageData, mediaType); err != nil {
+			failedPages++
+			log.Printf("PDF page failed document=%s page=%d stage=store error=%v", doc.ID, pageNumber, err)
+			continue
+		}
+		uploadDuration += time.Since(stageStarted)
 
 		if imagePath != "" {
 			imagePaths = append(imagePaths, imagePath)
@@ -236,17 +303,110 @@ func (s *PDFService) convertPDFToImages(doc *models.PDFDocument, sourcePath stri
 		}
 	}
 
-	doc.ImagePaths = imagePaths
-	doc.Status = "completed"
-	doc.ManifestURL = fmt.Sprintf("%s/api/iiif/%s/manifest", s.config.IIIF.BaseURL, doc.ID)
+	if bulkUpload {
+		pdf.Close()
+		pdfClosed = true
+		uploadStarted := time.Now()
+		uploadErrors := s.uploadStagedImages(stagedImages, func(item stagedDocumentImage) {
+			doc.ConvertedPages++
+			if doc.ConvertedPages%5 == 0 || doc.ConvertedPages == doc.TotalPages {
+				_ = s.storage.UpdateDocument(doc)
+			}
+			_ = os.Remove(item.path)
+		})
+		uploadDuration += time.Since(uploadStarted)
+		failedPages += len(uploadErrors)
+		for _, uploadErr := range uploadErrors {
+			log.Printf("PDF page failed document=%s stage=bulk_upload error=%v", doc.ID, uploadErr)
+		}
+	}
 
-	s.storage.UpdateDocument(doc)
-	if s.onCompleted != nil {
+	doc.ImagePaths = imagePaths
+	if failedPages == 0 && doc.ConvertedPages == doc.TotalPages {
+		doc.Status = "completed"
+		doc.ManifestURL = fmt.Sprintf("%s/api/iiif/%s/manifest", s.config.IIIF.BaseURL, doc.ID)
+	} else {
+		doc.Status = "error"
+	}
+
+	_ = s.storage.UpdateDocument(doc)
+	if doc.Status == "completed" && s.onCompleted != nil {
 		s.onCompleted(doc.ID)
 	}
-	log.Printf("PDF conversion completed document=%s pages=%d total=%s render=%s resize=%s encode=%s store=%s dpi=%d max=%dx%d format=%s",
-		doc.ID, doc.ConvertedPages, time.Since(startedAt), renderDuration, resizeDuration, encodeDuration, storeDuration,
+	log.Printf("PDF conversion finished document=%s status=%s pages=%d/%d failed=%d bulk_upload=%t total=%s render=%s resize=%s encode=%s stage=%s upload=%s dpi=%d max=%dx%d format=%s",
+		doc.ID, doc.Status, doc.ConvertedPages, doc.TotalPages, failedPages, bulkUpload, time.Since(startedAt), renderDuration, resizeDuration, encodeDuration, stageDuration, uploadDuration,
 		settings.DPI, settings.MaxWidth, settings.MaxHeight, settings.Format)
+}
+
+func (s *PDFService) bulkUploadEnabled(projectKey string) bool {
+	if !s.usesS3() {
+		return false
+	}
+	project, ok := s.config.ProjectByKey(projectKey)
+	return ok && project.BulkUpload
+}
+
+func (s *PDFService) usesS3() bool {
+	return strings.EqualFold(s.config.FilesystemDisk, "s3") || strings.EqualFold(s.config.BinaryStorage.Mode, "s3")
+}
+
+func (s *PDFService) persistDocumentImage(image *models.DocumentImage, data []byte, mediaType string) error {
+	if writer, ok := s.storage.(storage.DocumentImageAssetWriter); ok {
+		s.uploadSlots <- struct{}{}
+		defer func() { <-s.uploadSlots }()
+		return writer.SaveDocumentImageAsset(image, data, mediaType)
+	}
+	if err := s.storage.SaveDocumentImage(image); err != nil {
+		return err
+	}
+	if s.usesDatabaseBlobs() {
+		return s.storage.SaveDocumentImageData(image.ID, data, mediaType)
+	}
+	return nil
+}
+
+func (s *PDFService) uploadStagedImages(items []stagedDocumentImage, onSuccess func(stagedDocumentImage)) []error {
+	if len(items) == 0 {
+		return nil
+	}
+	workerCount := cap(s.uploadSlots)
+	if workerCount > len(items) {
+		workerCount = len(items)
+	}
+	jobs := make(chan stagedDocumentImage)
+	results := make(chan stagedUploadResult, len(items))
+	var workers sync.WaitGroup
+	workers.Add(workerCount)
+	for worker := 0; worker < workerCount; worker++ {
+		go func() {
+			defer workers.Done()
+			for item := range jobs {
+				data, err := os.ReadFile(item.path)
+				if err == nil {
+					err = s.persistDocumentImage(item.image, data, item.mediaType)
+				}
+				results <- stagedUploadResult{item: item, err: err}
+			}
+		}()
+	}
+	go func() {
+		for _, item := range items {
+			jobs <- item
+		}
+		close(jobs)
+		workers.Wait()
+		close(results)
+	}()
+
+	errors := make([]error, 0)
+	for result := range results {
+		if result.err != nil {
+			errors = append(errors, fmt.Errorf("page=%d: %w", result.item.image.PageNumber, result.err))
+			continue
+		}
+		onSuccess(result.item)
+	}
+	return errors
 }
 
 func extractPDFOutline(pdf *fitz.Document, totalPages int) []models.PDFOutlineItem {

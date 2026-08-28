@@ -978,8 +978,8 @@ func applyEditableConfig(next, current *config.Config, payload editableConfigPay
 	if payload.Conversion.DefaultQuality < 1 || payload.Conversion.DefaultQuality > 100 {
 		return &configError{"conversion.default_quality debe estar entre 1 y 100"}
 	}
-	if payload.Security.MaxConcurrentUploads <= 0 {
-		return &configError{"security.max_concurrent_uploads debe ser mayor que cero"}
+	if payload.Security.MaxConcurrentUploads < 1 || payload.Security.MaxConcurrentUploads > 100 {
+		return &configError{"security.max_concurrent_uploads debe estar entre 1 y 100"}
 	}
 	if err := validateCORSOrigins(payload.Security.CorsOrigins); err != nil {
 		return err

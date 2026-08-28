@@ -11,6 +11,7 @@ export function ProjectsPage({ config, onSaved, notify }: { config: AppConfig; o
   const [syncing, setSyncing] = useState("");
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
+  const usesS3 = config.binary_storage.mode === "s3" || config.s3.filesystem_disk === "s3";
 
   useEffect(() => setSettings(structuredClone(config.projects)), [config.projects]);
 
@@ -19,7 +20,7 @@ export function ProjectsPage({ config, onSaved, notify }: { config: AppConfig; o
     const used = new Set(settings.items.map((item) => item.key));
     let suffix = settings.items.length + 1;
     while (used.has(`proyecto-${suffix}`)) suffix += 1;
-    setSettings((current) => ({ ...current, enabled: true, items: [...current.items, { key: `proyecto-${suffix}`, name: `Proyecto ${suffix}`, multitenant: false, tenants: [], tenants_endpoint: "", tenants_auth_type: "none", tenants_auth_header: "", tenants_auth_token: "" }] }));
+    setSettings((current) => ({ ...current, enabled: true, items: [...current.items, { key: `proyecto-${suffix}`, name: `Proyecto ${suffix}`, bulk_upload: false, multitenant: false, tenants: [], tenants_endpoint: "", tenants_auth_type: "none", tenants_auth_header: "", tenants_auth_token: "" }] }));
   };
   const removeProject = (index: number) => setSettings((current) => {
     if (current.items.length === 1) return current;
@@ -87,6 +88,8 @@ export function ProjectsPage({ config, onSaved, notify }: { config: AppConfig; o
           <FormField label="Clave" help="Se utiliza en rutas, filtros y almacenamiento.">{(id) => <Input id={id} value={project.key} onChange={(event) => updateProject(index, { key: event.target.value })} placeholder="metavisor" />}</FormField>
           <FormField label="Nombre visible">{(id) => <Input id={id} value={project.name} onChange={(event) => updateProject(index, { name: event.target.value })} placeholder="Metavisor" />}</FormField>
         </div>
+        {usesS3 && <Checkbox label="Subir masivamente a S3 / RustFS" checked={Boolean(project.bulk_upload)} onChange={(event) => updateProject(index, { bulk_upload: event.target.checked })} />}
+        {usesS3 && <p className="field-help">Convierte primero todas las páginas y después las sube en paralelo usando el límite global de cargas concurrentes.</p>}
         <Checkbox label="Proyecto multitenant" checked={project.multitenant} onChange={(event) => updateProject(index, { multitenant: event.target.checked, tenants: event.target.checked ? project.tenants : [] })} />
         {project.multitenant && <>
           <FormField label="Endpoint de tenants" help='Acepta JSON como ["tenant-a"] o {"tenants":[...]}.'>{(id) => <Input id={id} type="url" value={project.tenants_endpoint || ""} onChange={(event) => updateProject(index, { tenants_endpoint: event.target.value })} placeholder="https://api.ejemplo.com/tenants" />}</FormField>

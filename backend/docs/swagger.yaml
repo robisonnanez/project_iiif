@@ -47,6 +47,8 @@ definitions:
     type: object
   config.ProjectConfig:
     properties:
+      bulk_upload:
+        type: boolean
       key:
         type: string
       multitenant:

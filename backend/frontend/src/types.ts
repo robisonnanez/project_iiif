@@ -4,6 +4,7 @@ export type BinaryMode = "local" | "database" | "s3";
 export interface ProjectConfig {
   key: string;
   name: string;
+  bulk_upload?: boolean;
   multitenant: boolean;
   tenants: string[];
   tenants_endpoint?: string;
