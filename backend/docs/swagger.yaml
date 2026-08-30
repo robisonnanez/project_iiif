@@ -552,6 +552,22 @@ definitions:
       mode:
         type: string
     type: object
+  services.OCRAutocompleteItem:
+    properties:
+      frequency:
+        type: integer
+      text:
+        type: string
+    type: object
+  services.OCRAutocompleteResponse:
+    properties:
+      items:
+        items:
+          $ref: '#/definitions/services.OCRAutocompleteItem'
+        type: array
+      query:
+        type: string
+    type: object
   services.OCRDocumentSummary:
     properties:
       active_generation:
@@ -1186,6 +1202,40 @@ paths:
       summary: Obtener estado OCR de un documento
       tags:
       - OCR
+  /api/v1/documents/{id}/ocr/autocomplete:
+    get:
+      description: Sugiere palabras reales del OCR por prefijo. La comparación ignora
+        mayúsculas y acentos, conserva la grafía original y requiere al menos 2 caracteres.
+      parameters:
+      - description: ID del documento
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Prefijo de palabra (mínimo 2 caracteres)
+        in: query
+        name: q
+        required: true
+        type: string
+      - default: 10
+        description: Máximo de sugerencias (máximo 50)
+        in: query
+        name: limit
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/services.OCRAutocompleteResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.errorResponse'
+      summary: Autocompletar palabras OCR dentro de un documento
+      tags:
+      - OCR
   /api/v1/documents/{id}/ocr/pages/{page}:
     get:
       parameters:
@@ -1348,6 +1398,47 @@ paths:
       summary: Obtener manifiesto IIIF Presentation API v3
       tags:
       - IIIF
+  /api/v1/ocr/autocomplete:
+    get:
+      description: Sugiere palabras reales del OCR por prefijo. La comparación ignora
+        mayúsculas y acentos, conserva la grafía original y requiere al menos 2 caracteres.
+      parameters:
+      - description: Prefijo de palabra (mínimo 2 caracteres)
+        in: query
+        name: q
+        required: true
+        type: string
+      - description: Proyecto
+        in: query
+        name: project
+        type: string
+      - description: Tenant
+        in: query
+        name: tenant
+        type: string
+      - description: ID del documento
+        in: query
+        name: document_id
+        type: string
+      - default: 10
+        description: Máximo de sugerencias (máximo 50)
+        in: query
+        name: limit
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/services.OCRAutocompleteResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.errorResponse'
+      summary: Autocompletar palabras OCR por proyecto, tenant o documento
+      tags:
+      - OCR
   /api/v1/ocr/search:
     get:
       parameters:

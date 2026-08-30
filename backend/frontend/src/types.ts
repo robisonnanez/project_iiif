@@ -109,6 +109,9 @@ export interface OCRSearchResult {
 
 export interface OCRSearchResponse { results: OCRSearchResult[]; total: number; limit: number; offset: number }
 
+export interface OCRAutocompleteItem { text: string; frequency: number }
+export interface OCRAutocompleteResponse { query: string; items: OCRAutocompleteItem[] }
+
 export interface DBMigrationResult {
   engine: string;
   pending_before: number;

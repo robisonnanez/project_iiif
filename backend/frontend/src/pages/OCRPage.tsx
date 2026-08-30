@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import type { KeyboardEvent } from "react";
 import { api } from "../api";
 import { Alert, Badge, Button, Card, EmptyState, PageHeader } from "../components/ui";
-import type { AppConfig, DocumentRecord, Notify, OCRJob, OCRSearchResult } from "../types";
+import type { AppConfig, DocumentRecord, Notify, OCRAutocompleteItem, OCRJob, OCRSearchResult } from "../types";
 
 const terminal = new Set(["completed", "completed_with_errors", "failed", "cancelled"]);
 
@@ -19,6 +20,10 @@ export function OCRPage({ documents, config, notify }: { documents: DocumentReco
   const [scope, setScope] = useState("document");
   const [results, setResults] = useState<OCRSearchResult[]>([]);
   const [searched, setSearched] = useState(false);
+  const [suggestions, setSuggestions] = useState<OCRAutocompleteItem[]>([]);
+  const [suggestionsOpen, setSuggestionsOpen] = useState(false);
+  const [activeSuggestion, setActiveSuggestion] = useState(-1);
+  const skipAutocomplete = useRef(false);
 
   useEffect(() => { if (!documentId && ready.length) setDocumentId(ready[0].id); }, [documentId, ready]);
   useEffect(() => {
@@ -31,6 +36,32 @@ export function OCRPage({ documents, config, notify }: { documents: DocumentReco
     }, 1500);
     return () => window.clearInterval(timer);
   }, [job, notify]);
+  useEffect(() => {
+    if (skipAutocomplete.current) {
+      skipAutocomplete.current = false;
+      return;
+    }
+    const prefix = query.trim();
+    if (prefix.length < 2) {
+      setSuggestions([]); setSuggestionsOpen(false); setActiveSuggestion(-1);
+      return;
+    }
+    const selected = ready.find((item) => item.id === documentId);
+    const controller = new AbortController();
+    let current = true;
+    const timer = window.setTimeout(async () => {
+      try {
+        const response = await api.autocompleteOCR(prefix, scope === "document" ? documentId : undefined, scope === "project" ? selected?.projectKey : undefined, scope === "project" ? selected?.tenantKey : undefined, controller.signal);
+        if (!current) return;
+        setSuggestions(response.items); setSuggestionsOpen(response.items.length > 0); setActiveSuggestion(-1);
+      } catch (cause) {
+        if (current && !(cause instanceof DOMException && cause.name === "AbortError")) {
+          setSuggestions([]); setSuggestionsOpen(false); setActiveSuggestion(-1);
+        }
+      }
+    }, 300);
+    return () => { current = false; controller.abort(); window.clearTimeout(timer); };
+  }, [documentId, query, ready, scope]);
 
   const toggleLanguage = (language: string) => setLanguages((current) => current.includes(language) ? current.filter((item) => item !== language) : [...current, language]);
   const start = async () => {
@@ -48,6 +79,25 @@ export function OCRPage({ documents, config, notify }: { documents: DocumentReco
       setResults(response.results);
     } catch (cause) { setError(cause instanceof Error ? cause.message : "No se pudo buscar en OCR."); setResults([]); }
     finally { setBusy(false); }
+  };
+  const chooseSuggestion = (item: OCRAutocompleteItem) => {
+    skipAutocomplete.current = true; setQuery(item.text); setSuggestions([]); setSuggestionsOpen(false); setActiveSuggestion(-1);
+  };
+  const handleQueryKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
+    if (event.key === "ArrowDown" && suggestions.length) {
+      event.preventDefault(); setSuggestionsOpen(true); setActiveSuggestion((current) => Math.min(current + 1, suggestions.length - 1)); return;
+    }
+    if (event.key === "ArrowUp" && suggestions.length) {
+      event.preventDefault(); setSuggestionsOpen(true); setActiveSuggestion((current) => current <= 0 ? suggestions.length - 1 : current - 1); return;
+    }
+    if (event.key === "Escape") {
+      event.preventDefault(); setSuggestionsOpen(false); setActiveSuggestion(-1); return;
+    }
+    if (event.key === "Enter") {
+      event.preventDefault();
+      if (suggestionsOpen && activeSuggestion >= 0) chooseSuggestion(suggestions[activeSuggestion]);
+      else void search();
+    }
   };
   const progress = job?.total_pages ? Math.round(job.processed_pages * 100 / job.total_pages) : 0;
 
@@ -71,7 +121,9 @@ export function OCRPage({ documents, config, notify }: { documents: DocumentReco
       </Card>
       <Card>
         <div className="card-heading"><div><h2>Buscar texto</h2><p>Los resultados siempre indican documento, página y Canvas.</p></div></div>
-        <div className="form-field"><label htmlFor="ocr-query">Texto</label><input id="ocr-query" className="input" value={query} onChange={(event) => setQuery(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") void search(); }} placeholder="Ej. patrimonio cultural" /></div>
+        <div className="form-field autocomplete-field"><label htmlFor="ocr-query">Texto</label><input id="ocr-query" className="input" role="combobox" aria-autocomplete="list" aria-expanded={suggestionsOpen} aria-controls="ocr-suggestions" aria-activedescendant={activeSuggestion >= 0 ? `ocr-suggestion-${activeSuggestion}` : undefined} value={query} onChange={(event) => { setQuery(event.target.value); setSuggestionsOpen(true); }} onFocus={() => suggestions.length && setSuggestionsOpen(true)} onBlur={() => setSuggestionsOpen(false)} onKeyDown={handleQueryKeyDown} placeholder="Ej. patrimonio cultural" autoComplete="off" />
+          {suggestionsOpen && <ul id="ocr-suggestions" className="autocomplete-list" role="listbox">{suggestions.map((item, index) => <li id={`ocr-suggestion-${index}`} className={index === activeSuggestion ? "active" : ""} role="option" aria-selected={index === activeSuggestion} key={item.text} onMouseDown={(event) => event.preventDefault()} onClick={() => chooseSuggestion(item)}><span>{item.text}</span><small>{item.frequency} aparición{item.frequency === 1 ? "" : "es"}</small></li>)}</ul>}
+        </div>
         <div className="segmented"><label><input type="radio" checked={scope === "document"} onChange={() => setScope("document")} />Documento seleccionado</label><label><input type="radio" checked={scope === "project"} onChange={() => setScope("project")} />Proyecto / tenant</label></div>
         <Button disabled={busy || !documentId} onClick={search}>Buscar</Button>
       </Card>

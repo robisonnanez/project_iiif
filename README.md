@@ -122,6 +122,7 @@ La carga masiva necesita espacio temporal suficiente para todas las imágenes de
 - Servicio Linux: [docs/INSTALL_SERVICE.md](docs/INSTALL_SERVICE.md).
 - Docker: [docs/DOCKER.md](docs/DOCKER.md).
 - Avisos de actualización: `deploy/project-iiif-check-update` y las unidades systemd asociadas consultan diariamente `origin/master`, escriben el resultado en `journalctl` y nunca instalan cambios automáticamente. Consulta la sección 21 del manual del servicio Linux.
+- Autocompletado OCR: `GET /api/v1/ocr/autocomplete?q=func&project=default&limit=10` sugiere palabras reales por prefijo, sin duplicados y con normalización de mayúsculas y acentos. La ruta administrativa equivalente requiere sesión; consulta [docs/OCR.md](docs/OCR.md).
 
 ## Pruebas
 

@@ -170,6 +170,53 @@ func (h *OCRHandler) search(c *gin.Context, documentID string) {
 	c.JSON(http.StatusOK, gin.H{"results": results, "total": total, "limit": limit, "offset": offset})
 }
 
+// AutocompleteDocument godoc
+// @Summary Autocompletar palabras OCR dentro de un documento
+// @Description Sugiere palabras reales del OCR por prefijo. La comparación ignora mayúsculas y acentos, conserva la grafía original y requiere al menos 2 caracteres.
+// @Tags OCR
+// @Produce json
+// @Param id path string true "ID del documento"
+// @Param q query string true "Prefijo de palabra (mínimo 2 caracteres)"
+// @Param limit query int false "Máximo de sugerencias (máximo 50)" default(10)
+// @Success 200 {object} services.OCRAutocompleteResponse
+// @Failure 400 {object} errorResponse
+// @Router /api/v1/documents/{id}/ocr/autocomplete [get]
+func (h *OCRHandler) AutocompleteDocument(c *gin.Context) { h.autocomplete(c, c.Param("id")) }
+
+// Autocomplete godoc
+// @Summary Autocompletar palabras OCR por proyecto, tenant o documento
+// @Description Sugiere palabras reales del OCR por prefijo. La comparación ignora mayúsculas y acentos, conserva la grafía original y requiere al menos 2 caracteres.
+// @Tags OCR
+// @Produce json
+// @Param q query string true "Prefijo de palabra (mínimo 2 caracteres)"
+// @Param project query string false "Proyecto"
+// @Param tenant query string false "Tenant"
+// @Param document_id query string false "ID del documento"
+// @Param limit query int false "Máximo de sugerencias (máximo 50)" default(10)
+// @Success 200 {object} services.OCRAutocompleteResponse
+// @Failure 400 {object} errorResponse
+// @Router /api/v1/ocr/autocomplete [get]
+func (h *OCRHandler) Autocomplete(c *gin.Context) {
+	h.autocomplete(c, strings.TrimSpace(c.Query("document_id")))
+}
+
+func (h *OCRHandler) autocomplete(c *gin.Context, documentID string) {
+	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "10"))
+	if limit < 1 {
+		limit = 10
+	}
+	if limit > 50 {
+		limit = 50
+	}
+	query := strings.TrimSpace(c.Query("q"))
+	items, err := h.service.Autocomplete(query, strings.TrimSpace(c.Query("project")), strings.TrimSpace(c.Query("tenant")), documentID, limit)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, services.OCRAutocompleteResponse{Query: query, Items: items})
+}
+
 func (h *OCRHandler) Delete(c *gin.Context) {
 	if err := h.service.Delete(c.Param("id")); err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})

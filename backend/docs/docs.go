@@ -888,6 +888,55 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/v1/documents/{id}/ocr/autocomplete": {
+            "get": {
+                "description": "Sugiere palabras reales del OCR por prefijo. La comparación ignora mayúsculas y acentos, conserva la grafía original y requiere al menos 2 caracteres.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "OCR"
+                ],
+                "summary": "Autocompletar palabras OCR dentro de un documento",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "ID del documento",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Prefijo de palabra (mínimo 2 caracteres)",
+                        "name": "q",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "integer",
+                        "default": 10,
+                        "description": "Máximo de sugerencias (máximo 50)",
+                        "name": "limit",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/services.OCRAutocompleteResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.errorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/documents/{id}/ocr/pages/{page}": {
             "get": {
                 "produces": [
@@ -1031,6 +1080,66 @@ const docTemplate = `{
                     },
                     "404": {
                         "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.errorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/ocr/autocomplete": {
+            "get": {
+                "description": "Sugiere palabras reales del OCR por prefijo. La comparación ignora mayúsculas y acentos, conserva la grafía original y requiere al menos 2 caracteres.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "OCR"
+                ],
+                "summary": "Autocompletar palabras OCR por proyecto, tenant o documento",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Prefijo de palabra (mínimo 2 caracteres)",
+                        "name": "q",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Proyecto",
+                        "name": "project",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Tenant",
+                        "name": "tenant",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "ID del documento",
+                        "name": "document_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "default": 10,
+                        "description": "Máximo de sugerencias (máximo 50)",
+                        "name": "limit",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/services.OCRAutocompleteResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
                         "schema": {
                             "$ref": "#/definitions/handlers.errorResponse"
                         }
@@ -2136,6 +2245,31 @@ const docTemplate = `{
                     }
                 },
                 "mode": {
+                    "type": "string"
+                }
+            }
+        },
+        "services.OCRAutocompleteItem": {
+            "type": "object",
+            "properties": {
+                "frequency": {
+                    "type": "integer"
+                },
+                "text": {
+                    "type": "string"
+                }
+            }
+        },
+        "services.OCRAutocompleteResponse": {
+            "type": "object",
+            "properties": {
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/services.OCRAutocompleteItem"
+                    }
+                },
+                "query": {
                     "type": "string"
                 }
             }

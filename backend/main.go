@@ -158,10 +158,12 @@ func main() {
 			group.GET("/documents/:id/ocr", ocrHandler.GetSummary)
 			group.GET("/documents/:id/ocr/pages/:page", ocrHandler.GetPage)
 			group.GET("/documents/:id/ocr/search", ocrHandler.SearchDocument)
+			group.GET("/documents/:id/ocr/autocomplete", ocrHandler.AutocompleteDocument)
 			group.DELETE("/documents/:id/ocr", ocrHandler.Delete)
 			group.GET("/ocr/jobs/:job_id", ocrHandler.GetJob)
 			group.POST("/ocr/jobs/:job_id/cancel", ocrHandler.CancelJob)
 			group.GET("/ocr/search", ocrHandler.Search)
+			group.GET("/ocr/autocomplete", ocrHandler.Autocomplete)
 		}
 
 		adminV1 := router.Group("/api/v1/admin")
@@ -191,9 +193,11 @@ func main() {
 		documentV1.GET("/:id/ocr", ocrHandler.GetSummary)
 		documentV1.GET("/:id/ocr/pages/:page", ocrHandler.GetPage)
 		documentV1.GET("/:id/ocr/search", ocrHandler.SearchDocument)
+		documentV1.GET("/:id/ocr/autocomplete", ocrHandler.AutocompleteDocument)
 	}
 	apiV1OCR := router.Group("/api/v1/ocr")
 	apiV1OCR.GET("/search", ocrHandler.Search)
+	apiV1OCR.GET("/autocomplete", ocrHandler.Autocomplete)
 	apiV1IIIF := router.Group("/api/v1/iiif")
 	apiV1IIIF.GET("/:id/manifest", apiHandler.GetManifestV3)
 	apiV1IIIF.GET("/:id/manifest/v3", apiHandler.GetManifestV3)
