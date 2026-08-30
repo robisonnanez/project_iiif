@@ -1,4 +1,4 @@
-import type { AppConfig, DBMigrationResult, DBMigrationStatus, DocumentImagesResponse, DocumentRecord, MigrationDirectory, MigrationPayload, MigrationStatus, OCRJob, OCRSearchResponse, ProjectConfig, UploadScope, UploadSettings } from "./types";
+import type { AppConfig, DBMigrationResult, DBMigrationStatus, DocumentImagesResponse, DocumentRecord, MigrationDirectory, MigrationPayload, MigrationStatus, OCRAutocompleteResponse, OCRJob, OCRSearchResponse, ProjectConfig, UploadScope, UploadSettings } from "./types";
 
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
   const response = await fetch(url, { credentials: "same-origin", ...init });
@@ -59,6 +59,11 @@ export const api = {
     const params = new URLSearchParams({ q: query, limit: "100" });
     if (documentId) params.set("document_id", documentId); if (project) params.set("project", project); if (tenant) params.set("tenant", tenant);
     return request<OCRSearchResponse>(`/api/v1/admin/ocr/search?${params}`);
+  },
+  autocompleteOCR: (query: string, documentId?: string, project?: string, tenant?: string, signal?: AbortSignal) => {
+    const params = new URLSearchParams({ q: query, limit: "10" });
+    if (documentId) params.set("document_id", documentId); if (project) params.set("project", project); if (tenant) params.set("tenant", tenant);
+    return request<OCRAutocompleteResponse>(`/api/v1/admin/ocr/autocomplete?${params}`, { signal });
   },
   logout: () => request<void>("/auth/logout", { method: "POST" }),
 };

@@ -57,6 +57,7 @@ Endpoints administrativos:
 - `GET /api/v1/admin/documents/{id}/ocr`
 - `GET /api/v1/admin/documents/{id}/ocr/pages/{page}`
 - `GET /api/v1/admin/ocr/search?q=texto&project=default`
+- `GET /api/v1/admin/ocr/autocomplete?q=func&project=default&limit=10`
 - `DELETE /api/v1/admin/documents/{id}/ocr`
 
 Endpoints públicos de lectura para integraciones externas:
@@ -64,7 +65,9 @@ Endpoints públicos de lectura para integraciones externas:
 - `GET /api/v1/documents/{id}/ocr`
 - `GET /api/v1/documents/{id}/ocr/pages/{page}`
 - `GET /api/v1/documents/{id}/ocr/search?q=texto`
+- `GET /api/v1/documents/{id}/ocr/autocomplete?q=func&limit=10`
 - `GET /api/v1/ocr/search?q=texto&project=default&tenant=tenant`
+- `GET /api/v1/ocr/autocomplete?q=func&project=default&tenant=tenant&limit=10`
 - `GET /api/v1/iiif/{id}/manifest`
 - `GET /api/v1/iiif/{id}/manifest/v3`
 
@@ -82,6 +85,34 @@ Ejemplo de creación:
 ```
 
 Los trabajos y artefactos son durables bajo `{storage.data_path}/ocr`. Cada página se guarda comprimida por documento y generación; una generación nueva solo queda activa cuando termina el procesamiento completo. Los trabajos incompletos vuelven a la cola cuando arranca el servicio.
+
+## Autocompletado de palabras
+
+El autocompletado complementa la búsqueda de páginas y no la reemplaza. Solo devuelve palabras que existen en la generación OCR activa dentro del documento, proyecto y tenant solicitados. La vista administrativa usa el mismo alcance elegido en el buscador, espera 300 ms después de la última pulsación y cancela solicitudes obsoletas.
+
+```http
+GET /api/v1/ocr/autocomplete?q=func&project=default&limit=10
+```
+
+```json
+{
+  "query": "func",
+  "items": [
+    { "text": "funciones", "frequency": 128 },
+    { "text": "funcionalidad", "frequency": 84 },
+    { "text": "funcionamiento", "frequency": 41 }
+  ]
+}
+```
+
+- `q` es obligatorio y debe contener al menos 2 caracteres Unicode después de normalizar espacios.
+- `limit` vale 10 por defecto, debe ser positivo y nunca supera 50.
+- `project`, `tenant` y `document_id` conservan el mismo significado y alcance que en `/api/v1/ocr/search`. La variante bajo `/api/v1/admin` requiere la cookie de sesión administrativa; las rutas públicas mantienen la política de lectura del buscador OCR existente.
+- La comparación es por inicio de palabra, no por substring. Ignora mayúsculas y diacríticos mediante normalización Unicode, por lo que `informacion` puede sugerir `información`; la respuesta conserva la grafía original del OCR.
+- Las formas equivalentes por mayúsculas o acentos se consolidan. El orden prioriza coincidencia exacta normalizada, frecuencia descendente, longitud y orden alfabético.
+- Cada generación terminada crea un vocabulario comprimido y ordenado bajo `{storage.data_path}/ocr/vocabularies/<documento>/<generación>.json.gz`. Las instalaciones con OCR anterior lo reconstruyen una sola vez al primer uso y lo conservan en caché de memoria. Reprocesar crea otro vocabulario antes de activar la generación; eliminar el OCR o el documento elimina también sus vocabularios.
+
+El vocabulario evita abrir, descomprimir y tokenizar todas las páginas en cada pulsación. No añade tablas, migraciones, Redis ni dependencias externas.
 
 ## Recuperación
 

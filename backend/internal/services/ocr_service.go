@@ -31,6 +31,8 @@ import (
 
 const ocrSchemaVersion = 1
 
+const ocrVocabularySchemaVersion = 1
+
 type OCRWord struct {
 	Text       string  `json:"text"`
 	Confidence float64 `json:"confidence"`
@@ -113,6 +115,29 @@ type OCRSearchResult struct {
 	Matches    int     `json:"matches"`
 }
 
+type OCRAutocompleteItem struct {
+	Text      string `json:"text"`
+	Frequency int    `json:"frequency"`
+}
+
+type OCRAutocompleteResponse struct {
+	Query string                `json:"query"`
+	Items []OCRAutocompleteItem `json:"items"`
+}
+
+type ocrVocabularyEntry struct {
+	Text       string `json:"text"`
+	Normalized string `json:"normalized"`
+	Frequency  int    `json:"frequency"`
+}
+
+type ocrVocabulary struct {
+	SchemaVersion int                  `json:"schema_version"`
+	DocumentID    string               `json:"document_id"`
+	Generation    string               `json:"generation"`
+	Entries       []ocrVocabularyEntry `json:"entries"`
+}
+
 type CreateOCRJobRequest struct {
 	Mode         string   `json:"mode"`
 	LanguageMode string   `json:"language_mode"`
@@ -186,18 +211,20 @@ func parseTesseractTSV(data []byte) (string, []OCRWord, float64, error) {
 }
 
 type OCRService struct {
-	config  *config.Config
-	storage storage.Storage
-	engine  OCREngine
-	root    string
-	queue   chan string
-	mu      sync.RWMutex
-	jobs    map[string]*OCRJob
-	cancels map[string]context.CancelFunc
+	config       *config.Config
+	storage      storage.Storage
+	engine       OCREngine
+	root         string
+	queue        chan string
+	mu           sync.RWMutex
+	jobs         map[string]*OCRJob
+	cancels      map[string]context.CancelFunc
+	vocabularyMu sync.RWMutex
+	vocabularies map[string][]ocrVocabularyEntry
 }
 
 func NewOCRService(cfg *config.Config, store storage.Storage) (*OCRService, error) {
-	service := &OCRService{config: cfg, storage: store, engine: TesseractEngine{}, root: filepath.Join(cfg.Storage.DataPath, "ocr"), jobs: map[string]*OCRJob{}, cancels: map[string]context.CancelFunc{}}
+	service := &OCRService{config: cfg, storage: store, engine: TesseractEngine{}, root: filepath.Join(cfg.Storage.DataPath, "ocr"), jobs: map[string]*OCRJob{}, cancels: map[string]context.CancelFunc{}, vocabularies: map[string][]ocrVocabularyEntry{}}
 	if err := os.MkdirAll(filepath.Join(service.root, "jobs"), 0755); err != nil {
 		return nil, err
 	}
@@ -384,6 +411,15 @@ func (s *OCRService) processJob(id string) {
 		status = "completed_with_errors"
 	}
 	summary := &OCRDocumentSummary{DocumentID: job.DocumentID, ProjectKey: job.ProjectKey, TenantKey: job.TenantKey, ActiveGeneration: job.Generation, Status: status, Languages: languages, TotalPages: pageCount, IndexedPages: pageCount - current.FailedPages, FailedPages: current.FailedPages, UpdatedAt: time.Now().UTC()}
+	vocabulary, err := s.buildVocabulary(job.DocumentID, job.Generation, pageCount)
+	if err != nil {
+		s.failJob(id, err)
+		return
+	}
+	if err := s.saveVocabulary(vocabulary); err != nil {
+		s.failJob(id, err)
+		return
+	}
 	if err := s.saveSummary(summary); err != nil {
 		s.failJob(id, err)
 		return
@@ -616,6 +652,86 @@ func (s *OCRService) Search(query, project, tenant, documentID string, limit, of
 	return results[offset:end], total, nil
 }
 
+func (s *OCRService) Autocomplete(query, project, tenant, documentID string, limit int) ([]OCRAutocompleteItem, error) {
+	prefix := normalizeSearch(query)
+	if utf8.RuneCountInString(prefix) < 2 {
+		return nil, errors.New("la consulta debe tener al menos 2 caracteres")
+	}
+	if limit < 1 {
+		limit = 10
+	}
+	if limit > 50 {
+		limit = 50
+	}
+	docs, err := s.storage.GetDocumentsByScope(project, tenant)
+	if err != nil {
+		return nil, err
+	}
+	type candidate struct {
+		text        string
+		frequency   int
+		displayFreq int
+	}
+	candidates := map[string]candidate{}
+	for _, doc := range docs {
+		if documentID != "" && doc.ID != documentID {
+			continue
+		}
+		summary, err := s.GetSummary(doc.ID)
+		if err != nil {
+			continue
+		}
+		entries, err := s.vocabularyForDocument(summary)
+		if err != nil {
+			continue
+		}
+		start := sort.Search(len(entries), func(index int) bool { return entries[index].Normalized >= prefix })
+		for index := start; index < len(entries) && strings.HasPrefix(entries[index].Normalized, prefix); index++ {
+			entry := entries[index]
+			current := candidates[entry.Normalized]
+			current.frequency += entry.Frequency
+			if current.text == "" || entry.Frequency > current.displayFreq || (entry.Frequency == current.displayFreq && betterWordDisplay(entry.Text, current.text)) {
+				current.text = entry.Text
+				current.displayFreq = entry.Frequency
+			}
+			candidates[entry.Normalized] = current
+		}
+	}
+	type rankedCandidate struct {
+		normalized string
+		candidate
+	}
+	ranked := make([]rankedCandidate, 0, len(candidates))
+	for normalized, item := range candidates {
+		ranked = append(ranked, rankedCandidate{normalized: normalized, candidate: item})
+	}
+	sort.Slice(ranked, func(i, j int) bool {
+		iExact, jExact := ranked[i].normalized == prefix, ranked[j].normalized == prefix
+		if iExact != jExact {
+			return iExact
+		}
+		if ranked[i].frequency != ranked[j].frequency {
+			return ranked[i].frequency > ranked[j].frequency
+		}
+		iLength, jLength := utf8.RuneCountInString(ranked[i].normalized), utf8.RuneCountInString(ranked[j].normalized)
+		if iLength != jLength {
+			return iLength < jLength
+		}
+		if ranked[i].normalized != ranked[j].normalized {
+			return ranked[i].normalized < ranked[j].normalized
+		}
+		return ranked[i].text < ranked[j].text
+	})
+	if limit > len(ranked) {
+		limit = len(ranked)
+	}
+	items := make([]OCRAutocompleteItem, 0, limit)
+	for _, item := range ranked[:limit] {
+		items = append(items, OCRAutocompleteItem{Text: item.text, Frequency: item.frequency})
+	}
+	return items, nil
+}
+
 func (s *OCRService) imageReference(documentID string, page int) (string, string) {
 	image, err := s.storage.GetDocumentImageByPage(documentID, page)
 	if err != nil || image == nil || image.ID == "" {
@@ -632,7 +748,186 @@ func (s *OCRService) Delete(documentID string) error {
 	if err := os.Remove(filepath.Join(s.root, "documents", documentID+".json")); err != nil && !os.IsNotExist(err) {
 		return err
 	}
-	return os.RemoveAll(filepath.Join(s.root, "pages", documentID))
+	if err := os.RemoveAll(filepath.Join(s.root, "pages", documentID)); err != nil {
+		return err
+	}
+	if err := os.RemoveAll(filepath.Join(s.root, "vocabularies", documentID)); err != nil {
+		return err
+	}
+	s.vocabularyMu.Lock()
+	for key := range s.vocabularies {
+		if strings.HasPrefix(key, documentID+"\x00") {
+			delete(s.vocabularies, key)
+		}
+	}
+	s.vocabularyMu.Unlock()
+	return nil
+}
+
+func (s *OCRService) vocabularyForDocument(summary *OCRDocumentSummary) ([]ocrVocabularyEntry, error) {
+	key := vocabularyCacheKey(summary.DocumentID, summary.ActiveGeneration)
+	s.vocabularyMu.RLock()
+	entries, ok := s.vocabularies[key]
+	s.vocabularyMu.RUnlock()
+	if ok {
+		return entries, nil
+	}
+	s.vocabularyMu.Lock()
+	defer s.vocabularyMu.Unlock()
+	if entries, ok = s.vocabularies[key]; ok {
+		return entries, nil
+	}
+	vocabulary, err := s.readVocabulary(summary.DocumentID, summary.ActiveGeneration)
+	if os.IsNotExist(err) {
+		vocabulary, err = s.buildVocabulary(summary.DocumentID, summary.ActiveGeneration, summary.TotalPages)
+		if err == nil {
+			err = s.writeVocabulary(vocabulary)
+		}
+	}
+	if err != nil {
+		return nil, err
+	}
+	s.vocabularies[key] = vocabulary.Entries
+	return vocabulary.Entries, nil
+}
+
+func (s *OCRService) buildVocabulary(documentID, generation string, totalPages int) (*ocrVocabulary, error) {
+	type wordCount struct {
+		total    int
+		variants map[string]int
+	}
+	words := map[string]*wordCount{}
+	for page := 1; page <= totalPages; page++ {
+		item, err := s.readPage(documentID, generation, page)
+		if err != nil {
+			continue
+		}
+		for _, word := range splitOCRWords(item.Text) {
+			normalized := normalizeSearch(word)
+			if normalized == "" {
+				continue
+			}
+			count := words[normalized]
+			if count == nil {
+				count = &wordCount{variants: map[string]int{}}
+				words[normalized] = count
+			}
+			count.total++
+			count.variants[word]++
+		}
+	}
+	entries := make([]ocrVocabularyEntry, 0, len(words))
+	for normalized, count := range words {
+		text, frequency := "", 0
+		for variant, variantFrequency := range count.variants {
+			if text == "" || variantFrequency > frequency || (variantFrequency == frequency && betterWordDisplay(variant, text)) {
+				text, frequency = variant, variantFrequency
+			}
+		}
+		entries = append(entries, ocrVocabularyEntry{Text: text, Normalized: normalized, Frequency: count.total})
+	}
+	sort.Slice(entries, func(i, j int) bool {
+		if entries[i].Normalized == entries[j].Normalized {
+			return entries[i].Text < entries[j].Text
+		}
+		return entries[i].Normalized < entries[j].Normalized
+	})
+	return &ocrVocabulary{SchemaVersion: ocrVocabularySchemaVersion, DocumentID: documentID, Generation: generation, Entries: entries}, nil
+}
+
+func (s *OCRService) saveVocabulary(vocabulary *ocrVocabulary) error {
+	s.vocabularyMu.Lock()
+	defer s.vocabularyMu.Unlock()
+	if err := s.writeVocabulary(vocabulary); err != nil {
+		return err
+	}
+	s.vocabularies[vocabularyCacheKey(vocabulary.DocumentID, vocabulary.Generation)] = vocabulary.Entries
+	return nil
+}
+
+func (s *OCRService) writeVocabulary(vocabulary *ocrVocabulary) error {
+	path := filepath.Join(s.root, "vocabularies", vocabulary.DocumentID, vocabulary.Generation+".json.gz")
+	return writeGzipJSONAtomic(path, vocabulary)
+}
+
+func (s *OCRService) readVocabulary(documentID, generation string) (*ocrVocabulary, error) {
+	file, err := os.Open(filepath.Join(s.root, "vocabularies", documentID, generation+".json.gz"))
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+	reader, err := gzip.NewReader(file)
+	if err != nil {
+		return nil, err
+	}
+	defer reader.Close()
+	var result ocrVocabulary
+	if err := json.NewDecoder(reader).Decode(&result); err != nil {
+		return nil, err
+	}
+	if result.SchemaVersion != ocrVocabularySchemaVersion || result.DocumentID != documentID || result.Generation != generation {
+		return nil, errors.New("vocabulario OCR incompatible")
+	}
+	return &result, nil
+}
+
+func writeGzipJSONAtomic(path string, value any) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		return err
+	}
+	temp, err := os.CreateTemp(filepath.Dir(path), ".ocr-vocabulary-*.json.gz")
+	if err != nil {
+		return err
+	}
+	name := temp.Name()
+	defer os.Remove(name)
+	writer := gzip.NewWriter(temp)
+	err = json.NewEncoder(writer).Encode(value)
+	closeErr := writer.Close()
+	fileErr := temp.Close()
+	if err != nil {
+		return err
+	}
+	if closeErr != nil {
+		return closeErr
+	}
+	if fileErr != nil {
+		return fileErr
+	}
+	return os.Rename(name, path)
+}
+
+func vocabularyCacheKey(documentID, generation string) string {
+	return documentID + "\x00" + generation
+}
+
+func splitOCRWords(value string) []string {
+	words := make([]string, 0)
+	var current strings.Builder
+	flush := func() {
+		if current.Len() > 0 {
+			words = append(words, current.String())
+			current.Reset()
+		}
+	}
+	for _, character := range strings.ToValidUTF8(value, "") {
+		if unicode.IsLetter(character) || unicode.IsNumber(character) {
+			current.WriteRune(character)
+		} else {
+			flush()
+		}
+	}
+	flush()
+	return words
+}
+
+func betterWordDisplay(candidate, current string) bool {
+	candidateLower := candidate == strings.ToLower(candidate)
+	currentLower := current == strings.ToLower(current)
+	if candidateLower != currentLower {
+		return candidateLower
+	}
+	return candidate < current
 }
 
 func (s *OCRService) savePage(page *OCRPage) error {
