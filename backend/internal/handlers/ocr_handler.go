@@ -10,9 +10,79 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-type OCRHandler struct{ service *services.OCRService }
+type OCRHandler struct {
+	service         *services.OCRService
+	languageService *services.OCRLanguageService
+}
 
-func NewOCRHandler(service *services.OCRService) *OCRHandler { return &OCRHandler{service: service} }
+func NewOCRHandler(service *services.OCRService, languageServices ...*services.OCRLanguageService) *OCRHandler {
+	handler := &OCRHandler{service: service}
+	if len(languageServices) > 0 {
+		handler.languageService = languageServices[0]
+	}
+	return handler
+}
+
+// GetLanguages godoc
+// @Summary Consultar idiomas OCR del sistema
+// @Description Obtiene los idiomas reconocidos por Tesseract y los paquetes APT disponibles para instalar. Requiere sesión administrativa.
+// @Tags OCR
+// @Security SessionCookie
+// @Produce json
+// @Success 200 {object} services.OCRLanguageCatalog
+// @Failure 401 {object} errorResponse
+// @Failure 503 {object} errorResponse
+// @Router /api/v1/admin/ocr/languages [get]
+func (h *OCRHandler) GetLanguages(c *gin.Context) {
+	if h.languageService == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "administración de idiomas OCR no disponible"})
+		return
+	}
+	catalog, err := h.languageService.Catalog(c.Request.Context())
+	if err != nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, catalog)
+}
+
+// InstallLanguages godoc
+// @Summary Instalar idiomas OCR
+// @Description Instala hasta 10 paquetes descubiertos en APT mediante un helper privilegiado restringido y verifica el resultado con Tesseract. Instalar no habilita automáticamente el idioma.
+// @Tags OCR
+// @Security SessionCookie
+// @Accept json
+// @Produce json
+// @Param request body services.InstallOCRLanguagesRequest true "Idiomas Tesseract"
+// @Success 200 {object} services.InstallOCRLanguagesResponse
+// @Failure 400 {object} errorResponse
+// @Failure 401 {object} errorResponse
+// @Failure 409 {object} errorResponse
+// @Failure 503 {object} errorResponse
+// @Router /api/v1/admin/ocr/languages/install [post]
+func (h *OCRHandler) InstallLanguages(c *gin.Context) {
+	if h.languageService == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "administración de idiomas OCR no disponible"})
+		return
+	}
+	var request services.InstallOCRLanguagesRequest
+	if err := c.ShouldBindJSON(&request); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "selección de idiomas inválida"})
+		return
+	}
+	result, err := h.languageService.Install(c.Request.Context(), request.Languages)
+	if err != nil {
+		status := http.StatusBadRequest
+		if strings.Contains(err.Error(), "en curso") {
+			status = http.StatusConflict
+		} else if strings.Contains(err.Error(), "deshabilitada") || strings.Contains(err.Error(), "no se pudo instalar") {
+			status = http.StatusServiceUnavailable
+		}
+		c.JSON(status, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, result)
+}
 
 // CreateJob godoc
 // @Summary Crear trabajo OCR

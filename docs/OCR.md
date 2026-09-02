@@ -26,6 +26,10 @@ ocr:
     max_languages: 2
   artifacts:
     gzip: true
+  language_installation:
+    enabled: false
+    helper_path: /usr/local/sbin/project-iiif-install-tesseract-language
+    timeout_seconds: 300
 ```
 
 Después reinicie únicamente ese servicio:
@@ -44,6 +48,37 @@ tesseract --list-langs
 ```
 
 Los idiomas instalados deben incluir `spa`, `eng`, `fra`, `por` y `osd`.
+
+## Idiomas del sistema e instalación segura
+
+La configuración administrativa consulta `tesseract --list-langs` para los idiomas realmente instalados y `apt-cache pkgnames tesseract-ocr-` para los paquetes disponibles. La diferencia se presenta como **Idiomas por instalar**. La lista no está codificada en el frontend; los nombres conocidos se traducen y los códigos desconocidos se muestran como `Tesseract (código)`.
+
+Endpoints administrativos, ambos protegidos por la cookie de sesión:
+
+- `GET /api/v1/admin/ocr/languages`
+- `POST /api/v1/admin/ocr/languages/install` con `{"languages":["deu","ita"]}`
+
+La instalación está deshabilitada por defecto. Para habilitarla en Ubuntu/Debian, un administrador debe instalar los archivos versionados con propiedad y permisos restringidos:
+
+```bash
+sudo install -o root -g root -m 0755 deploy/project-iiif-install-tesseract-language /usr/local/sbin/project-iiif-install-tesseract-language
+sudo install -o root -g root -m 0440 deploy/project-iiif-tesseract-language.sudoers /etc/sudoers.d/project-iiif-tesseract-language
+sudo visudo -cf /etc/sudoers.d/project-iiif-tesseract-language
+```
+
+Después se puede cambiar únicamente en el archivo `config.yaml`:
+
+```yaml
+ocr:
+  language_installation:
+    enabled: true
+    helper_path: /usr/local/sbin/project-iiif-install-tesseract-language
+    timeout_seconds: 300
+```
+
+El backend nunca ejecuta `apt-get` directamente, no usa `sh -c` y no acepta nombres de paquetes del navegador. Valida como máximo diez códigos contra el catálogo APT recién consultado y llama con argumentos separados a `sudo -n <helper> <código>`. El helper, propiedad de `root`, vuelve a validar un único código, bloquea instalaciones simultáneas, limita el paquete a `tesseract-ocr-<código>`, aplica un timeout propio, registra auditoría y verifica el resultado con `tesseract --list-langs`. La API administrativa no puede habilitar ni cambiar la ruta del helper: estos campos se conservan desde `config.yaml`.
+
+Instalar no habilita automáticamente. Los idiomas ISO 639-3 compatibles con Lingua pueden activarse luego en **Idiomas instalados** para detección automática; otros permanecen disponibles para selección manual. No se concede `sudo apt` general al usuario del servicio.
 
 ## Operación
 

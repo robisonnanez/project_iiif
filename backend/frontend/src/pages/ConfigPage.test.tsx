@@ -5,6 +5,17 @@ import { api } from "../api";
 import { ConfigPage } from "./ConfigPage";
 import { sampleConfig } from "../test/fixtures";
 
+it("muestra idiomas del sistema e instala una selección sin habilitarla", async () => {
+  const user = userEvent.setup();
+  vi.spyOn(api, "ocrLanguages").mockResolvedValueOnce({ installation_enabled: true, installed: [{ code: "spa", name: "Español", installed: true, enabled: true, detection_supported: true }], available: [{ code: "deu", name: "Alemán", package: "tesseract-ocr-deu", installed: false, enabled: false, detection_supported: true }] });
+  const install = vi.spyOn(api, "installOCRLanguages").mockResolvedValueOnce({ installed: ["deu"], catalog: { installation_enabled: true, installed: [{ code: "deu", name: "Alemán", package: "tesseract-ocr-deu", installed: true, enabled: false, detection_supported: true }], available: [] } });
+  render(<ConfigPage initial={structuredClone(sampleConfig)} onSaved={() => undefined} />);
+  await user.click(await screen.findByLabelText("Alemán (deu)"));
+  await user.click(screen.getByRole("button", { name: "Instalar seleccionados" }));
+  expect(install).toHaveBeenCalledWith(["deu"]);
+  expect(await screen.findByText(/Idiomas instalados y verificados: deu/)).toBeInTheDocument();
+});
+
 it("muestra solo Mongo URI para MongoDB", async () => {
   const user = userEvent.setup();
   render(<ConfigPage initial={structuredClone(sampleConfig)} onSaved={() => undefined} />);

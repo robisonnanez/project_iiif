@@ -60,6 +60,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("Error inicializando OCR: %v", err)
 	}
+	ocrLanguageService := services.NewOCRLanguageService(cfg)
 	if cfg.OCR.Enabled && cfg.OCR.AutoAfterConversion {
 		pdfService.SetCompletionHook(func(documentID string) {
 			if _, createErr := ocrService.CreateJob(documentID, services.CreateOCRJobRequest{Mode: cfg.OCR.DefaultMode, LanguageMode: "auto"}); createErr != nil {
@@ -95,7 +96,7 @@ func main() {
 	welcomeHandler := handlers.NewWelcomeHandler(cfg)
 	frontendHandler := handlers.NewFrontendHandler(cfg)
 	adminHandler := handlers.NewAdminHandler(cfg, documentService)
-	ocrHandler := handlers.NewOCRHandler(ocrService)
+	ocrHandler := handlers.NewOCRHandler(ocrService, ocrLanguageService)
 	authHandler := handlers.NewAuthHandler(cfg)
 
 	// Ruta de bienvenida
@@ -164,6 +165,8 @@ func main() {
 			group.POST("/ocr/jobs/:job_id/cancel", ocrHandler.CancelJob)
 			group.GET("/ocr/search", ocrHandler.Search)
 			group.GET("/ocr/autocomplete", ocrHandler.Autocomplete)
+			group.GET("/ocr/languages", ocrHandler.GetLanguages)
+			group.POST("/ocr/languages/install", ocrHandler.InstallLanguages)
 		}
 
 		adminV1 := router.Group("/api/v1/admin")

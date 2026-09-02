@@ -508,6 +508,106 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/v1/admin/ocr/languages": {
+            "get": {
+                "security": [
+                    {
+                        "SessionCookie": []
+                    }
+                ],
+                "description": "Obtiene los idiomas reconocidos por Tesseract y los paquetes APT disponibles para instalar. Requiere sesión administrativa.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "OCR"
+                ],
+                "summary": "Consultar idiomas OCR del sistema",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/services.OCRLanguageCatalog"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.errorResponse"
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.errorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/admin/ocr/languages/install": {
+            "post": {
+                "security": [
+                    {
+                        "SessionCookie": []
+                    }
+                ],
+                "description": "Instala hasta 10 paquetes descubiertos en APT mediante un helper privilegiado restringido y verifica el resultado con Tesseract. Instalar no habilita automáticamente el idioma.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "OCR"
+                ],
+                "summary": "Instalar idiomas OCR",
+                "parameters": [
+                    {
+                        "description": "Idiomas Tesseract",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/services.InstallOCRLanguagesRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/services.InstallOCRLanguagesResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.errorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.errorResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.errorResponse"
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.errorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/admin/projects": {
             "get": {
                 "security": [
@@ -1465,6 +1565,20 @@ const docTemplate = `{
                         }
                     }
                 },
+                "language_installation": {
+                    "type": "object",
+                    "properties": {
+                        "enabled": {
+                            "type": "boolean"
+                        },
+                        "helper_path": {
+                            "type": "string"
+                        },
+                        "timeout_seconds": {
+                            "type": "integer"
+                        }
+                    }
+                },
                 "min_text_chars": {
                     "type": "integer"
                 },
@@ -2250,6 +2364,38 @@ const docTemplate = `{
                 }
             }
         },
+        "services.InstallOCRLanguagesRequest": {
+            "type": "object",
+            "required": [
+                "languages"
+            ],
+            "properties": {
+                "languages": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    },
+                    "example": [
+                        "deu",
+                        "ita"
+                    ]
+                }
+            }
+        },
+        "services.InstallOCRLanguagesResponse": {
+            "type": "object",
+            "properties": {
+                "catalog": {
+                    "$ref": "#/definitions/services.OCRLanguageCatalog"
+                },
+                "installed": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                }
+            }
+        },
         "services.OCRAutocompleteItem": {
             "type": "object",
             "properties": {
@@ -2393,6 +2539,55 @@ const docTemplate = `{
                 },
                 "total_pages": {
                     "type": "integer"
+                }
+            }
+        },
+        "services.OCRLanguage": {
+            "type": "object",
+            "properties": {
+                "code": {
+                    "type": "string",
+                    "example": "deu"
+                },
+                "detection_supported": {
+                    "type": "boolean",
+                    "example": true
+                },
+                "enabled": {
+                    "type": "boolean",
+                    "example": false
+                },
+                "installed": {
+                    "type": "boolean",
+                    "example": false
+                },
+                "name": {
+                    "type": "string",
+                    "example": "Alemán"
+                },
+                "package": {
+                    "type": "string",
+                    "example": "tesseract-ocr-deu"
+                }
+            }
+        },
+        "services.OCRLanguageCatalog": {
+            "type": "object",
+            "properties": {
+                "available": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/services.OCRLanguage"
+                    }
+                },
+                "installation_enabled": {
+                    "type": "boolean"
+                },
+                "installed": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/services.OCRLanguage"
+                    }
                 }
             }
         },

@@ -1,4 +1,4 @@
-import type { AppConfig, DBMigrationResult, DBMigrationStatus, DocumentImagesResponse, DocumentRecord, MigrationDirectory, MigrationPayload, MigrationStatus, OCRAutocompleteResponse, OCRJob, OCRSearchResponse, ProjectConfig, UploadScope, UploadSettings } from "./types";
+import type { AppConfig, DBMigrationResult, DBMigrationStatus, DocumentImagesResponse, DocumentRecord, MigrationDirectory, MigrationPayload, MigrationStatus, OCRAutocompleteResponse, OCRJob, OCRLanguageCatalog, OCRSearchResponse, ProjectConfig, UploadScope, UploadSettings } from "./types";
 
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
   const response = await fetch(url, { credentials: "same-origin", ...init });
@@ -55,6 +55,10 @@ export const api = {
   startOCR: (documentId: string, payload: { mode: string; language_mode: string; languages: string[]; force: boolean }) => request<OCRJob>(`/api/v1/admin/documents/${encodeURIComponent(documentId)}/ocr/jobs`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }),
   ocrJob: (jobId: string) => request<OCRJob>(`/api/v1/admin/ocr/jobs/${encodeURIComponent(jobId)}`),
   cancelOCR: (jobId: string) => request<OCRJob>(`/api/v1/admin/ocr/jobs/${encodeURIComponent(jobId)}/cancel`, { method: "POST" }),
+  ocrLanguages: () => request<OCRLanguageCatalog>("/api/v1/admin/ocr/languages", { cache: "no-store" }),
+  installOCRLanguages: (languages: string[]) => request<{ installed: string[]; catalog: OCRLanguageCatalog }>("/api/v1/admin/ocr/languages/install", {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ languages }),
+  }),
   searchOCR: (query: string, documentId?: string, project?: string, tenant?: string) => {
     const params = new URLSearchParams({ q: query, limit: "100" });
     if (documentId) params.set("document_id", documentId); if (project) params.set("project", project); if (tenant) params.set("tenant", tenant);
@@ -81,6 +85,7 @@ function normalizeConfig(config: AppConfig): AppConfig {
       ...config.ocr,
       candidate_languages: Array.isArray(config.ocr.candidate_languages) ? config.ocr.candidate_languages : [],
       fallback_languages: Array.isArray(config.ocr.fallback_languages) ? config.ocr.fallback_languages : [],
+      language_installation: config.ocr.language_installation ?? { enabled: false, helper_path: "/usr/local/sbin/project-iiif-install-tesseract-language", timeout_seconds: 300 },
     },
   };
 }

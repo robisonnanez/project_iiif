@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { KeyboardEvent } from "react";
 import { api } from "../api";
 import { Alert, Badge, Button, Card, EmptyState, PageHeader } from "../components/ui";
-import type { AppConfig, DocumentRecord, Notify, OCRAutocompleteItem, OCRJob, OCRSearchResult } from "../types";
+import type { AppConfig, DocumentRecord, Notify, OCRAutocompleteItem, OCRJob, OCRLanguage, OCRSearchResult } from "../types";
 
 const terminal = new Set(["completed", "completed_with_errors", "failed", "cancelled"]);
 
@@ -12,6 +12,7 @@ export function OCRPage({ documents, config, notify }: { documents: DocumentReco
   const [mode, setMode] = useState("hybrid");
   const [languageMode, setLanguageMode] = useState("auto");
   const [languages, setLanguages] = useState<string[]>(["spa"]);
+  const [installedLanguages, setInstalledLanguages] = useState<OCRLanguage[]>([]);
   const [force, setForce] = useState(false);
   const [job, setJob] = useState<OCRJob | null>(null);
   const [busy, setBusy] = useState(false);
@@ -26,6 +27,7 @@ export function OCRPage({ documents, config, notify }: { documents: DocumentReco
   const skipAutocomplete = useRef(false);
 
   useEffect(() => { if (!documentId && ready.length) setDocumentId(ready[0].id); }, [documentId, ready]);
+  useEffect(() => { void api.ocrLanguages().then((catalog) => setInstalledLanguages(catalog.installed)).catch(() => undefined); }, []);
   useEffect(() => {
     if (!job || terminal.has(job.status)) return;
     const timer = window.setInterval(async () => {
@@ -114,7 +116,7 @@ export function OCRPage({ documents, config, notify }: { documents: DocumentReco
           <div className="form-field"><label htmlFor="ocr-mode">Cobertura</label><select id="ocr-mode" className="input" value={mode} onChange={(event) => setMode(event.target.value)}><option value="hybrid">Híbrido por página</option><option value="exhaustive">Exhaustivo</option><option value="ocr_only">Solo OCR</option></select></div>
           <div className="form-field"><label htmlFor="ocr-language-mode">Idiomas</label><select id="ocr-language-mode" className="input" value={languageMode} onChange={(event) => setLanguageMode(event.target.value)}><option value="auto">Detectar automáticamente</option><option value="manual">Seleccionar manualmente</option></select></div>
         </div>
-        {languageMode === "manual" && <div className="language-options">{["spa", "eng", "fra", "por"].map((language) => <label className="checkbox" key={language}><input type="checkbox" checked={languages.includes(language)} onChange={() => toggleLanguage(language)} />{language}</label>)}</div>}
+        {languageMode === "manual" && <div className="language-options">{(installedLanguages.length ? installedLanguages : fallbackManualLanguages).filter((language) => language.code !== "osd").map((language) => <label className="checkbox" key={language.code}><input type="checkbox" checked={languages.includes(language.code)} onChange={() => toggleLanguage(language.code)} />{language.name} ({language.code})</label>)}</div>}
         <label className="checkbox"><input type="checkbox" checked={force} onChange={(event) => setForce(event.target.checked)} />Crear una nueva generación aunque ya exista OCR</label>
         <Button disabled={!config?.ocr?.enabled || !documentId || busy || (!!job && !terminal.has(job.status))} onClick={start}>{busy ? "Procesando…" : "Iniciar OCR"}</Button>
         {job && <div className="job-progress"><div className="job-progress-heading"><strong>{job.status.replaceAll("_", " ")}</strong><span>{job.processed_pages} / {job.total_pages} páginas</span></div><div className="progress-track"><div className="progress-fill" style={{ width: `${progress}%` }} /></div>{job.error && <p className="inline-error">{job.error}</p>}{!terminal.has(job.status) && <Button variant="danger" onClick={async () => setJob(await api.cancelOCR(job.id))}>Cancelar</Button>}</div>}
@@ -131,3 +133,5 @@ export function OCRPage({ documents, config, notify }: { documents: DocumentReco
     <Card className="ocr-results"><div className="card-heading"><div><h2>Coincidencias</h2><p>{searched ? `${results.length} páginas encontradas` : "Ejecuta una búsqueda para ver las páginas."}</p></div></div>{searched && !results.length ? <EmptyState title="Sin coincidencias" description="Prueba otra palabra o verifica que el documento tenga OCR activo." /> : <div className="table-wrap"><table><thead><tr><th>Documento</th><th>Página</th><th>Origen</th><th>Coincidencia</th><th>IIIF</th></tr></thead><tbody>{results.map((result) => <tr key={`${result.document_id}-${result.page_number}`}><td><code>{result.document_id.slice(0, 12)}…</code></td><td><strong>{result.page_number}</strong></td><td><Badge tone={result.source === "ocr" ? "info" : "success"}>{result.source}</Badge></td><td><span className="ocr-snippet">{result.snippet}</span><small className="table-secondary">{result.matches} coincidencia(s)</small></td><td>{result.image_id ? <a className="button button-secondary compact-button" href={`/iiif/3/${encodeURIComponent(result.image_id)}/full/max/0/default.jpg`} target="_blank" rel="noreferrer">Abrir imagen IIIF</a> : <span className="table-secondary">Imagen no disponible</span>}</td></tr>)}</tbody></table></div>}</Card>
   </>;
 }
+
+const fallbackManualLanguages = ["spa", "eng", "fra", "por"].map((code) => ({ code, name: code, installed: true, enabled: true, detection_supported: true }));

@@ -34,6 +34,15 @@ definitions:
           sample_pages:
             type: integer
         type: object
+      language_installation:
+        properties:
+          enabled:
+            type: boolean
+          helper_path:
+            type: string
+          timeout_seconds:
+            type: integer
+        type: object
       min_text_chars:
         type: integer
       page_timeout_seconds:
@@ -552,6 +561,27 @@ definitions:
       mode:
         type: string
     type: object
+  services.InstallOCRLanguagesRequest:
+    properties:
+      languages:
+        example:
+        - deu
+        - ita
+        items:
+          type: string
+        type: array
+    required:
+    - languages
+    type: object
+  services.InstallOCRLanguagesResponse:
+    properties:
+      catalog:
+        $ref: '#/definitions/services.OCRLanguageCatalog'
+      installed:
+        items:
+          type: string
+        type: array
+    type: object
   services.OCRAutocompleteItem:
     properties:
       frequency:
@@ -648,6 +678,40 @@ definitions:
         type: string
       total_pages:
         type: integer
+    type: object
+  services.OCRLanguage:
+    properties:
+      code:
+        example: deu
+        type: string
+      detection_supported:
+        example: true
+        type: boolean
+      enabled:
+        example: false
+        type: boolean
+      installed:
+        example: false
+        type: boolean
+      name:
+        example: Alemán
+        type: string
+      package:
+        example: tesseract-ocr-deu
+        type: string
+    type: object
+  services.OCRLanguageCatalog:
+    properties:
+      available:
+        items:
+          $ref: '#/definitions/services.OCRLanguage'
+        type: array
+      installation_enabled:
+        type: boolean
+      installed:
+        items:
+          $ref: '#/definitions/services.OCRLanguage'
+        type: array
     type: object
   services.OCRPage:
     properties:
@@ -1033,6 +1097,72 @@ paths:
       security:
       - SessionCookie: []
       summary: Cancelar trabajo OCR
+      tags:
+      - OCR
+  /api/v1/admin/ocr/languages:
+    get:
+      description: Obtiene los idiomas reconocidos por Tesseract y los paquetes APT
+        disponibles para instalar. Requiere sesión administrativa.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/services.OCRLanguageCatalog'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.errorResponse'
+        "503":
+          description: Service Unavailable
+          schema:
+            $ref: '#/definitions/handlers.errorResponse'
+      security:
+      - SessionCookie: []
+      summary: Consultar idiomas OCR del sistema
+      tags:
+      - OCR
+  /api/v1/admin/ocr/languages/install:
+    post:
+      consumes:
+      - application/json
+      description: Instala hasta 10 paquetes descubiertos en APT mediante un helper
+        privilegiado restringido y verifica el resultado con Tesseract. Instalar no
+        habilita automáticamente el idioma.
+      parameters:
+      - description: Idiomas Tesseract
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/services.InstallOCRLanguagesRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/services.InstallOCRLanguagesResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.errorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.errorResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/handlers.errorResponse'
+        "503":
+          description: Service Unavailable
+          schema:
+            $ref: '#/definitions/handlers.errorResponse'
+      security:
+      - SessionCookie: []
+      summary: Instalar idiomas OCR
       tags:
       - OCR
   /api/v1/admin/projects:

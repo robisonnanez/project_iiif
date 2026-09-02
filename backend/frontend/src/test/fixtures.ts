@@ -21,6 +21,7 @@ export const sampleConfig: AppConfig = {
     candidate_languages: ["spa", "eng", "fra", "por"], fallback_languages: ["spa"],
     language_detection: { enabled: true, sample_pages: 5, min_sample_chars: 200, minimum_confidence: 0.7, max_languages: 2 },
     artifacts: { gzip: true },
+    language_installation: { enabled: false, helper_path: "/usr/local/sbin/project-iiif-install-tesseract-language", timeout_seconds: 300 },
   },
   projects: { enabled: false, default_project: "default", require_project: false, allow_dynamic_tenants: false, items: [] },
   security: { enable_auth: false, log_level: "info", cors_origins: [], max_concurrent_uploads: 5 },

@@ -642,7 +642,14 @@ func (s *OCRService) detectLanguages(document *fitz.Document) []string {
 	if usefulRunes(sample.String()) < s.config.OCR.LanguageDetection.MinSampleChars {
 		return append([]string(nil), s.config.OCR.FallbackLanguages...)
 	}
-	detector := lingua.NewLanguageDetectorBuilder().FromLanguages(lingua.Spanish, lingua.English, lingua.French, lingua.Portuguese).Build()
+	detectorLanguages := linguaLanguages(s.config.OCR.CandidateLanguages)
+	if len(detectorLanguages) == 0 {
+		return append([]string(nil), s.config.OCR.FallbackLanguages...)
+	}
+	if len(detectorLanguages) == 1 {
+		return []string{tesseractLanguage(detectorLanguages[0])}
+	}
+	detector := lingua.NewLanguageDetectorBuilder().FromLanguages(detectorLanguages...).Build()
 	values := detector.ComputeLanguageConfidenceValues(sample.String())
 	if len(values) == 0 || values[0].Value() < s.config.OCR.LanguageDetection.MinimumConfidence {
 		return append([]string(nil), s.config.OCR.FallbackLanguages...)
@@ -655,16 +662,18 @@ func (s *OCRService) detectLanguages(document *fitz.Document) []string {
 }
 
 func tesseractLanguage(language lingua.Language) string {
-	switch language {
-	case lingua.English:
-		return "eng"
-	case lingua.French:
-		return "fra"
-	case lingua.Portuguese:
-		return "por"
-	default:
-		return "spa"
+	return strings.ToLower(language.IsoCode639_3().String())
+}
+
+func linguaLanguages(codes []string) []lingua.Language {
+	requested := stringSet(codes)
+	result := make([]lingua.Language, 0, len(requested))
+	for _, language := range lingua.AllLanguages() {
+		if requested[tesseractLanguage(language)] {
+			result = append(result, language)
+		}
 	}
+	return result
 }
 
 func (s *OCRService) GetSummary(documentID string) (*OCRDocumentSummary, error) {

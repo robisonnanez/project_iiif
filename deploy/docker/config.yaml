@@ -84,6 +84,10 @@ ocr:
     max_languages: 2
   artifacts:
     gzip: true
+  language_installation:
+    enabled: false
+    helper_path: /usr/local/sbin/project-iiif-install-tesseract-language
+    timeout_seconds: 300
 security:
   enable_auth: true
   log_level: "info"
