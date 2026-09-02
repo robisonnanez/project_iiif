@@ -781,6 +781,23 @@ definitions:
         example: SÁNCHEZ,
         type: string
     type: object
+  services.OCRWordSearchResponse:
+    properties:
+      document_id:
+        type: string
+      geometry_space:
+        type: string
+      geometry_status:
+        type: string
+      items:
+        items:
+          $ref: '#/definitions/services.OCRWord'
+        type: array
+      page_number:
+        type: integer
+      query:
+        type: string
+    type: object
 info:
   contact: {}
   description: 'API publica unificada: gestion documental v1 e interoperabilidad IIIF
@@ -1417,6 +1434,54 @@ paths:
           schema:
             $ref: '#/definitions/handlers.errorResponse'
       summary: Obtener OCR y bounding boxes de una página
+      tags:
+      - OCR
+  /api/v1/documents/{id}/ocr/pages/{page}/words:
+    get:
+      description: Devuelve únicamente las apariciones exactas de q con confianza
+        y bbox en coordenadas del Canvas IIIF. Ignora mayúsculas, acentos y puntuación
+        exterior. Las generaciones page_only deben reprocesarse con force=true.
+      parameters:
+      - description: ID del documento
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Número de página
+        in: path
+        name: page
+        required: true
+        type: integer
+      - description: Palabra a localizar
+        in: query
+        name: q
+        required: true
+        type: string
+      - default: 100
+        description: Máximo de apariciones (máximo 1000)
+        in: query
+        name: limit
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/services.OCRWordSearchResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.errorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.errorResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/handlers.errorResponse'
+      summary: Buscar una palabra y sus bounding boxes en una página OCR
       tags:
       - OCR
   /api/v1/documents/{id}/ocr/search:

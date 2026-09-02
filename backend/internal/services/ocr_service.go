@@ -49,6 +49,17 @@ type OCRWord struct {
 	BBox       OCRBoundingBox `json:"bbox"`
 }
 
+type OCRWordSearchResponse struct {
+	DocumentID     string    `json:"document_id"`
+	PageNumber     int       `json:"page_number"`
+	Query          string    `json:"query"`
+	GeometryStatus string    `json:"geometry_status"`
+	GeometrySpace  string    `json:"geometry_space,omitempty"`
+	Items          []OCRWord `json:"items"`
+}
+
+var ErrOCRWordGeometryUnavailable = errors.New("la página no contiene geometría por palabra; debe reprocesarse con force=true")
+
 func (word *OCRWord) UnmarshalJSON(data []byte) error {
 	var value struct {
 		Text       string          `json:"text"`
@@ -710,6 +721,42 @@ func (s *OCRService) GetPage(documentID string, page int) (*OCRPage, error) {
 	return result, nil
 }
 
+func (s *OCRService) FindPageWords(documentID string, page int, query string, limit int) (*OCRWordSearchResponse, error) {
+	needle := normalizeWordLookup(query)
+	if needle == "" {
+		return nil, errors.New("q debe contener al menos una letra o número")
+	}
+	result, err := s.GetPage(documentID, page)
+	if err != nil {
+		return nil, err
+	}
+	if result.GeometryStatus != "word" || len(result.Words) == 0 {
+		return nil, ErrOCRWordGeometryUnavailable
+	}
+	if limit < 1 {
+		limit = 100
+	}
+	if limit > 1000 {
+		limit = 1000
+	}
+	items := filterOCRWords(result.Words, needle, limit)
+	return &OCRWordSearchResponse{DocumentID: documentID, PageNumber: page, Query: query, GeometryStatus: result.GeometryStatus, GeometrySpace: result.GeometrySpace, Items: items}, nil
+}
+
+func filterOCRWords(words []OCRWord, normalizedQuery string, limit int) []OCRWord {
+	items := make([]OCRWord, 0)
+	for _, word := range words {
+		if normalizeWordLookup(word.Text) != normalizedQuery {
+			continue
+		}
+		items = append(items, word)
+		if len(items) == limit {
+			break
+		}
+	}
+	return items
+}
+
 func (s *OCRService) Search(query, project, tenant, documentID string, limit, offset int) ([]OCRSearchResult, int, error) {
 	needle := normalizeSearch(query)
 	if utf8.RuneCountInString(needle) < 2 {
@@ -1260,6 +1307,11 @@ func normalizeSearch(value string) string {
 		builder.WriteRune(current)
 	}
 	return norm.NFC.String(builder.String())
+}
+func normalizeWordLookup(value string) string {
+	return strings.TrimFunc(normalizeSearch(value), func(current rune) bool {
+		return !unicode.IsLetter(current) && !unicode.IsNumber(current)
+	})
 }
 func makeSnippet(original, normalizedNeedle string) string {
 	normalized := normalizeSearch(original)

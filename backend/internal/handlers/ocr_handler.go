@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"errors"
 	"net/http"
 	"strconv"
 	"strings"
@@ -189,6 +190,41 @@ func (h *OCRHandler) GetPage(c *gin.Context) {
 	result, err := h.service.GetPage(c.Param("id"), page)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "página OCR no encontrada"})
+		return
+	}
+	c.JSON(http.StatusOK, result)
+}
+
+// FindPageWords godoc
+// @Summary Buscar una palabra y sus bounding boxes en una página OCR
+// @Description Devuelve únicamente las apariciones exactas de q con confianza y bbox en coordenadas del Canvas IIIF. Ignora mayúsculas, acentos y puntuación exterior. Las generaciones page_only deben reprocesarse con force=true.
+// @Tags OCR
+// @Produce json
+// @Param id path string true "ID del documento"
+// @Param page path int true "Número de página"
+// @Param q query string true "Palabra a localizar"
+// @Param limit query int false "Máximo de apariciones (máximo 1000)" default(100)
+// @Success 200 {object} services.OCRWordSearchResponse
+// @Failure 400 {object} errorResponse
+// @Failure 404 {object} errorResponse
+// @Failure 409 {object} errorResponse
+// @Router /api/v1/documents/{id}/ocr/pages/{page}/words [get]
+func (h *OCRHandler) FindPageWords(c *gin.Context) {
+	page, err := strconv.Atoi(c.Param("page"))
+	if err != nil || page < 1 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "page debe ser mayor a cero"})
+		return
+	}
+	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "100"))
+	result, err := h.service.FindPageWords(c.Param("id"), page, c.Query("q"), limit)
+	if err != nil {
+		status := http.StatusBadRequest
+		if errors.Is(err, services.ErrOCRWordGeometryUnavailable) {
+			status = http.StatusConflict
+		} else if !strings.Contains(err.Error(), "q debe") {
+			status = http.StatusNotFound
+		}
+		c.JSON(status, gin.H{"error": err.Error()})
 		return
 	}
 	c.JSON(http.StatusOK, result)

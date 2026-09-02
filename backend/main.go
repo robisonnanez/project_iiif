@@ -158,6 +158,7 @@ func main() {
 			group.POST("/documents/:id/ocr/jobs", ocrHandler.CreateJob)
 			group.GET("/documents/:id/ocr", ocrHandler.GetSummary)
 			group.GET("/documents/:id/ocr/pages/:page", ocrHandler.GetPage)
+			group.GET("/documents/:id/ocr/pages/:page/words", ocrHandler.FindPageWords)
 			group.GET("/documents/:id/ocr/search", ocrHandler.SearchDocument)
 			group.GET("/documents/:id/ocr/autocomplete", ocrHandler.AutocompleteDocument)
 			group.DELETE("/documents/:id/ocr", ocrHandler.Delete)
@@ -195,6 +196,7 @@ func main() {
 		registerDocumentRoutes(documentV1)
 		documentV1.GET("/:id/ocr", ocrHandler.GetSummary)
 		documentV1.GET("/:id/ocr/pages/:page", ocrHandler.GetPage)
+		documentV1.GET("/:id/ocr/pages/:page/words", ocrHandler.FindPageWords)
 		documentV1.GET("/:id/ocr/search", ocrHandler.SearchDocument)
 		documentV1.GET("/:id/ocr/autocomplete", ocrHandler.AutocompleteDocument)
 	}

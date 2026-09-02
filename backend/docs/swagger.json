@@ -1078,6 +1078,74 @@
                 }
             }
         },
+        "/api/v1/documents/{id}/ocr/pages/{page}/words": {
+            "get": {
+                "description": "Devuelve únicamente las apariciones exactas de q con confianza y bbox en coordenadas del Canvas IIIF. Ignora mayúsculas, acentos y puntuación exterior. Las generaciones page_only deben reprocesarse con force=true.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "OCR"
+                ],
+                "summary": "Buscar una palabra y sus bounding boxes en una página OCR",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "ID del documento",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Número de página",
+                        "name": "page",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Palabra a localizar",
+                        "name": "q",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "integer",
+                        "default": 100,
+                        "description": "Máximo de apariciones (máximo 1000)",
+                        "name": "limit",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/services.OCRWordSearchResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.errorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.errorResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.errorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/documents/{id}/ocr/search": {
             "get": {
                 "produces": [
@@ -2683,6 +2751,32 @@
                 "text": {
                     "type": "string",
                     "example": "SÁNCHEZ,"
+                }
+            }
+        },
+        "services.OCRWordSearchResponse": {
+            "type": "object",
+            "properties": {
+                "document_id": {
+                    "type": "string"
+                },
+                "geometry_space": {
+                    "type": "string"
+                },
+                "geometry_status": {
+                    "type": "string"
+                },
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/services.OCRWord"
+                    }
+                },
+                "page_number": {
+                    "type": "integer"
+                },
+                "query": {
+                    "type": "string"
                 }
             }
         }

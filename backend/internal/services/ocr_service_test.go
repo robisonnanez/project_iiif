@@ -51,6 +51,18 @@ func TestParseTesseractTSV(t *testing.T) {
 	}
 }
 
+func TestFilterOCRWordsMatchesAccentsCaseAndOuterPunctuation(t *testing.T) {
+	words := []OCRWord{
+		{Text: "SÁNCHEZ,", Confidence: 95, BBox: OCRBoundingBox{X0: 10, X1: 30, Y0: 20, Y1: 40}},
+		{Text: "sanchez", Confidence: 90, BBox: OCRBoundingBox{X0: 40, X1: 60, Y0: 20, Y1: 40}},
+		{Text: "otro", Confidence: 99, BBox: OCRBoundingBox{X0: 70, X1: 90, Y0: 20, Y1: 40}},
+	}
+	items := filterOCRWords(words, normalizeWordLookup("sánchez"), 1)
+	if len(items) != 1 || items[0].Text != "SÁNCHEZ," || items[0].BBox.X1 != 30 {
+		t.Fatalf("resultado inesperado: %+v", items)
+	}
+}
+
 func TestParseTesseractTSVRejectsMissingHeader(t *testing.T) {
 	if _, _, _, err := parseTesseractTSV([]byte("línea\tmalformada\n")); err == nil {
 		t.Fatal("se esperaba error para TSV sin encabezado")

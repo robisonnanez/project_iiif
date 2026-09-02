@@ -7,9 +7,10 @@ import { sampleConfig } from "../test/fixtures";
 
 it("muestra idiomas del sistema e instala una selección sin habilitarla", async () => {
   const user = userEvent.setup();
-  vi.spyOn(api, "ocrLanguages").mockResolvedValueOnce({ installation_enabled: true, installed: [{ code: "spa", name: "Español", installed: true, enabled: true, detection_supported: true }], available: [{ code: "deu", name: "Alemán", package: "tesseract-ocr-deu", installed: false, enabled: false, detection_supported: true }] });
+  vi.spyOn(api, "ocrLanguages").mockResolvedValueOnce({ installation_enabled: true, installed: [{ code: "spa", name: "Español", installed: true, enabled: true, detection_supported: true }, { code: "osd", name: "Detección de orientación y escritura", installed: true, enabled: false, detection_supported: false }], available: [{ code: "deu", name: "Alemán", package: "tesseract-ocr-deu", installed: false, enabled: false, detection_supported: true }] });
   const install = vi.spyOn(api, "installOCRLanguages").mockResolvedValueOnce({ installed: ["deu"], catalog: { installation_enabled: true, installed: [{ code: "deu", name: "Alemán", package: "tesseract-ocr-deu", installed: true, enabled: false, detection_supported: true }], available: [] } });
   render(<ConfigPage initial={structuredClone(sampleConfig)} onSaved={() => undefined} />);
+  expect(screen.queryByLabelText(/orientación y escritura/i)).not.toBeInTheDocument();
   await user.click(await screen.findByLabelText("Alemán (deu)"));
   await user.click(screen.getByRole("button", { name: "Instalar seleccionados" }));
   expect(install).toHaveBeenCalledWith(["deu"]);

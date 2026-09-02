@@ -99,6 +99,7 @@ Endpoints públicos de lectura para integraciones externas:
 
 - `GET /api/v1/documents/{id}/ocr`
 - `GET /api/v1/documents/{id}/ocr/pages/{page}`
+- `GET /api/v1/documents/{id}/ocr/pages/{page}/words?q=SÁNCHEZ&limit=100`
 - `GET /api/v1/documents/{id}/ocr/search?q=texto`
 - `GET /api/v1/documents/{id}/ocr/autocomplete?q=func&limit=10`
 - `GET /api/v1/ocr/search?q=texto&project=default&tenant=tenant`
@@ -158,6 +159,14 @@ Los estados existentes se conservan:
 - `page_only`: hay texto de página, pero no cajas; es el estado normal del OCR histórico no reprocesado o el fallback si Tesseract falla y existe texto nativo.
 
 Las páginas antiguas que sí guardaban `left/top/width/height` se leen de forma compatible y se transforman al contrato `bbox` al responder. No se modifican ni eliminan artefactos históricos. Para obtener cajas en páginas históricas `page_only`, se debe lanzar manualmente una nueva generación con `force: true`.
+
+Para localizar una palabra concreta sin transferir el texto completo ni todas las cajas se puede usar:
+
+```http
+GET /api/v1/documents/{id}/ocr/pages/{page}/words?q=SÁNCHEZ&limit=100
+```
+
+La respuesta contiene únicamente las apariciones exactas con `text`, `confidence` y `bbox`. La comparación ignora mayúsculas, acentos y puntuación exterior, preservando el texto OCR original en la respuesta. `limit` vale 100 por defecto y no supera 1000. Una generación histórica `page_only` responde `409` e indica que debe reprocesarse; la ruta nunca genera OCR durante una consulta.
 
 ## Autocompletado de palabras
 
