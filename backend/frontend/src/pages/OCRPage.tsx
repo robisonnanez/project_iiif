@@ -104,7 +104,7 @@ export function OCRPage({ documents, config, notify }: { documents: DocumentReco
   return <>
     <PageHeader eyebrow="Texto indexado" title="OCR por página" description="Extrae texto de todas las páginas y localiza cada coincidencia en su Canvas IIIF." />
     {!config?.ocr?.enabled && <Alert tone="info">OCR está desactivado. Activa <code>ocr.enabled: true</code> en <code>config.yaml</code> y reinicia el servicio.</Alert>}
-    {config?.ocr?.enabled && <Alert tone="info">Los resultados OCR se guardan comprimidos en <code>{config.storage.data_path.replace(/\/$/, "")}/ocr/pages/&lt;documento&gt;/&lt;generación&gt;/000001.json.gz</code>. Cada palabra reconocida incluye <code>left</code>, <code>top</code>, <code>width</code> y <code>height</code>; las páginas con origen <code>text_layer</code> conservan texto por página, pero no cajas por palabra.</Alert>}
+    {config?.ocr?.enabled && <Alert tone="info">Los resultados OCR se guardan comprimidos en <code>{config.storage.data_path.replace(/\/$/, "")}/ocr/pages/&lt;documento&gt;/&lt;generación&gt;/000001.json.gz</code>. Cada palabra nueva incluye <code>bbox.x0</code>, <code>x1</code>, <code>y0</code> y <code>y1</code> en coordenadas del Canvas IIIF. Los OCR históricos sin geometría conservan <code>geometry_status: page_only</code> hasta ser reprocesados.</Alert>}
     {error && <Alert tone="danger">{error}</Alert>}
     <div className="ocr-layout">
       <Card>

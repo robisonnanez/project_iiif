@@ -939,6 +939,7 @@ const docTemplate = `{
         },
         "/api/v1/documents/{id}/ocr/pages/{page}": {
             "get": {
+                "description": "Devuelve el texto completo y, cuando existe geometría, palabras con bbox x0/x1/y0/y1 expresado en coordenadas del Canvas IIIF. Los OCR históricos sin geometría continúan con geometry_status=page_only.",
                 "produces": [
                     "application/json"
                 ],
@@ -2274,6 +2275,27 @@ const docTemplate = `{
                 }
             }
         },
+        "services.OCRBoundingBox": {
+            "type": "object",
+            "properties": {
+                "x0": {
+                    "type": "integer",
+                    "example": 940
+                },
+                "x1": {
+                    "type": "integer",
+                    "example": 1016
+                },
+                "y0": {
+                    "type": "integer",
+                    "example": 1543
+                },
+                "y1": {
+                    "type": "integer",
+                    "example": 1557
+                }
+            }
+        },
         "services.OCRDocumentSummary": {
             "type": "object",
             "properties": {
@@ -2401,6 +2423,12 @@ const docTemplate = `{
                 "generation": {
                     "type": "string"
                 },
+                "geometry_error": {
+                    "type": "string"
+                },
+                "geometry_space": {
+                    "type": "string"
+                },
                 "geometry_status": {
                     "type": "string"
                 },
@@ -2418,6 +2446,12 @@ const docTemplate = `{
                 },
                 "native_text": {
                     "type": "string"
+                },
+                "ocr_image_height": {
+                    "type": "integer"
+                },
+                "ocr_image_width": {
+                    "type": "integer"
                 },
                 "ocr_text": {
                     "type": "string"
@@ -2451,23 +2485,16 @@ const docTemplate = `{
         "services.OCRWord": {
             "type": "object",
             "properties": {
+                "bbox": {
+                    "$ref": "#/definitions/services.OCRBoundingBox"
+                },
                 "confidence": {
-                    "type": "number"
-                },
-                "height": {
-                    "type": "integer"
-                },
-                "left": {
-                    "type": "integer"
+                    "type": "number",
+                    "example": 95.20067596435548
                 },
                 "text": {
-                    "type": "string"
-                },
-                "top": {
-                    "type": "integer"
-                },
-                "width": {
-                    "type": "integer"
+                    "type": "string",
+                    "example": "SÁNCHEZ,"
                 }
             }
         }

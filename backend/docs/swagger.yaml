@@ -568,6 +568,21 @@ definitions:
       query:
         type: string
     type: object
+  services.OCRBoundingBox:
+    properties:
+      x0:
+        example: 940
+        type: integer
+      x1:
+        example: 1016
+        type: integer
+      y0:
+        example: 1543
+        type: integer
+      y1:
+        example: 1557
+        type: integer
+    type: object
   services.OCRDocumentSummary:
     properties:
       active_generation:
@@ -652,6 +667,10 @@ definitions:
         type: string
       generation:
         type: string
+      geometry_error:
+        type: string
+      geometry_space:
+        type: string
       geometry_status:
         type: string
       height:
@@ -664,6 +683,10 @@ definitions:
         type: string
       native_text:
         type: string
+      ocr_image_height:
+        type: integer
+      ocr_image_width:
+        type: integer
       ocr_text:
         type: string
       page_number:
@@ -685,18 +708,14 @@ definitions:
     type: object
   services.OCRWord:
     properties:
+      bbox:
+        $ref: '#/definitions/services.OCRBoundingBox'
       confidence:
+        example: 95.20067596435548
         type: number
-      height:
-        type: integer
-      left:
-        type: integer
       text:
+        example: SÁNCHEZ,
         type: string
-      top:
-        type: integer
-      width:
-        type: integer
     type: object
 info:
   contact: {}
@@ -1238,6 +1257,9 @@ paths:
       - OCR
   /api/v1/documents/{id}/ocr/pages/{page}:
     get:
+      description: Devuelve el texto completo y, cuando existe geometría, palabras
+        con bbox x0/x1/y0/y1 expresado en coordenadas del Canvas IIIF. Los OCR históricos
+        sin geometría continúan con geometry_status=page_only.
       parameters:
       - description: ID del documento
         in: path

@@ -14,7 +14,8 @@ it("abre la imagen IIIF real y explica dónde se guardan los bbox", async () => 
   config.ocr.enabled = true;
   render(<OCRPage documents={[document]} config={config} notify={() => undefined} />);
 
-  expect(screen.getByRole("status")).toHaveTextContent("Cada palabra reconocida incluye");
+  expect(screen.getByRole("status")).toHaveTextContent("Cada palabra nueva incluye");
+  expect(screen.getByRole("status")).toHaveTextContent("bbox.x0");
   await user.type(screen.getByLabelText("Texto"), "texto");
   await user.click(screen.getByRole("button", { name: "Buscar" }));
 

@@ -101,6 +101,7 @@ func (h *OCRHandler) GetSummary(c *gin.Context) {
 
 // GetPage godoc
 // @Summary Obtener OCR y bounding boxes de una página
+// @Description Devuelve el texto completo y, cuando existe geometría, palabras con bbox x0/x1/y0/y1 expresado en coordenadas del Canvas IIIF. Los OCR históricos sin geometría continúan con geometry_status=page_only.
 // @Tags OCR
 // @Produce json
 // @Param id path string true "ID del documento"
