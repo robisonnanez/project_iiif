@@ -34,6 +34,15 @@ definitions:
           sample_pages:
             type: integer
         type: object
+      language_installation:
+        properties:
+          enabled:
+            type: boolean
+          helper_path:
+            type: string
+          timeout_seconds:
+            type: integer
+        type: object
       min_text_chars:
         type: integer
       page_timeout_seconds:
@@ -552,6 +561,27 @@ definitions:
       mode:
         type: string
     type: object
+  services.InstallOCRLanguagesRequest:
+    properties:
+      languages:
+        example:
+        - deu
+        - ita
+        items:
+          type: string
+        type: array
+    required:
+    - languages
+    type: object
+  services.InstallOCRLanguagesResponse:
+    properties:
+      catalog:
+        $ref: '#/definitions/services.OCRLanguageCatalog'
+      installed:
+        items:
+          type: string
+        type: array
+    type: object
   services.OCRAutocompleteItem:
     properties:
       frequency:
@@ -567,6 +597,21 @@ definitions:
         type: array
       query:
         type: string
+    type: object
+  services.OCRBoundingBox:
+    properties:
+      x0:
+        example: 940
+        type: integer
+      x1:
+        example: 1016
+        type: integer
+      y0:
+        example: 1543
+        type: integer
+      y1:
+        example: 1557
+        type: integer
     type: object
   services.OCRDocumentSummary:
     properties:
@@ -634,6 +679,40 @@ definitions:
       total_pages:
         type: integer
     type: object
+  services.OCRLanguage:
+    properties:
+      code:
+        example: deu
+        type: string
+      detection_supported:
+        example: true
+        type: boolean
+      enabled:
+        example: false
+        type: boolean
+      installed:
+        example: false
+        type: boolean
+      name:
+        example: Alemán
+        type: string
+      package:
+        example: tesseract-ocr-deu
+        type: string
+    type: object
+  services.OCRLanguageCatalog:
+    properties:
+      available:
+        items:
+          $ref: '#/definitions/services.OCRLanguage'
+        type: array
+      installation_enabled:
+        type: boolean
+      installed:
+        items:
+          $ref: '#/definitions/services.OCRLanguage'
+        type: array
+    type: object
   services.OCRPage:
     properties:
       canvas_v2:
@@ -652,6 +731,10 @@ definitions:
         type: string
       generation:
         type: string
+      geometry_error:
+        type: string
+      geometry_space:
+        type: string
       geometry_status:
         type: string
       height:
@@ -664,6 +747,10 @@ definitions:
         type: string
       native_text:
         type: string
+      ocr_image_height:
+        type: integer
+      ocr_image_width:
+        type: integer
       ocr_text:
         type: string
       page_number:
@@ -685,18 +772,31 @@ definitions:
     type: object
   services.OCRWord:
     properties:
+      bbox:
+        $ref: '#/definitions/services.OCRBoundingBox'
       confidence:
+        example: 95.20067596435548
         type: number
-      height:
-        type: integer
-      left:
-        type: integer
       text:
+        example: SÁNCHEZ,
         type: string
-      top:
+    type: object
+  services.OCRWordSearchResponse:
+    properties:
+      document_id:
+        type: string
+      geometry_space:
+        type: string
+      geometry_status:
+        type: string
+      items:
+        items:
+          $ref: '#/definitions/services.OCRWord'
+        type: array
+      page_number:
         type: integer
-      width:
-        type: integer
+      query:
+        type: string
     type: object
 info:
   contact: {}
@@ -1016,6 +1116,72 @@ paths:
       summary: Cancelar trabajo OCR
       tags:
       - OCR
+  /api/v1/admin/ocr/languages:
+    get:
+      description: Obtiene los idiomas reconocidos por Tesseract y los paquetes APT
+        disponibles para instalar. Requiere sesión administrativa.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/services.OCRLanguageCatalog'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.errorResponse'
+        "503":
+          description: Service Unavailable
+          schema:
+            $ref: '#/definitions/handlers.errorResponse'
+      security:
+      - SessionCookie: []
+      summary: Consultar idiomas OCR del sistema
+      tags:
+      - OCR
+  /api/v1/admin/ocr/languages/install:
+    post:
+      consumes:
+      - application/json
+      description: Instala hasta 10 paquetes descubiertos en APT mediante un helper
+        privilegiado restringido y verifica el resultado con Tesseract. Instalar no
+        habilita automáticamente el idioma.
+      parameters:
+      - description: Idiomas Tesseract
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/services.InstallOCRLanguagesRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/services.InstallOCRLanguagesResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.errorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.errorResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/handlers.errorResponse'
+        "503":
+          description: Service Unavailable
+          schema:
+            $ref: '#/definitions/handlers.errorResponse'
+      security:
+      - SessionCookie: []
+      summary: Instalar idiomas OCR
+      tags:
+      - OCR
   /api/v1/admin/projects:
     get:
       produces:
@@ -1238,6 +1404,9 @@ paths:
       - OCR
   /api/v1/documents/{id}/ocr/pages/{page}:
     get:
+      description: Devuelve el texto completo y, cuando existe geometría, palabras
+        con bbox x0/x1/y0/y1 expresado en coordenadas del Canvas IIIF. Los OCR históricos
+        sin geometría continúan con geometry_status=page_only.
       parameters:
       - description: ID del documento
         in: path
@@ -1265,6 +1434,54 @@ paths:
           schema:
             $ref: '#/definitions/handlers.errorResponse'
       summary: Obtener OCR y bounding boxes de una página
+      tags:
+      - OCR
+  /api/v1/documents/{id}/ocr/pages/{page}/words:
+    get:
+      description: Devuelve únicamente las apariciones exactas de q con confianza
+        y bbox en coordenadas del Canvas IIIF. Ignora mayúsculas, acentos y puntuación
+        exterior. Las generaciones page_only deben reprocesarse con force=true.
+      parameters:
+      - description: ID del documento
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Número de página
+        in: path
+        name: page
+        required: true
+        type: integer
+      - description: Palabra a localizar
+        in: query
+        name: q
+        required: true
+        type: string
+      - default: 100
+        description: Máximo de apariciones (máximo 1000)
+        in: query
+        name: limit
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/services.OCRWordSearchResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.errorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.errorResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/handlers.errorResponse'
+      summary: Buscar una palabra y sus bounding boxes en una página OCR
       tags:
       - OCR
   /api/v1/documents/{id}/ocr/search:

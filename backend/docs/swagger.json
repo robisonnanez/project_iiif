@@ -501,6 +501,106 @@
                 }
             }
         },
+        "/api/v1/admin/ocr/languages": {
+            "get": {
+                "security": [
+                    {
+                        "SessionCookie": []
+                    }
+                ],
+                "description": "Obtiene los idiomas reconocidos por Tesseract y los paquetes APT disponibles para instalar. Requiere sesión administrativa.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "OCR"
+                ],
+                "summary": "Consultar idiomas OCR del sistema",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/services.OCRLanguageCatalog"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.errorResponse"
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.errorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/admin/ocr/languages/install": {
+            "post": {
+                "security": [
+                    {
+                        "SessionCookie": []
+                    }
+                ],
+                "description": "Instala hasta 10 paquetes descubiertos en APT mediante un helper privilegiado restringido y verifica el resultado con Tesseract. Instalar no habilita automáticamente el idioma.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "OCR"
+                ],
+                "summary": "Instalar idiomas OCR",
+                "parameters": [
+                    {
+                        "description": "Idiomas Tesseract",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/services.InstallOCRLanguagesRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/services.InstallOCRLanguagesResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.errorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.errorResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.errorResponse"
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.errorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/admin/projects": {
             "get": {
                 "security": [
@@ -932,6 +1032,7 @@
         },
         "/api/v1/documents/{id}/ocr/pages/{page}": {
             "get": {
+                "description": "Devuelve el texto completo y, cuando existe geometría, palabras con bbox x0/x1/y0/y1 expresado en coordenadas del Canvas IIIF. Los OCR históricos sin geometría continúan con geometry_status=page_only.",
                 "produces": [
                     "application/json"
                 ],
@@ -970,6 +1071,74 @@
                     },
                     "404": {
                         "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.errorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/documents/{id}/ocr/pages/{page}/words": {
+            "get": {
+                "description": "Devuelve únicamente las apariciones exactas de q con confianza y bbox en coordenadas del Canvas IIIF. Ignora mayúsculas, acentos y puntuación exterior. Las generaciones page_only deben reprocesarse con force=true.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "OCR"
+                ],
+                "summary": "Buscar una palabra y sus bounding boxes en una página OCR",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "ID del documento",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Número de página",
+                        "name": "page",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Palabra a localizar",
+                        "name": "q",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "integer",
+                        "default": 100,
+                        "description": "Máximo de apariciones (máximo 1000)",
+                        "name": "limit",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/services.OCRWordSearchResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.errorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.errorResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
                         "schema": {
                             "$ref": "#/definitions/handlers.errorResponse"
                         }
@@ -1453,6 +1622,20 @@
                             "type": "number"
                         },
                         "sample_pages": {
+                            "type": "integer"
+                        }
+                    }
+                },
+                "language_installation": {
+                    "type": "object",
+                    "properties": {
+                        "enabled": {
+                            "type": "boolean"
+                        },
+                        "helper_path": {
+                            "type": "string"
+                        },
+                        "timeout_seconds": {
                             "type": "integer"
                         }
                     }
@@ -2242,6 +2425,38 @@
                 }
             }
         },
+        "services.InstallOCRLanguagesRequest": {
+            "type": "object",
+            "required": [
+                "languages"
+            ],
+            "properties": {
+                "languages": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    },
+                    "example": [
+                        "deu",
+                        "ita"
+                    ]
+                }
+            }
+        },
+        "services.InstallOCRLanguagesResponse": {
+            "type": "object",
+            "properties": {
+                "catalog": {
+                    "$ref": "#/definitions/services.OCRLanguageCatalog"
+                },
+                "installed": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                }
+            }
+        },
         "services.OCRAutocompleteItem": {
             "type": "object",
             "properties": {
@@ -2264,6 +2479,27 @@
                 },
                 "query": {
                     "type": "string"
+                }
+            }
+        },
+        "services.OCRBoundingBox": {
+            "type": "object",
+            "properties": {
+                "x0": {
+                    "type": "integer",
+                    "example": 940
+                },
+                "x1": {
+                    "type": "integer",
+                    "example": 1016
+                },
+                "y0": {
+                    "type": "integer",
+                    "example": 1543
+                },
+                "y1": {
+                    "type": "integer",
+                    "example": 1557
                 }
             }
         },
@@ -2367,6 +2603,55 @@
                 }
             }
         },
+        "services.OCRLanguage": {
+            "type": "object",
+            "properties": {
+                "code": {
+                    "type": "string",
+                    "example": "deu"
+                },
+                "detection_supported": {
+                    "type": "boolean",
+                    "example": true
+                },
+                "enabled": {
+                    "type": "boolean",
+                    "example": false
+                },
+                "installed": {
+                    "type": "boolean",
+                    "example": false
+                },
+                "name": {
+                    "type": "string",
+                    "example": "Alemán"
+                },
+                "package": {
+                    "type": "string",
+                    "example": "tesseract-ocr-deu"
+                }
+            }
+        },
+        "services.OCRLanguageCatalog": {
+            "type": "object",
+            "properties": {
+                "available": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/services.OCRLanguage"
+                    }
+                },
+                "installation_enabled": {
+                    "type": "boolean"
+                },
+                "installed": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/services.OCRLanguage"
+                    }
+                }
+            }
+        },
         "services.OCRPage": {
             "type": "object",
             "properties": {
@@ -2394,6 +2679,12 @@
                 "generation": {
                     "type": "string"
                 },
+                "geometry_error": {
+                    "type": "string"
+                },
+                "geometry_space": {
+                    "type": "string"
+                },
                 "geometry_status": {
                     "type": "string"
                 },
@@ -2411,6 +2702,12 @@
                 },
                 "native_text": {
                     "type": "string"
+                },
+                "ocr_image_height": {
+                    "type": "integer"
+                },
+                "ocr_image_width": {
+                    "type": "integer"
                 },
                 "ocr_text": {
                     "type": "string"
@@ -2444,23 +2741,42 @@
         "services.OCRWord": {
             "type": "object",
             "properties": {
+                "bbox": {
+                    "$ref": "#/definitions/services.OCRBoundingBox"
+                },
                 "confidence": {
-                    "type": "number"
-                },
-                "height": {
-                    "type": "integer"
-                },
-                "left": {
-                    "type": "integer"
+                    "type": "number",
+                    "example": 95.20067596435548
                 },
                 "text": {
+                    "type": "string",
+                    "example": "SÁNCHEZ,"
+                }
+            }
+        },
+        "services.OCRWordSearchResponse": {
+            "type": "object",
+            "properties": {
+                "document_id": {
                     "type": "string"
                 },
-                "top": {
+                "geometry_space": {
+                    "type": "string"
+                },
+                "geometry_status": {
+                    "type": "string"
+                },
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/services.OCRWord"
+                    }
+                },
+                "page_number": {
                     "type": "integer"
                 },
-                "width": {
-                    "type": "integer"
+                "query": {
+                    "type": "string"
                 }
             }
         }

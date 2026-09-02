@@ -1,14 +1,17 @@
 package services
 
 import (
-	"bufio"
 	"bytes"
 	"compress/gzip"
 	"context"
+	"encoding/csv"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"image/png"
+	"io"
+	"log"
+	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -29,17 +32,57 @@ import (
 	"golang.org/x/text/unicode/norm"
 )
 
-const ocrSchemaVersion = 1
+const ocrSchemaVersion = 2
 
 const ocrVocabularySchemaVersion = 1
 
+type OCRBoundingBox struct {
+	X0 int `json:"x0" example:"940"`
+	X1 int `json:"x1" example:"1016"`
+	Y0 int `json:"y0" example:"1543"`
+	Y1 int `json:"y1" example:"1557"`
+}
+
 type OCRWord struct {
-	Text       string  `json:"text"`
-	Confidence float64 `json:"confidence"`
-	Left       int     `json:"left"`
-	Top        int     `json:"top"`
-	Width      int     `json:"width"`
-	Height     int     `json:"height"`
+	Text       string         `json:"text" example:"SÁNCHEZ,"`
+	Confidence float64        `json:"confidence" example:"95.20067596435548"`
+	BBox       OCRBoundingBox `json:"bbox"`
+}
+
+type OCRWordSearchResponse struct {
+	DocumentID     string    `json:"document_id"`
+	PageNumber     int       `json:"page_number"`
+	Query          string    `json:"query"`
+	GeometryStatus string    `json:"geometry_status"`
+	GeometrySpace  string    `json:"geometry_space,omitempty"`
+	Items          []OCRWord `json:"items"`
+}
+
+var ErrOCRWordGeometryUnavailable = errors.New("la página no contiene geometría por palabra; debe reprocesarse con force=true")
+
+func (word *OCRWord) UnmarshalJSON(data []byte) error {
+	var value struct {
+		Text       string          `json:"text"`
+		Confidence float64         `json:"confidence"`
+		BBox       *OCRBoundingBox `json:"bbox"`
+		Left       *int            `json:"left"`
+		Top        *int            `json:"top"`
+		Width      *int            `json:"width"`
+		Height     *int            `json:"height"`
+	}
+	if err := json.Unmarshal(data, &value); err != nil {
+		return err
+	}
+	word.Text = value.Text
+	word.Confidence = value.Confidence
+	if value.BBox != nil {
+		word.BBox = *value.BBox
+		return nil
+	}
+	if value.Left != nil && value.Top != nil && value.Width != nil && value.Height != nil {
+		word.BBox = OCRBoundingBox{X0: *value.Left, X1: *value.Left + *value.Width, Y0: *value.Top, Y1: *value.Top + *value.Height}
+	}
+	return nil
 }
 
 type OCRPage struct {
@@ -57,11 +100,15 @@ type OCRPage struct {
 	Confidence     float64   `json:"confidence"`
 	Width          int       `json:"width"`
 	Height         int       `json:"height"`
+	OCRImageWidth  int       `json:"ocr_image_width,omitempty"`
+	OCRImageHeight int       `json:"ocr_image_height,omitempty"`
 	Text           string    `json:"text"`
 	NativeText     string    `json:"native_text,omitempty"`
 	OCRText        string    `json:"ocr_text,omitempty"`
 	SearchText     string    `json:"-"`
 	GeometryStatus string    `json:"geometry_status"`
+	GeometrySpace  string    `json:"geometry_space,omitempty"`
+	GeometryError  string    `json:"geometry_error,omitempty"`
 	Words          []OCRWord `json:"words,omitempty"`
 	Engine         string    `json:"engine"`
 	CreatedAt      time.Time `json:"created_at"`
@@ -169,45 +216,93 @@ func (TesseractEngine) Recognize(ctx context.Context, imagePath string, language
 }
 
 func parseTesseractTSV(data []byte) (string, []OCRWord, float64, error) {
-	scanner := bufio.NewScanner(bytes.NewReader(data))
-	scanner.Buffer(make([]byte, 64*1024), 4*1024*1024)
-	first := true
+	reader := csv.NewReader(bytes.NewReader(data))
+	reader.Comma = '\t'
+	reader.FieldsPerRecord = -1
+	reader.LazyQuotes = true
+	header, err := readTesseractTSVHeader(reader)
+	if err != nil {
+		return "", nil, 0, err
+	}
 	words := make([]OCRWord, 0)
 	var text strings.Builder
 	confidenceTotal := 0.0
-	for scanner.Scan() {
-		if first {
-			first = false
+	for {
+		fields, readErr := reader.Read()
+		if readErr == io.EOF {
+			break
+		}
+		if readErr != nil || !recordHasColumns(fields, header) {
 			continue
 		}
-		fields := strings.SplitN(scanner.Text(), "\t", 12)
-		if len(fields) < 12 || strings.TrimSpace(fields[11]) == "" {
+		level, parseErr := strconv.Atoi(fields[header["level"]])
+		if parseErr != nil || level != 5 {
 			continue
 		}
-		confidence, err := strconv.ParseFloat(fields[10], 64)
-		if err != nil || confidence < 0 {
+		wordText := fields[header["text"]]
+		if strings.TrimSpace(wordText) == "" {
 			continue
 		}
-		left, _ := strconv.Atoi(fields[6])
-		top, _ := strconv.Atoi(fields[7])
-		width, _ := strconv.Atoi(fields[8])
-		height, _ := strconv.Atoi(fields[9])
-		word := OCRWord{Text: fields[11], Confidence: confidence, Left: left, Top: top, Width: width, Height: height}
+		confidence, parseErr := strconv.ParseFloat(fields[header["conf"]], 64)
+		if parseErr != nil || confidence < 0 {
+			continue
+		}
+		left, leftErr := strconv.Atoi(fields[header["left"]])
+		top, topErr := strconv.Atoi(fields[header["top"]])
+		width, widthErr := strconv.Atoi(fields[header["width"]])
+		height, heightErr := strconv.Atoi(fields[header["height"]])
+		if leftErr != nil || topErr != nil || widthErr != nil || heightErr != nil || left < 0 || top < 0 || width <= 0 || height <= 0 {
+			continue
+		}
+		word := OCRWord{Text: wordText, Confidence: confidence, BBox: OCRBoundingBox{X0: left, X1: left + width, Y0: top, Y1: top + height}}
 		words = append(words, word)
 		if text.Len() > 0 {
 			text.WriteByte(' ')
 		}
-		text.WriteString(word.Text)
+		text.WriteString(wordText)
 		confidenceTotal += confidence
-	}
-	if err := scanner.Err(); err != nil {
-		return "", nil, 0, err
 	}
 	confidence := 0.0
 	if len(words) > 0 {
 		confidence = confidenceTotal / float64(len(words))
 	}
 	return strings.TrimSpace(text.String()), words, confidence, nil
+}
+
+func readTesseractTSVHeader(reader *csv.Reader) (map[string]int, error) {
+	required := []string{"level", "left", "top", "width", "height", "conf", "text"}
+	for {
+		record, err := reader.Read()
+		if err == io.EOF {
+			return nil, errors.New("TSV de Tesseract sin encabezado")
+		}
+		if err != nil || len(record) == 0 {
+			continue
+		}
+		header := make(map[string]int, len(record))
+		for index, field := range record {
+			header[strings.TrimSpace(strings.TrimPrefix(field, "\ufeff"))] = index
+		}
+		valid := true
+		for _, field := range required {
+			if _, ok := header[field]; !ok {
+				valid = false
+				break
+			}
+		}
+		if valid {
+			return header, nil
+		}
+	}
+}
+
+func recordHasColumns(record []string, header map[string]int) bool {
+	for _, index := range header {
+		if index >= len(record) {
+			return false
+		}
+	}
+	return true
 }
 
 type OCRService struct {
@@ -428,6 +523,7 @@ func (s *OCRService) processJob(id string) {
 }
 
 func (s *OCRService) processPage(parent context.Context, document *fitz.Document, job *OCRJob, pageIndex int, languages []string) (*OCRPage, error) {
+	startedAt := time.Now()
 	nativeText, _ := document.Text(pageIndex)
 	nativeText = cleanText(nativeText)
 	image, err := document.ImageDPI(pageIndex, float64(s.config.OCR.RenderDPI))
@@ -435,20 +531,13 @@ func (s *OCRService) processPage(parent context.Context, document *fitz.Document
 		return nil, fmt.Errorf("render página %d: %w", pageIndex+1, err)
 	}
 	bounds := image.Bounds()
-	imageID, iiifImage := s.imageReference(job.DocumentID, pageIndex+1)
-	page := &OCRPage{SchemaVersion: ocrSchemaVersion, DocumentID: job.DocumentID, Generation: job.Generation, PageNumber: pageIndex + 1, CanvasV2: fmt.Sprintf("%s/api/iiif/%s/canvases/%s_%04d", strings.TrimRight(s.config.IIIF.BaseURL, "/"), job.DocumentID, job.DocumentID, pageIndex+1), CanvasV3: fmt.Sprintf("%s/api/iiif/%s/canvas/%d", strings.TrimRight(s.config.IIIF.BaseURL, "/"), job.DocumentID, pageIndex+1), ImageID: imageID, IIIFImage: iiifImage, Status: "indexed", Language: strings.Join(languages, "+"), Width: bounds.Dx(), Height: bounds.Dy(), NativeText: nativeText, Engine: "mupdf+tesseract-cli", CreatedAt: time.Now().UTC()}
-	needsOCR := job.Mode == "exhaustive" || job.Mode == "ocr_only" || usefulRunes(nativeText) < s.config.OCR.MinTextChars
-	if !needsOCR {
-		page.Source = "text_layer"
-		page.Text = nativeText
-		page.GeometryStatus = "page_only"
-		page.SearchText = normalizeSearch(nativeText)
-		if page.Text == "" {
-			page.Status = "blank"
-			page.Source = "blank"
-		}
-		return page, nil
+	ocrWidth, ocrHeight := bounds.Dx(), bounds.Dy()
+	imageID, iiifImage, canvasWidth, canvasHeight := s.imageDetails(job.DocumentID, pageIndex+1)
+	if canvasWidth <= 0 || canvasHeight <= 0 {
+		canvasWidth, canvasHeight = ocrWidth, ocrHeight
 	}
+	page := &OCRPage{SchemaVersion: ocrSchemaVersion, DocumentID: job.DocumentID, Generation: job.Generation, PageNumber: pageIndex + 1, CanvasV2: fmt.Sprintf("%s/api/iiif/%s/canvases/%s_%04d", strings.TrimRight(s.config.IIIF.BaseURL, "/"), job.DocumentID, job.DocumentID, pageIndex+1), CanvasV3: fmt.Sprintf("%s/api/iiif/%s/canvas/%d", strings.TrimRight(s.config.IIIF.BaseURL, "/"), job.DocumentID, pageIndex+1), ImageID: imageID, IIIFImage: iiifImage, Status: "indexed", Language: strings.Join(languages, "+"), Width: canvasWidth, Height: canvasHeight, OCRImageWidth: ocrWidth, OCRImageHeight: ocrHeight, NativeText: nativeText, GeometryStatus: "page_only", Engine: "mupdf+tesseract-cli", CreatedAt: time.Now().UTC()}
+	hasNativeText := usefulRunes(nativeText) >= s.config.OCR.MinTextChars
 	temp, err := os.CreateTemp(s.config.PDF.TempPath, fmt.Sprintf("ocr-%s-%06d-*.png", job.DocumentID, pageIndex+1))
 	if err != nil {
 		return nil, err
@@ -465,7 +554,9 @@ func (s *OCRService) processPage(parent context.Context, document *fitz.Document
 	var ocrText string
 	var words []OCRWord
 	var confidence float64
+	attempts := 0
 	for attempt := 0; attempt <= s.config.OCR.RetriesPerPage; attempt++ {
+		attempts++
 		ctx, cancel := context.WithTimeout(parent, time.Duration(s.config.OCR.PageTimeoutSeconds)*time.Second)
 		ocrText, words, confidence, err = s.engine.Recognize(ctx, tempPath, languages)
 		cancel()
@@ -477,16 +568,35 @@ func (s *OCRService) processPage(parent context.Context, document *fitz.Document
 		}
 	}
 	if err != nil {
+		if job.Mode == "hybrid" && hasNativeText {
+			page.Source = "text_layer"
+			page.Text = nativeText
+			page.GeometryError = err.Error()
+			page.SearchText = normalizeSearch(page.Text)
+			log.Printf("OCR page document=%s page=%d language=%s words=0 geometry=%s duration=%s tesseract_calls=%d error=%q", job.DocumentID, pageIndex+1, page.Language, page.GeometryStatus, time.Since(startedAt).Round(time.Millisecond), attempts, err.Error())
+			return page, nil
+		}
 		return nil, err
 	}
 	page.OCRText = cleanText(ocrText)
-	page.Words = words
+	page.Words = scaleOCRWords(words, ocrWidth, ocrHeight, canvasWidth, canvasHeight)
 	page.Confidence = confidence
-	page.GeometryStatus = "word"
+	if len(page.Words) > 0 {
+		page.GeometryStatus = "word"
+		page.GeometrySpace = "canvas"
+	}
 	switch job.Mode {
 	case "exhaustive":
 		page.Source = "mixed"
 		page.Text = strings.TrimSpace(nativeText + "\n" + page.OCRText)
+	case "hybrid":
+		if hasNativeText {
+			page.Source = "text_layer"
+			page.Text = nativeText
+		} else {
+			page.Source = "ocr"
+			page.Text = page.OCRText
+		}
 	default:
 		page.Source = "ocr"
 		page.Text = page.OCRText
@@ -496,6 +606,7 @@ func (s *OCRService) processPage(parent context.Context, document *fitz.Document
 		page.Source = "blank"
 	}
 	page.SearchText = normalizeSearch(page.Text)
+	log.Printf("OCR page document=%s page=%d language=%s words=%d geometry=%s duration=%s tesseract_calls=%d ocr_image=%dx%d canvas=%dx%d", job.DocumentID, pageIndex+1, page.Language, len(page.Words), page.GeometryStatus, time.Since(startedAt).Round(time.Millisecond), attempts, ocrWidth, ocrHeight, canvasWidth, canvasHeight)
 	return page, nil
 }
 
@@ -542,7 +653,14 @@ func (s *OCRService) detectLanguages(document *fitz.Document) []string {
 	if usefulRunes(sample.String()) < s.config.OCR.LanguageDetection.MinSampleChars {
 		return append([]string(nil), s.config.OCR.FallbackLanguages...)
 	}
-	detector := lingua.NewLanguageDetectorBuilder().FromLanguages(lingua.Spanish, lingua.English, lingua.French, lingua.Portuguese).Build()
+	detectorLanguages := linguaLanguages(s.config.OCR.CandidateLanguages)
+	if len(detectorLanguages) == 0 {
+		return append([]string(nil), s.config.OCR.FallbackLanguages...)
+	}
+	if len(detectorLanguages) == 1 {
+		return []string{tesseractLanguage(detectorLanguages[0])}
+	}
+	detector := lingua.NewLanguageDetectorBuilder().FromLanguages(detectorLanguages...).Build()
 	values := detector.ComputeLanguageConfidenceValues(sample.String())
 	if len(values) == 0 || values[0].Value() < s.config.OCR.LanguageDetection.MinimumConfidence {
 		return append([]string(nil), s.config.OCR.FallbackLanguages...)
@@ -555,16 +673,18 @@ func (s *OCRService) detectLanguages(document *fitz.Document) []string {
 }
 
 func tesseractLanguage(language lingua.Language) string {
-	switch language {
-	case lingua.English:
-		return "eng"
-	case lingua.French:
-		return "fra"
-	case lingua.Portuguese:
-		return "por"
-	default:
-		return "spa"
+	return strings.ToLower(language.IsoCode639_3().String())
+}
+
+func linguaLanguages(codes []string) []lingua.Language {
+	requested := stringSet(codes)
+	result := make([]lingua.Language, 0, len(requested))
+	for _, language := range lingua.AllLanguages() {
+		if requested[tesseractLanguage(language)] {
+			result = append(result, language)
+		}
 	}
+	return result
 }
 
 func (s *OCRService) GetSummary(documentID string) (*OCRDocumentSummary, error) {
@@ -585,10 +705,56 @@ func (s *OCRService) GetPage(documentID string, page int) (*OCRPage, error) {
 		return nil, err
 	}
 	result, err := s.readPage(documentID, summary.ActiveGeneration, page)
-	if err == nil && result.ImageID == "" {
-		result.ImageID, result.IIIFImage = s.imageReference(documentID, page)
+	if err != nil {
+		return nil, err
 	}
-	return result, err
+	imageID, iiifImage, canvasWidth, canvasHeight := s.imageDetails(documentID, page)
+	if result.ImageID == "" {
+		result.ImageID, result.IIIFImage = imageID, iiifImage
+	}
+	if len(result.Words) > 0 && result.GeometrySpace == "" && result.Width > 0 && result.Height > 0 && canvasWidth > 0 && canvasHeight > 0 {
+		result.OCRImageWidth, result.OCRImageHeight = result.Width, result.Height
+		result.Words = scaleOCRWords(result.Words, result.Width, result.Height, canvasWidth, canvasHeight)
+		result.Width, result.Height = canvasWidth, canvasHeight
+		result.GeometrySpace = "canvas"
+	}
+	return result, nil
+}
+
+func (s *OCRService) FindPageWords(documentID string, page int, query string, limit int) (*OCRWordSearchResponse, error) {
+	needle := normalizeWordLookup(query)
+	if needle == "" {
+		return nil, errors.New("q debe contener al menos una letra o número")
+	}
+	result, err := s.GetPage(documentID, page)
+	if err != nil {
+		return nil, err
+	}
+	if result.GeometryStatus != "word" || len(result.Words) == 0 {
+		return nil, ErrOCRWordGeometryUnavailable
+	}
+	if limit < 1 {
+		limit = 100
+	}
+	if limit > 1000 {
+		limit = 1000
+	}
+	items := filterOCRWords(result.Words, needle, limit)
+	return &OCRWordSearchResponse{DocumentID: documentID, PageNumber: page, Query: query, GeometryStatus: result.GeometryStatus, GeometrySpace: result.GeometrySpace, Items: items}, nil
+}
+
+func filterOCRWords(words []OCRWord, normalizedQuery string, limit int) []OCRWord {
+	items := make([]OCRWord, 0)
+	for _, word := range words {
+		if normalizeWordLookup(word.Text) != normalizedQuery {
+			continue
+		}
+		items = append(items, word)
+		if len(items) == limit {
+			break
+		}
+	}
+	return items
 }
 
 func (s *OCRService) Search(query, project, tenant, documentID string, limit, offset int) ([]OCRSearchResult, int, error) {
@@ -733,12 +899,59 @@ func (s *OCRService) Autocomplete(query, project, tenant, documentID string, lim
 }
 
 func (s *OCRService) imageReference(documentID string, page int) (string, string) {
+	imageID, iiifImage, _, _ := s.imageDetails(documentID, page)
+	return imageID, iiifImage
+}
+
+func (s *OCRService) imageDetails(documentID string, page int) (string, string, int, int) {
 	image, err := s.storage.GetDocumentImageByPage(documentID, page)
 	if err != nil || image == nil || image.ID == "" {
-		return "", ""
+		return "", "", 0, 0
 	}
 	base := strings.TrimRight(s.config.IIIF.BaseURL, "/")
-	return image.ID, fmt.Sprintf("%s/iiif/%s/%s/full/max/0/default.jpg", base, s.config.IIIF.APIVersion, image.ID)
+	return image.ID, fmt.Sprintf("%s/iiif/%s/%s/full/max/0/default.jpg", base, s.config.IIIF.APIVersion, image.ID), image.Width, image.Height
+}
+
+func scaleOCRWords(words []OCRWord, sourceWidth, sourceHeight, targetWidth, targetHeight int) []OCRWord {
+	if sourceWidth <= 0 || sourceHeight <= 0 || targetWidth <= 0 || targetHeight <= 0 {
+		return append([]OCRWord(nil), words...)
+	}
+	scaled := make([]OCRWord, 0, len(words))
+	for _, word := range words {
+		box := word.BBox
+		if box.X0 < 0 || box.Y0 < 0 || box.X1 <= box.X0 || box.Y1 <= box.Y0 {
+			continue
+		}
+		x0 := scaleCoordinate(box.X0, sourceWidth, targetWidth)
+		x1 := scaleCoordinate(box.X1, sourceWidth, targetWidth)
+		y0 := scaleCoordinate(box.Y0, sourceHeight, targetHeight)
+		y1 := scaleCoordinate(box.Y1, sourceHeight, targetHeight)
+		if x0 >= targetWidth {
+			x0 = targetWidth - 1
+		}
+		if y0 >= targetHeight {
+			y0 = targetHeight - 1
+		}
+		if x1 <= x0 {
+			x1 = x0 + 1
+		}
+		if y1 <= y0 {
+			y1 = y0 + 1
+		}
+		if x1 > targetWidth {
+			x1 = targetWidth
+		}
+		if y1 > targetHeight {
+			y1 = targetHeight
+		}
+		word.BBox = OCRBoundingBox{X0: x0, X1: x1, Y0: y0, Y1: y1}
+		scaled = append(scaled, word)
+	}
+	return scaled
+}
+
+func scaleCoordinate(value, sourceSize, targetSize int) int {
+	return int(math.Round(float64(value) * float64(targetSize) / float64(sourceSize)))
 }
 
 func (s *OCRService) Delete(documentID string) error {
@@ -1094,6 +1307,11 @@ func normalizeSearch(value string) string {
 		builder.WriteRune(current)
 	}
 	return norm.NFC.String(builder.String())
+}
+func normalizeWordLookup(value string) string {
+	return strings.TrimFunc(normalizeSearch(value), func(current rune) bool {
+		return !unicode.IsLetter(current) && !unicode.IsNumber(current)
+	})
 }
 func makeSnippet(original, normalizedNeedle string) string {
 	normalized := normalizeSearch(original)

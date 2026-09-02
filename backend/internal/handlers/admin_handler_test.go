@@ -49,8 +49,11 @@ func TestValidateOCRLanguages(t *testing.T) {
 	if err := validateOCRLanguages([]string{"spa"}, []string{"eng"}); err == nil {
 		t.Fatal("expected fallback outside candidates to fail")
 	}
-	if err := validateOCRLanguages([]string{"deu"}, []string{"deu"}); err == nil {
-		t.Fatal("expected unsupported language to fail")
+	if err := validateOCRLanguages([]string{"deu"}, []string{"deu"}); err != nil {
+		t.Fatalf("expected valid discovered language code to pass: %v", err)
+	}
+	if err := validateOCRLanguages([]string{"deu;id"}, []string{"deu;id"}); err == nil {
+		t.Fatal("expected unsafe language code to fail")
 	}
 }
 

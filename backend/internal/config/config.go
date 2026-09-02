@@ -174,6 +174,11 @@ type OCRConfig struct {
 	Artifacts struct {
 		Gzip bool `yaml:"gzip" json:"gzip"`
 	} `yaml:"artifacts" json:"artifacts"`
+	LanguageInstallation struct {
+		Enabled        bool   `yaml:"enabled" json:"enabled"`
+		HelperPath     string `yaml:"helper_path" json:"helper_path"`
+		TimeoutSeconds int    `yaml:"timeout_seconds" json:"timeout_seconds"`
+	} `yaml:"language_installation" json:"language_installation"`
 }
 
 type ProjectConfig struct {
@@ -320,6 +325,12 @@ func applyDefaults(config *Config) {
 	}
 	if config.OCR.LanguageDetection.MaxLanguages <= 0 {
 		config.OCR.LanguageDetection.MaxLanguages = defaults.OCR.LanguageDetection.MaxLanguages
+	}
+	if strings.TrimSpace(config.OCR.LanguageInstallation.HelperPath) == "" {
+		config.OCR.LanguageInstallation.HelperPath = defaults.OCR.LanguageInstallation.HelperPath
+	}
+	if config.OCR.LanguageInstallation.TimeoutSeconds <= 0 {
+		config.OCR.LanguageInstallation.TimeoutSeconds = defaults.OCR.LanguageInstallation.TimeoutSeconds
 	}
 	if config.Conversion.EnableOCR {
 		config.OCR.Enabled = true
@@ -706,6 +717,9 @@ func Default() *Config {
 			value.LanguageDetection.MinimumConfidence = 0.70
 			value.LanguageDetection.MaxLanguages = 2
 			value.Artifacts.Gzip = true
+			value.LanguageInstallation.Enabled = false
+			value.LanguageInstallation.HelperPath = "/usr/local/sbin/project-iiif-install-tesseract-language"
+			value.LanguageInstallation.TimeoutSeconds = 300
 			return value
 		}(),
 		Security: struct {

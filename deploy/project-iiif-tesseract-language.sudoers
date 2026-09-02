@@ -1,0 +1,3 @@
+# Instalar como /etc/sudoers.d/project-iiif-tesseract-language con modo 0440.
+# El helper debe pertenecer a root:root, tener modo 0755 y no ser modificable por robison.
+robison ALL=(root) NOPASSWD: /usr/local/sbin/project-iiif-install-tesseract-language *

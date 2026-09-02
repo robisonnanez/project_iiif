@@ -1,0 +1,40 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+readonly language="${1:-}"
+if [[ $# -ne 1 || ! "$language" =~ ^[a-z]{3}(_[a-z0-9]+)*$ || "$language" == "all" || "$language" == "dev" ]]; then
+  echo "Código de idioma Tesseract inválido" >&2
+  exit 64
+fi
+
+readonly package="tesseract-ocr-${language//_/-}"
+exec 9>/run/lock/project-iiif-tesseract-language.lock
+if ! /usr/bin/flock -n 9; then
+  echo "Ya existe una instalación OCR en curso" >&2
+  exit 75
+fi
+
+if ! /usr/bin/apt-cache show --no-all-versions -- "$package" >/dev/null 2>&1; then
+  echo "El paquete solicitado no está disponible" >&2
+  exit 65
+fi
+
+/usr/bin/logger -t project-iiif-ocr-language "language=$language package=$package status=installing"
+/usr/bin/timeout --signal=TERM --kill-after=10s 240s /usr/bin/apt-get install --yes --no-install-recommends -- "$package"
+
+found=false
+while IFS= read -r installed; do
+  if [[ "$installed" == "$language" ]]; then
+    found=true
+    break
+  fi
+done < <(/usr/bin/tesseract --list-langs 2>/dev/null)
+
+if [[ "$found" != true ]]; then
+  /usr/bin/logger -t project-iiif-ocr-language "language=$language package=$package status=verification_failed"
+  echo "Tesseract no reconoció el idioma instalado" >&2
+  exit 70
+fi
+
+/usr/bin/logger -t project-iiif-ocr-language "language=$language package=$package status=installed"
+echo "Idioma $language instalado y verificado"

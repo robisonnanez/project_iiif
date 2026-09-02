@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -1118,6 +1119,9 @@ func applyEditableConfig(next, current *config.Config, payload editableConfigPay
 	next.Conversion.EnableOCR = payload.Conversion.EnableOCR
 	if payload.OCR.DefaultMode != "" {
 		next.OCR = payload.OCR
+		// El helper privilegiado solo puede configurarse directamente en config.yaml.
+		// Nunca se acepta una ruta o activación enviada por la API administrativa.
+		next.OCR.LanguageInstallation = current.OCR.LanguageInstallation
 		next.Conversion.EnableOCR = payload.OCR.Enabled
 	}
 	next.Projects.Enabled = payload.Projects.Enabled
@@ -1283,13 +1287,13 @@ func validateCORSOrigins(origins []string) error {
 }
 
 func validateOCRLanguages(candidates, fallbacks []string) error {
-	allowed := map[string]bool{"spa": true, "eng": true, "fra": true, "por": true}
+	validCode := regexp.MustCompile(`^[a-z]{3}(?:_[a-z0-9]+)*$`)
 	selected := map[string]bool{}
 	if len(candidates) == 0 {
 		return &configError{"ocr.candidate_languages debe incluir al menos un idioma"}
 	}
 	for _, language := range candidates {
-		if !allowed[language] || selected[language] {
+		if !validCode.MatchString(language) || selected[language] {
 			return &configError{"idioma OCR candidato inválido o duplicado: " + language}
 		}
 		selected[language] = true

@@ -1,6 +1,7 @@
 package services
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -15,22 +16,100 @@ import (
 
 func TestParseTesseractTSV(t *testing.T) {
 	input := strings.Join([]string{
+		"",
 		"level\tpage_num\tblock_num\tpar_num\tline_num\tword_num\tleft\ttop\twidth\theight\tconf\ttext",
-		"5\t1\t1\t1\t1\t1\t10\t20\t30\t12\t95.5\tHola",
-		"5\t1\t1\t1\t1\t2\t45\t20\t50\t12\t84.5\tmundo",
+		"1\t1\t0\t0\t0\t0\t0\t0\t2000\t3000\t-1\t",
+		"5\t1\t1\t1\t1\t1\t940\t1543\t76\t14\t95.20067596435548\tSÁNCHEZ,",
+		"5\t1\t1\t1\t1\t2\t1020\t1543\t80\t14\t91.5\tartículo",
+		"5\t1\t1\t1\t1\t3\t1110\t1543\t42\t14\t90.25\tNIÑO",
+		"5\t1\t1\t1\t1\t4\t1160\t1543\t38\t14\t88.75\t62-C",
+		"5\t1\t1\t1\t1\t5\t1200\t1543\t40\t14\t-1\tnegativa",
+		"5\t1\t1\t1\t1\t6\t1240\t1543\t40\t14\t80.0\t",
+		"malformada",
+		"5\t1\t1\t1\t1\t7\tno-numero\t1543\t40\t14\t80.0\tignorada",
 	}, "\n")
 	text, words, confidence, err := parseTesseractTSV([]byte(input))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if text != "Hola mundo" {
+	if text != "SÁNCHEZ, artículo NIÑO 62-C" {
 		t.Fatalf("text = %q", text)
 	}
-	if len(words) != 2 || words[0].Left != 10 || words[1].Width != 50 {
+	if len(words) != 4 {
 		t.Fatalf("words = %#v", words)
 	}
-	if confidence != 90 {
-		t.Fatalf("confidence = %v", confidence)
+	first := words[0]
+	if first.Text != "SÁNCHEZ," || first.Confidence != 95.20067596435548 {
+		t.Fatalf("first word = %#v", first)
+	}
+	wantBox := (OCRBoundingBox{X0: 940, X1: 1016, Y0: 1543, Y1: 1557})
+	if first.BBox != wantBox {
+		t.Fatalf("bbox = %#v, want %#v", first.BBox, wantBox)
+	}
+	if confidence <= 0 || confidence >= 100 {
+		t.Fatalf("confidence promedio = %v", confidence)
+	}
+}
+
+func TestFilterOCRWordsMatchesAccentsCaseAndOuterPunctuation(t *testing.T) {
+	words := []OCRWord{
+		{Text: "SÁNCHEZ,", Confidence: 95, BBox: OCRBoundingBox{X0: 10, X1: 30, Y0: 20, Y1: 40}},
+		{Text: "sanchez", Confidence: 90, BBox: OCRBoundingBox{X0: 40, X1: 60, Y0: 20, Y1: 40}},
+		{Text: "otro", Confidence: 99, BBox: OCRBoundingBox{X0: 70, X1: 90, Y0: 20, Y1: 40}},
+	}
+	items := filterOCRWords(words, normalizeWordLookup("sánchez"), 1)
+	if len(items) != 1 || items[0].Text != "SÁNCHEZ," || items[0].BBox.X1 != 30 {
+		t.Fatalf("resultado inesperado: %+v", items)
+	}
+}
+
+func TestParseTesseractTSVRejectsMissingHeader(t *testing.T) {
+	if _, _, _, err := parseTesseractTSV([]byte("línea\tmalformada\n")); err == nil {
+		t.Fatal("se esperaba error para TSV sin encabezado")
+	}
+}
+
+func TestOCRWordReadsLegacyCoordinatesAndWritesBBox(t *testing.T) {
+	var word OCRWord
+	if err := json.Unmarshal([]byte(`{"text":"SÁNCHEZ,","confidence":95.2,"left":940,"top":1543,"width":76,"height":14}`), &word); err != nil {
+		t.Fatal(err)
+	}
+	if word.BBox != (OCRBoundingBox{X0: 940, X1: 1016, Y0: 1543, Y1: 1557}) {
+		t.Fatalf("legacy bbox = %#v", word.BBox)
+	}
+	encoded, err := json.Marshal(word)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(encoded), `"left"`) || !strings.Contains(string(encoded), `"bbox"`) {
+		t.Fatalf("JSON nuevo inesperado: %s", encoded)
+	}
+}
+
+func TestScaleOCRWordsToCanvasCoordinates(t *testing.T) {
+	words := []OCRWord{{Text: "SÁNCHEZ,", Confidence: 95.2, BBox: OCRBoundingBox{X0: 940, X1: 1016, Y0: 1543, Y1: 1557}}}
+	scaled := scaleOCRWords(words, 2000, 3000, 1000, 1500)
+	want := OCRBoundingBox{X0: 470, X1: 508, Y0: 772, Y1: 779}
+	if len(scaled) != 1 || scaled[0].BBox != want {
+		t.Fatalf("scaled = %#v, want %#v", scaled, want)
+	}
+}
+
+func TestOCRPagePersistsWordGeometry(t *testing.T) {
+	service := newAutocompleteTestService(t, []autocompleteTestDocument{{id: "doc-a", project: "project-a", pages: []string{"SÁNCHEZ,"}}})
+	page := &OCRPage{SchemaVersion: ocrSchemaVersion, DocumentID: "doc-a", Generation: "generation-1", PageNumber: 1, Status: "indexed", Source: "ocr", Width: 1000, Height: 1500, OCRImageWidth: 2000, OCRImageHeight: 3000, Text: "SÁNCHEZ,", GeometryStatus: "word", GeometrySpace: "canvas", Words: []OCRWord{{Text: "SÁNCHEZ,", Confidence: 95.2, BBox: OCRBoundingBox{X0: 470, X1: 508, Y0: 772, Y1: 779}}}}
+	if err := service.savePage(page); err != nil {
+		t.Fatal(err)
+	}
+	result, err := service.readPage("doc-a", "generation-1", 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.GeometrySpace != "canvas" || result.Width != 1000 || result.Height != 1500 || result.OCRImageWidth != 2000 || result.OCRImageHeight != 3000 {
+		t.Fatalf("page geometry = %#v", result)
+	}
+	if len(result.Words) != 1 || result.Words[0].BBox != (OCRBoundingBox{X0: 470, X1: 508, Y0: 772, Y1: 779}) {
+		t.Fatalf("page words = %#v", result.Words)
 	}
 }
 

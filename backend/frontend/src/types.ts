@@ -90,6 +90,7 @@ export interface AppConfig {
     min_text_chars: number; candidate_languages: string[]; fallback_languages: string[];
     language_detection: { enabled: boolean; sample_pages: number; min_sample_chars: number; minimum_confidence: number; max_languages: number };
     artifacts: { gzip: boolean };
+    language_installation: { enabled: boolean; helper_path: string; timeout_seconds: number };
   };
   projects: { enabled: boolean; default_project: string; require_project: boolean; allow_dynamic_tenants: boolean; items: ProjectConfig[] };
   security: { enable_auth: boolean; log_level: string; cors_origins: string[]; max_concurrent_uploads: number };
@@ -111,6 +112,11 @@ export interface OCRSearchResponse { results: OCRSearchResult[]; total: number; 
 
 export interface OCRAutocompleteItem { text: string; frequency: number }
 export interface OCRAutocompleteResponse { query: string; items: OCRAutocompleteItem[] }
+
+export interface OCRLanguage {
+  code: string; name: string; package?: string; installed: boolean; enabled: boolean; detection_supported: boolean;
+}
+export interface OCRLanguageCatalog { installation_enabled: boolean; installed: OCRLanguage[]; available: OCRLanguage[] }
 
 export interface DBMigrationResult {
   engine: string;

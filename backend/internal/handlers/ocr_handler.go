@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"errors"
 	"net/http"
 	"strconv"
 	"strings"
@@ -10,9 +11,79 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-type OCRHandler struct{ service *services.OCRService }
+type OCRHandler struct {
+	service         *services.OCRService
+	languageService *services.OCRLanguageService
+}
 
-func NewOCRHandler(service *services.OCRService) *OCRHandler { return &OCRHandler{service: service} }
+func NewOCRHandler(service *services.OCRService, languageServices ...*services.OCRLanguageService) *OCRHandler {
+	handler := &OCRHandler{service: service}
+	if len(languageServices) > 0 {
+		handler.languageService = languageServices[0]
+	}
+	return handler
+}
+
+// GetLanguages godoc
+// @Summary Consultar idiomas OCR del sistema
+// @Description Obtiene los idiomas reconocidos por Tesseract y los paquetes APT disponibles para instalar. Requiere sesión administrativa.
+// @Tags OCR
+// @Security SessionCookie
+// @Produce json
+// @Success 200 {object} services.OCRLanguageCatalog
+// @Failure 401 {object} errorResponse
+// @Failure 503 {object} errorResponse
+// @Router /api/v1/admin/ocr/languages [get]
+func (h *OCRHandler) GetLanguages(c *gin.Context) {
+	if h.languageService == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "administración de idiomas OCR no disponible"})
+		return
+	}
+	catalog, err := h.languageService.Catalog(c.Request.Context())
+	if err != nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, catalog)
+}
+
+// InstallLanguages godoc
+// @Summary Instalar idiomas OCR
+// @Description Instala hasta 10 paquetes descubiertos en APT mediante un helper privilegiado restringido y verifica el resultado con Tesseract. Instalar no habilita automáticamente el idioma.
+// @Tags OCR
+// @Security SessionCookie
+// @Accept json
+// @Produce json
+// @Param request body services.InstallOCRLanguagesRequest true "Idiomas Tesseract"
+// @Success 200 {object} services.InstallOCRLanguagesResponse
+// @Failure 400 {object} errorResponse
+// @Failure 401 {object} errorResponse
+// @Failure 409 {object} errorResponse
+// @Failure 503 {object} errorResponse
+// @Router /api/v1/admin/ocr/languages/install [post]
+func (h *OCRHandler) InstallLanguages(c *gin.Context) {
+	if h.languageService == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "administración de idiomas OCR no disponible"})
+		return
+	}
+	var request services.InstallOCRLanguagesRequest
+	if err := c.ShouldBindJSON(&request); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "selección de idiomas inválida"})
+		return
+	}
+	result, err := h.languageService.Install(c.Request.Context(), request.Languages)
+	if err != nil {
+		status := http.StatusBadRequest
+		if strings.Contains(err.Error(), "en curso") {
+			status = http.StatusConflict
+		} else if strings.Contains(err.Error(), "deshabilitada") || strings.Contains(err.Error(), "no se pudo instalar") {
+			status = http.StatusServiceUnavailable
+		}
+		c.JSON(status, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, result)
+}
 
 // CreateJob godoc
 // @Summary Crear trabajo OCR
@@ -101,6 +172,7 @@ func (h *OCRHandler) GetSummary(c *gin.Context) {
 
 // GetPage godoc
 // @Summary Obtener OCR y bounding boxes de una página
+// @Description Devuelve el texto completo y, cuando existe geometría, palabras con bbox x0/x1/y0/y1 expresado en coordenadas del Canvas IIIF. Los OCR históricos sin geometría continúan con geometry_status=page_only.
 // @Tags OCR
 // @Produce json
 // @Param id path string true "ID del documento"
@@ -118,6 +190,41 @@ func (h *OCRHandler) GetPage(c *gin.Context) {
 	result, err := h.service.GetPage(c.Param("id"), page)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "página OCR no encontrada"})
+		return
+	}
+	c.JSON(http.StatusOK, result)
+}
+
+// FindPageWords godoc
+// @Summary Buscar una palabra y sus bounding boxes en una página OCR
+// @Description Devuelve únicamente las apariciones exactas de q con confianza y bbox en coordenadas del Canvas IIIF. Ignora mayúsculas, acentos y puntuación exterior. Las generaciones page_only deben reprocesarse con force=true.
+// @Tags OCR
+// @Produce json
+// @Param id path string true "ID del documento"
+// @Param page path int true "Número de página"
+// @Param q query string true "Palabra a localizar"
+// @Param limit query int false "Máximo de apariciones (máximo 1000)" default(100)
+// @Success 200 {object} services.OCRWordSearchResponse
+// @Failure 400 {object} errorResponse
+// @Failure 404 {object} errorResponse
+// @Failure 409 {object} errorResponse
+// @Router /api/v1/documents/{id}/ocr/pages/{page}/words [get]
+func (h *OCRHandler) FindPageWords(c *gin.Context) {
+	page, err := strconv.Atoi(c.Param("page"))
+	if err != nil || page < 1 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "page debe ser mayor a cero"})
+		return
+	}
+	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "100"))
+	result, err := h.service.FindPageWords(c.Param("id"), page, c.Query("q"), limit)
+	if err != nil {
+		status := http.StatusBadRequest
+		if errors.Is(err, services.ErrOCRWordGeometryUnavailable) {
+			status = http.StatusConflict
+		} else if !strings.Contains(err.Error(), "q debe") {
+			status = http.StatusNotFound
+		}
+		c.JSON(status, gin.H{"error": err.Error()})
 		return
 	}
 	c.JSON(http.StatusOK, result)
