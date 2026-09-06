@@ -1383,6 +1383,26 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/v1/version": {
+            "get": {
+                "description": "Devuelve versión, commit y fecha de compilación incorporados al binario.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Sistema"
+                ],
+                "summary": "Consultar versión desplegada",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/buildinfo.Info"
+                        }
+                    }
+                }
+            }
+        },
         "/auth/login": {
             "post": {
                 "description": "Crea cookie de sesion para rutas administrativas.",
@@ -1581,6 +1601,23 @@ const docTemplate = `{
         }
     },
     "definitions": {
+        "buildinfo.Info": {
+            "type": "object",
+            "properties": {
+                "build_date": {
+                    "type": "string",
+                    "example": "2026-09-06T15:56:00Z"
+                },
+                "commit": {
+                    "type": "string",
+                    "example": "9e0befef0bce9e200349ac2a5b86c231e5d02d29"
+                },
+                "version": {
+                    "type": "string",
+                    "example": "1.1.0"
+                }
+            }
+        },
         "config.OCRConfig": {
             "type": "object",
             "properties": {

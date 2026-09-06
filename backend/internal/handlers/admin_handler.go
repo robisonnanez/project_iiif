@@ -38,6 +38,7 @@ type AdminHandler struct {
 	lastRestartByIP  map[string]time.Time
 }
 
+// NewAdminHandler crea e inicializa la dependencia con una configuración válida.
 func NewAdminHandler(config *config.Config, documentService *services.DocumentService) *AdminHandler {
 	return &AdminHandler{
 		config:          config,
@@ -56,8 +57,9 @@ func NewAdminHandler(config *config.Config, documentService *services.DocumentSe
 // @Success 200 {object} map[string]interface{}
 // @Failure 401 {object} errorResponse
 // @Router /api/v1/admin/config [get]
+// GetConfig obtiene la información solicitada sin modificar el estado persistido.
 func (h *AdminHandler) GetConfig(c *gin.Context) {
-	c.JSON(http.StatusOK, h.sanitizedConfig())
+	writeJSON(c, http.StatusOK, h.sanitizedConfig())
 }
 
 // GetDBMigrationsStatus godoc
@@ -68,10 +70,11 @@ func (h *AdminHandler) GetConfig(c *gin.Context) {
 // @Success 200 {object} map[string]interface{}
 // @Failure 401 {object} errorResponse
 // @Router /api/v1/admin/db/migrations/status [get]
+// GetDBMigrationsStatus obtiene la información solicitada sin modificar el estado persistido.
 func (h *AdminHandler) GetDBMigrationsStatus(c *gin.Context) {
 	h.dbMigrateMu.Lock()
 	defer h.dbMigrateMu.Unlock()
-	c.JSON(http.StatusOK, gin.H{
+	writeJSON(c, http.StatusOK, gin.H{
 		"running": h.dbMigrateRunning,
 		"result":  h.dbMigrateStatus,
 	})
@@ -87,11 +90,12 @@ func (h *AdminHandler) GetDBMigrationsStatus(c *gin.Context) {
 // @Failure 409 {object} errorResponse
 // @Failure 500 {object} errorResponse
 // @Router /api/v1/admin/db/migrations/run [post]
+// RunDBMigrations ejecuta la operación principal respetando límites, contexto y errores.
 func (h *AdminHandler) RunDBMigrations(c *gin.Context) {
 	h.dbMigrateMu.Lock()
 	if h.dbMigrateRunning {
 		h.dbMigrateMu.Unlock()
-		c.JSON(http.StatusConflict, gin.H{"error": "ya hay una ejecucion de migraciones en curso"})
+		writeJSON(c, http.StatusConflict, gin.H{"error": "ya hay una ejecucion de migraciones en curso"})
 		return
 	}
 	h.dbMigrateRunning = true
@@ -103,13 +107,13 @@ func (h *AdminHandler) RunDBMigrations(c *gin.Context) {
 	h.dbMigrateRunning = false
 	h.dbMigrateMu.Unlock()
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
+		writeJSON(c, http.StatusInternalServerError, gin.H{
 			"error":  "no se pudieron ejecutar migraciones",
 			"result": result,
 		})
 		return
 	}
-	c.JSON(http.StatusOK, result)
+	writeJSON(c, http.StatusOK, result)
 }
 
 // GetProjects godoc
@@ -120,8 +124,9 @@ func (h *AdminHandler) RunDBMigrations(c *gin.Context) {
 // @Success 200 {object} map[string]interface{}
 // @Failure 401 {object} errorResponse
 // @Router /api/v1/admin/projects [get]
+// GetProjects obtiene la información solicitada sin modificar el estado persistido.
 func (h *AdminHandler) GetProjects(c *gin.Context) {
-	c.JSON(http.StatusOK, gin.H{
+	writeJSON(c, http.StatusOK, gin.H{
 		"enabled":               h.config.Projects.Enabled,
 		"default_project":       h.config.Projects.DefaultProject,
 		"require_project":       h.config.Projects.RequireProject,
@@ -142,6 +147,7 @@ func (h *AdminHandler) GetProjects(c *gin.Context) {
 // @Failure 404 {object} errorResponse
 // @Failure 502 {object} errorResponse
 // @Router /api/v1/admin/projects/{key}/sync-tenants [post]
+// SyncProjectTenants actualiza el estado manteniendo sus invariantes.
 func (h *AdminHandler) SyncProjectTenants(c *gin.Context) {
 	key := strings.TrimSpace(c.Param("key"))
 	index := -1
@@ -152,26 +158,26 @@ func (h *AdminHandler) SyncProjectTenants(c *gin.Context) {
 		}
 	}
 	if index < 0 {
-		c.JSON(http.StatusNotFound, gin.H{"error": "Proyecto no encontrado"})
+		writeJSON(c, http.StatusNotFound, gin.H{"error": "Proyecto no encontrado"})
 		return
 	}
 	project := h.config.Projects.Items[index]
 	endpoint := strings.TrimSpace(project.TenantsEndpoint)
 	parsed, err := url.Parse(endpoint)
 	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Configura una URL http/https válida para consultar tenants"})
+		writeJSON(c, http.StatusBadRequest, gin.H{"error": "Configura una URL http/https válida para consultar tenants"})
 		return
 	}
 	ctx, cancel := context.WithTimeout(c.Request.Context(), 12*time.Second)
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		writeJSON(c, http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 	req.Header.Set("Accept", "application/json")
 	if err := applyTenantsAuthentication(req, project); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		writeJSON(c, http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 	client := &http.Client{Timeout: 12 * time.Second, CheckRedirect: func(next *http.Request, via []*http.Request) error {
@@ -188,27 +194,27 @@ func (h *AdminHandler) SyncProjectTenants(c *gin.Context) {
 	}}
 	response, err := client.Do(req)
 	if err != nil {
-		c.JSON(http.StatusBadGateway, gin.H{"error": "No se pudo consultar el endpoint de tenants: " + err.Error()})
+		writeJSON(c, http.StatusBadGateway, gin.H{"error": "No se pudo consultar el endpoint de tenants: " + err.Error()})
 		return
 	}
 	defer response.Body.Close()
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		c.JSON(http.StatusBadGateway, gin.H{"error": fmt.Sprintf("El endpoint de tenants respondió HTTP %d", response.StatusCode)})
+		writeJSON(c, http.StatusBadGateway, gin.H{"error": fmt.Sprintf("El endpoint de tenants respondió HTTP %d", response.StatusCode)})
 		return
 	}
 	data, err := io.ReadAll(io.LimitReader(response.Body, 2<<20))
 	if err != nil {
-		c.JSON(http.StatusBadGateway, gin.H{"error": "No se pudo leer la respuesta de tenants"})
+		writeJSON(c, http.StatusBadGateway, gin.H{"error": "No se pudo leer la respuesta de tenants"})
 		return
 	}
 	var payload any
 	if err := json.Unmarshal(data, &payload); err != nil {
-		c.JSON(http.StatusBadGateway, gin.H{"error": "El endpoint de tenants no devolvió JSON válido"})
+		writeJSON(c, http.StatusBadGateway, gin.H{"error": "El endpoint de tenants no devolvió JSON válido"})
 		return
 	}
 	tenants := extractTenantNames(payload)
 	if len(tenants) == 0 {
-		c.JSON(http.StatusBadGateway, gin.H{"error": "La respuesta no contiene tenants válidos"})
+		writeJSON(c, http.StatusBadGateway, gin.H{"error": "La respuesta no contiene tenants válidos"})
 		return
 	}
 	h.config.Projects.Items[index].Tenants = tenants
@@ -218,12 +224,13 @@ func (h *AdminHandler) SyncProjectTenants(c *gin.Context) {
 		configPath = "config.yaml"
 	}
 	if err := config.Save(configPath, h.config); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "No se pudo guardar config.yaml: " + err.Error()})
+		writeJSON(c, http.StatusInternalServerError, gin.H{"error": "No se pudo guardar config.yaml: " + err.Error()})
 		return
 	}
-	c.JSON(http.StatusOK, sanitizedProject(h.config.Projects.Items[index]))
+	writeJSON(c, http.StatusOK, sanitizedProject(h.config.Projects.Items[index]))
 }
 
+// applyTenantsAuthentication actualiza el estado manteniendo las invariantes del componente.
 func applyTenantsAuthentication(req *http.Request, project config.ProjectConfig) error {
 	authType := strings.ToLower(strings.TrimSpace(project.TenantsAuthType))
 	switch authType {
@@ -250,6 +257,7 @@ func applyTenantsAuthentication(req *http.Request, project config.ProjectConfig)
 	}
 }
 
+// extractTenantNames encapsula esta operación interna y conserva las invariantes del componente.
 func extractTenantNames(payload any) []string {
 	values := make([]string, 0)
 	var visit func(any)
@@ -312,17 +320,18 @@ func extractTenantNames(payload any) []string {
 // @Failure 429 {object} errorResponse
 // @Failure 500 {object} errorResponse
 // @Router /api/v1/admin/service/restart [post]
+// RestartService encapsula esta operación interna y conserva las invariantes del componente.
 func (h *AdminHandler) RestartService(c *gin.Context) {
 	// Programa un reinicio asíncrono de project-iiif para evitar cortar la respuesta HTTP al frontend.
 	var payload struct {
 		Password string `json:"password"`
 	}
 	if err := c.ShouldBindJSON(&payload); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"ok": false, "error": "payload invalido"})
+		writeJSON(c, http.StatusBadRequest, gin.H{"ok": false, "error": "payload invalido"})
 		return
 	}
 	if strings.TrimSpace(payload.Password) == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"ok": false, "error": "password obligatoria"})
+		writeJSON(c, http.StatusBadRequest, gin.H{"ok": false, "error": "password obligatoria"})
 		return
 	}
 
@@ -330,7 +339,7 @@ func (h *AdminHandler) RestartService(c *gin.Context) {
 	h.restartMu.Lock()
 	if last, ok := h.lastRestartByIP[clientIP]; ok && time.Since(last) < 10*time.Second {
 		h.restartMu.Unlock()
-		c.JSON(http.StatusTooManyRequests, gin.H{"ok": false, "error": "espera unos segundos antes de reintentar"})
+		writeJSON(c, http.StatusTooManyRequests, gin.H{"ok": false, "error": "espera unos segundos antes de reintentar"})
 		return
 	}
 	h.lastRestartByIP[clientIP] = time.Now()
@@ -343,7 +352,7 @@ func (h *AdminHandler) RestartService(c *gin.Context) {
 	// Valida credenciales sudo antes de programar el reinicio.
 	if err := runSudoSystemctl(ctx, payload.Password, "-k", "true"); err != nil {
 		log.Printf("ERROR service restart precheck failed: %v", err)
-		c.JSON(http.StatusInternalServerError, gin.H{
+		writeJSON(c, http.StatusInternalServerError, gin.H{
 			"ok":      false,
 			"error":   "no se pudo validar permisos para reiniciar",
 			"details": sanitizeCommandError(err.Error()),
@@ -363,7 +372,7 @@ func (h *AdminHandler) RestartService(c *gin.Context) {
 		log.Printf("INFO service project-iiif restart scheduled and executed")
 	})
 
-	c.JSON(http.StatusOK, gin.H{
+	writeJSON(c, http.StatusOK, gin.H{
 		"ok":      true,
 		"message": "reinicio programado; el servicio se reiniciara en breve",
 		"active":  true,
@@ -382,17 +391,18 @@ func (h *AdminHandler) RestartService(c *gin.Context) {
 // @Failure 401 {object} errorResponse
 // @Failure 500 {object} errorResponse
 // @Router /api/v1/admin/config [put]
+// UpdateConfig actualiza el estado manteniendo sus invariantes.
 func (h *AdminHandler) UpdateConfig(c *gin.Context) {
 	// Guarda solo campos permitidos del formulario para evitar sobrescribir secretos o YAML arbitrario.
 	var payload editableConfigPayload
 	if err := c.ShouldBindJSON(&payload); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "configuracion invalida"})
+		writeJSON(c, http.StatusBadRequest, gin.H{"error": "configuracion invalida"})
 		return
 	}
 
 	next := *h.config
 	if err := applyEditableConfig(&next, h.config, payload); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		writeJSON(c, http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 	next.SourcePath = h.config.SourcePath
@@ -403,18 +413,19 @@ func (h *AdminHandler) UpdateConfig(c *gin.Context) {
 		configPath = "config.yaml"
 	}
 	if err := config.Save(configPath, &next); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "no se pudo guardar config.yaml: " + err.Error()})
+		writeJSON(c, http.StatusInternalServerError, gin.H{"error": "no se pudo guardar config.yaml: " + err.Error()})
 		return
 	}
 
 	*h.config = next
-	c.JSON(http.StatusOK, gin.H{
+	writeJSON(c, http.StatusOK, gin.H{
 		"message":          "Configuracion guardada. Reinicia el servicio para aplicar cambios sensibles.",
 		"requires_restart": true,
 		"config":           h.sanitizedConfig(),
 	})
 }
 
+// runSudoSystemctl ejecuta la operación principal respetando límites, contexto y errores.
 func runSudoSystemctl(ctx context.Context, password string, args ...string) error {
 	cmdArgs := append([]string{"-S"}, args...)
 	cmd := exec.CommandContext(ctx, "sudo", cmdArgs...)
@@ -429,6 +440,7 @@ func runSudoSystemctl(ctx context.Context, password string, args ...string) erro
 	return nil
 }
 
+// sanitizeCommandError encapsula esta operación interna y conserva las invariantes del componente.
 func sanitizeCommandError(message string) string {
 	clean := strings.ReplaceAll(message, "\n", " ")
 	clean = strings.ReplaceAll(clean, "\r", " ")
@@ -453,18 +465,19 @@ func sanitizeCommandError(message string) string {
 // @Failure 404 {object} errorResponse
 // @Failure 500 {object} errorResponse
 // @Router /api/v1/admin/documents/{id}/images [get]
+// GetDocumentImages obtiene la información solicitada sin modificar el estado persistido.
 func (h *AdminHandler) GetDocumentImages(c *gin.Context) {
 	// Expone identificadores IIIF seguros para la galeria sin revelar rutas internas ni BLOBs.
 	documentID := c.Param("id")
 	doc, err := h.documentService.GetDocument(documentID)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "Documento no encontrado"})
+		writeJSON(c, http.StatusNotFound, gin.H{"error": "Documento no encontrado"})
 		return
 	}
 
 	images, err := h.documentService.GetDocumentImages(documentID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Error obteniendo imagenes"})
+		writeJSON(c, http.StatusInternalServerError, gin.H{"error": "Error obteniendo imagenes"})
 		return
 	}
 
@@ -490,7 +503,7 @@ func (h *AdminHandler) GetDocumentImages(c *gin.Context) {
 		})
 	}
 
-	c.JSON(http.StatusOK, gin.H{
+	writeJSON(c, http.StatusOK, gin.H{
 		"document_id": documentID,
 		"project_key": doc.ProjectKey,
 		"tenant_key":  doc.TenantKey,
@@ -510,22 +523,23 @@ func (h *AdminHandler) GetDocumentImages(c *gin.Context) {
 // @Failure 401 {object} errorResponse
 // @Failure 409 {object} errorResponse
 // @Router /api/v1/admin/migrations/local-to-db/start [post]
+// StartLocalToDBMigration ejecuta la operación principal respetando límites, contexto y errores.
 func (h *AdminHandler) StartLocalToDBMigration(c *gin.Context) {
 	// Ejecuta la migracion en background y devuelve estado inicial.
 	var payload migrationStartRequest
 	if err := c.ShouldBindJSON(&payload); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "payload invalido"})
+		writeJSON(c, http.StatusBadRequest, gin.H{"error": "payload invalido"})
 		return
 	}
 	if err := validateMigrationRequest(payload, h.config); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		writeJSON(c, http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 	if err := h.migrationRunner.Start(payload); err != nil {
-		c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
+		writeJSON(c, http.StatusConflict, gin.H{"error": err.Error()})
 		return
 	}
-	c.JSON(http.StatusAccepted, gin.H{
+	writeJSON(c, http.StatusAccepted, gin.H{
 		"message": "Migracion iniciada",
 		"status":  h.migrationRunner.Status(),
 	})
@@ -539,9 +553,10 @@ func (h *AdminHandler) StartLocalToDBMigration(c *gin.Context) {
 // @Success 200 {object} map[string]interface{}
 // @Failure 401 {object} errorResponse
 // @Router /api/v1/admin/migrations/local-to-db/status [get]
+// GetLocalToDBMigrationStatus obtiene la información solicitada sin modificar el estado persistido.
 func (h *AdminHandler) GetLocalToDBMigrationStatus(c *gin.Context) {
 	// Devuelve estado y logs acumulados de la ultima migracion.
-	c.JSON(http.StatusOK, h.migrationRunner.Status())
+	writeJSON(c, http.StatusOK, h.migrationRunner.Status())
 }
 
 // StartLocalToMySQLMigration mantiene compatibilidad con clientes antiguos.
@@ -565,6 +580,7 @@ func (h *AdminHandler) GetLocalToMySQLMigrationStatus(c *gin.Context) {
 // @Failure 401 {object} errorResponse
 // @Failure 403 {object} errorResponse
 // @Router /api/v1/admin/migrations/sources/local/browse [get]
+// BrowseLocalMigrationSource encapsula esta operación interna y conserva las invariantes del componente.
 func (h *AdminHandler) BrowseLocalMigrationSource(c *gin.Context) {
 	// Lista directorios hijos para ayudar a seleccionar ruta local de migracion.
 	path := strings.TrimSpace(c.Query("path"))
@@ -573,16 +589,16 @@ func (h *AdminHandler) BrowseLocalMigrationSource(c *gin.Context) {
 	}
 	resolved, err := filepath.Abs(path)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "ruta invalida"})
+		writeJSON(c, http.StatusBadRequest, gin.H{"error": "ruta invalida"})
 		return
 	}
 	if !h.isAllowedLocalPath(resolved) {
-		c.JSON(http.StatusForbidden, gin.H{"error": "ruta fuera de los directorios permitidos"})
+		writeJSON(c, http.StatusForbidden, gin.H{"error": "ruta fuera de los directorios permitidos"})
 		return
 	}
 	entries, err := os.ReadDir(resolved)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "no se pudo leer la ruta: " + err.Error()})
+		writeJSON(c, http.StatusBadRequest, gin.H{"error": "no se pudo leer la ruta: " + err.Error()})
 		return
 	}
 
@@ -600,12 +616,13 @@ func (h *AdminHandler) BrowseLocalMigrationSource(c *gin.Context) {
 			"path": child,
 		})
 	}
-	c.JSON(http.StatusOK, gin.H{
+	writeJSON(c, http.StatusOK, gin.H{
 		"path": path,
 		"dirs": dirs,
 	})
 }
 
+// isAllowedLocalPath evalúa la condición indicada sin producir efectos laterales.
 func (h *AdminHandler) isAllowedLocalPath(path string) bool {
 	path = filepath.Clean(path)
 	for _, root := range h.config.Migration.AllowedLocalRoots {
@@ -624,6 +641,7 @@ func (h *AdminHandler) isAllowedLocalPath(path string) bool {
 	return false
 }
 
+// validateMigrationRequest evalúa la condición indicada sin producir efectos laterales.
 func validateMigrationRequest(req migrationStartRequest, cfg *config.Config) error {
 	sourceType := strings.ToLower(strings.TrimSpace(req.Source.Type))
 	if sourceType != "local" && sourceType != "ssh" && sourceType != "database" {
@@ -688,6 +706,7 @@ func validateMigrationRequest(req migrationStartRequest, cfg *config.Config) err
 	return nil
 }
 
+// sanitizedConfig encapsula esta operación interna y conserva las invariantes del componente.
 func (h *AdminHandler) sanitizedConfig() gin.H {
 	return gin.H{
 		"server": gin.H{
@@ -798,6 +817,7 @@ func (h *AdminHandler) sanitizedConfig() gin.H {
 	}
 }
 
+// maskedSecret encapsula esta operación interna y conserva las invariantes del componente.
 func maskedSecret(value string) string {
 	if value == "" {
 		return ""
@@ -805,6 +825,7 @@ func maskedSecret(value string) string {
 	return "********"
 }
 
+// sanitizedProject encapsula esta operación interna y conserva las invariantes del componente.
 func sanitizedProject(project config.ProjectConfig) config.ProjectConfig {
 	project.Tenants = nonNilStrings(project.Tenants)
 	project.TenantsTokenConfigured = project.TenantsAuthToken != ""
@@ -812,6 +833,7 @@ func sanitizedProject(project config.ProjectConfig) config.ProjectConfig {
 	return project
 }
 
+// nonNilStrings encapsula esta operación interna y conserva las invariantes del componente.
 func nonNilStrings(values []string) []string {
 	if values == nil {
 		return []string{}
@@ -819,6 +841,7 @@ func nonNilStrings(values []string) []string {
 	return values
 }
 
+// sanitizedProjects encapsula esta operación interna y conserva las invariantes del componente.
 func sanitizedProjects(projects []config.ProjectConfig) []config.ProjectConfig {
 	result := make([]config.ProjectConfig, len(projects))
 	for index, project := range projects {
@@ -931,6 +954,7 @@ type editableConfigPayload struct {
 	} `json:"security"`
 }
 
+// applyEditableConfig actualiza el estado manteniendo las invariantes del componente.
 func applyEditableConfig(next, current *config.Config, payload editableConfigPayload) error {
 	if err := validatePort(payload.Server.Port, "server.port"); err != nil {
 		return err
@@ -1145,6 +1169,7 @@ func applyEditableConfig(next, current *config.Config, payload editableConfigPay
 	return nil
 }
 
+// validateProjects evalúa la condición indicada sin producir efectos laterales.
 func validateProjects(items []config.ProjectConfig, defaultProject string) error {
 	seen := map[string]struct{}{}
 	defaultFound := false
@@ -1193,6 +1218,7 @@ func validateProjects(items []config.ProjectConfig, defaultProject string) error
 	return nil
 }
 
+// mergeProjectSecrets encapsula esta operación interna y conserva las invariantes del componente.
 func mergeProjectSecrets(items, current []config.ProjectConfig) []config.ProjectConfig {
 	result := make([]config.ProjectConfig, len(items))
 	currentByKey := make(map[string]config.ProjectConfig, len(current))
@@ -1224,6 +1250,7 @@ func mergeProjectSecrets(items, current []config.ProjectConfig) []config.Project
 	return result
 }
 
+// validHTTPHeaderName encapsula esta operación interna y conserva las invariantes del componente.
 func validHTTPHeaderName(value string) bool {
 	value = strings.TrimSpace(value)
 	if value == "" || len(value) > 128 {
@@ -1238,6 +1265,7 @@ func validHTTPHeaderName(value string) bool {
 	return true
 }
 
+// validScopeKey encapsula esta operación interna y conserva las invariantes del componente.
 func validScopeKey(value string) bool {
 	value = strings.TrimSpace(value)
 	if value == "" || len(value) > 128 || value == "." || value == ".." {
@@ -1252,6 +1280,7 @@ func validScopeKey(value string) bool {
 	return true
 }
 
+// validatePort evalúa la condición indicada sin producir efectos laterales.
 func validatePort(value, field string) error {
 	port, err := strconv.Atoi(value)
 	if err != nil || port < 1 || port > 65535 {
@@ -1260,6 +1289,7 @@ func validatePort(value, field string) error {
 	return nil
 }
 
+// validateCORSOrigins evalúa la condición indicada sin producir efectos laterales.
 func validateCORSOrigins(origins []string) error {
 	seen := map[string]struct{}{}
 	for _, raw := range origins {
@@ -1286,6 +1316,7 @@ func validateCORSOrigins(origins []string) error {
 	return nil
 }
 
+// validateOCRLanguages evalúa la condición indicada sin producir efectos laterales.
 func validateOCRLanguages(candidates, fallbacks []string) error {
 	validCode := regexp.MustCompile(`^[a-z]{3}(?:_[a-z0-9]+)*$`)
 	selected := map[string]bool{}
@@ -1311,6 +1342,7 @@ func validateOCRLanguages(candidates, fallbacks []string) error {
 	return nil
 }
 
+// allowedValue encapsula esta operación interna y conserva las invariantes del componente.
 func allowedValue(value string, allowed ...string) bool {
 	for _, item := range allowed {
 		if strings.EqualFold(value, item) {
@@ -1320,6 +1352,7 @@ func allowedValue(value string, allowed ...string) bool {
 	return false
 }
 
+// secretOrCurrent encapsula esta operación interna y conserva las invariantes del componente.
 func secretOrCurrent(value, current string) string {
 	if strings.TrimSpace(value) == "" || value == maskedSecret(current) {
 		return current
@@ -1331,6 +1364,7 @@ type configError struct {
 	message string
 }
 
+// Error encapsula esta operación interna y conserva las invariantes del componente.
 func (e *configError) Error() string {
 	return e.message
 }

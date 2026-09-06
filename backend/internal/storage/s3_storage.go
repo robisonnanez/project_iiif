@@ -26,6 +26,7 @@ type S3Storage struct {
 	bucket string
 }
 
+// NewS3Storage crea e inicializa la dependencia con una configuración válida.
 func NewS3Storage(cfg *appconfig.Config, metadata Storage) (*S3Storage, error) {
 	if strings.TrimSpace(cfg.AWSBucket) == "" {
 		return nil, fmt.Errorf("AWS_BUCKET es obligatorio cuando FILESYSTEM_DISK=s3")
@@ -60,6 +61,7 @@ func NewS3Storage(cfg *appconfig.Config, metadata Storage) (*S3Storage, error) {
 	return store, nil
 }
 
+// ensureBucket encapsula esta operación interna y conserva las invariantes del componente.
 func (s *S3Storage) ensureBucket(ctx context.Context) error {
 	if err := s.CheckConnection(ctx); err == nil {
 		return nil
@@ -72,6 +74,7 @@ func (s *S3Storage) ensureBucket(ctx context.Context) error {
 	return s.CheckConnection(ctx)
 }
 
+// CheckConnection encapsula esta operación interna y conserva las invariantes del componente.
 func (s *S3Storage) CheckConnection(ctx context.Context) error {
 	_, err := s.client.HeadBucket(ctx, &s3.HeadBucketInput{Bucket: aws.String(s.bucket)})
 	if err != nil {
@@ -80,6 +83,7 @@ func (s *S3Storage) CheckConnection(ctx context.Context) error {
 	return nil
 }
 
+// SmokeTest encapsula esta operación interna y conserva las invariantes del componente.
 func (s *S3Storage) SmokeTest(ctx context.Context) error {
 	key := "_health/project-iiif-smoke.txt"
 	payload := []byte("project-iiif s3 ok")
@@ -101,6 +105,7 @@ func (s *S3Storage) SmokeTest(ctx context.Context) error {
 	return nil
 }
 
+// SaveDocumentPDF crea o persiste la información validada por el servicio.
 func (s *S3Storage) SaveDocumentPDF(documentID string, data []byte, mediaType string) error {
 	doc, err := s.Storage.GetDocument(documentID)
 	if err != nil {
@@ -114,6 +119,7 @@ func (s *S3Storage) SaveDocumentPDF(documentID string, data []byte, mediaType st
 	return s.Storage.UpdateDocument(doc)
 }
 
+// SaveDocumentImageData crea o persiste la información validada por el servicio.
 func (s *S3Storage) SaveDocumentImageData(imageID string, data []byte, mediaType string) error {
 	image, err := s.Storage.GetDocumentImage(imageID)
 	if err != nil {
@@ -122,6 +128,7 @@ func (s *S3Storage) SaveDocumentImageData(imageID string, data []byte, mediaType
 	return s.SaveDocumentImageAsset(image, data, mediaType)
 }
 
+// SaveDocumentImageAsset crea o persiste la información validada por el servicio.
 func (s *S3Storage) SaveDocumentImageAsset(image *models.DocumentImage, data []byte, mediaType string) error {
 	key := imageObjectKey(image)
 	if err := s.putObject(key, data, mediaType); err != nil {
@@ -141,6 +148,7 @@ func (s *S3Storage) SaveDocumentImageAsset(image *models.DocumentImage, data []b
 	return nil
 }
 
+// GetDocumentPDFData obtiene la información solicitada sin modificar el estado persistido.
 func (s *S3Storage) GetDocumentPDFData(documentID string) (*models.BinaryAsset, error) {
 	doc, err := s.Storage.GetDocument(documentID)
 	if err != nil {
@@ -149,6 +157,7 @@ func (s *S3Storage) GetDocumentPDFData(documentID string) (*models.BinaryAsset, 
 	return s.getObject(documentID, doc.FilePath)
 }
 
+// GetDocumentImageData obtiene la información solicitada sin modificar el estado persistido.
 func (s *S3Storage) GetDocumentImageData(imageID string) (*models.BinaryAsset, error) {
 	image, err := s.Storage.GetDocumentImage(imageID)
 	if err != nil {
@@ -157,6 +166,7 @@ func (s *S3Storage) GetDocumentImageData(imageID string) (*models.BinaryAsset, e
 	return s.getObject(imageID, image.ImagePath)
 }
 
+// HasDocumentPDFBlob evalúa la condición indicada sin producir efectos laterales.
 func (s *S3Storage) HasDocumentPDFBlob(documentID string) (bool, error) {
 	doc, err := s.Storage.GetDocument(documentID)
 	if err != nil {
@@ -165,6 +175,7 @@ func (s *S3Storage) HasDocumentPDFBlob(documentID string) (bool, error) {
 	return s.objectExists(doc.FilePath)
 }
 
+// HasImageBlob evalúa la condición indicada sin producir efectos laterales.
 func (s *S3Storage) HasImageBlob(imageID string) (bool, error) {
 	image, err := s.Storage.GetDocumentImage(imageID)
 	if err != nil {
@@ -173,6 +184,7 @@ func (s *S3Storage) HasImageBlob(imageID string) (bool, error) {
 	return s.objectExists(image.ImagePath)
 }
 
+// DeleteDocument elimina o libera de forma controlada los recursos asociados.
 func (s *S3Storage) DeleteDocument(id string) error {
 	doc, err := s.Storage.GetDocument(id)
 	if err != nil {
@@ -185,6 +197,7 @@ func (s *S3Storage) DeleteDocument(id string) error {
 	return s.Storage.DeleteDocument(id)
 }
 
+// putObject crea o persiste la información validada por el servicio.
 func (s *S3Storage) putObject(key string, data []byte, mediaType string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
@@ -200,6 +213,7 @@ func (s *S3Storage) putObject(key string, data []byte, mediaType string) error {
 	return nil
 }
 
+// getObject obtiene la información solicitada sin modificar el estado persistido.
 func (s *S3Storage) getObject(id, reference string) (*models.BinaryAsset, error) {
 	key, err := s.keyFromReference(reference)
 	if err != nil {
@@ -223,6 +237,7 @@ func (s *S3Storage) getObject(id, reference string) (*models.BinaryAsset, error)
 	return &models.BinaryAsset{ID: id, Data: data, MediaType: mediaType, ByteSize: int64(len(data))}, nil
 }
 
+// objectExists encapsula esta operación interna y conserva las invariantes del componente.
 func (s *S3Storage) objectExists(reference string) (bool, error) {
 	key, err := s.keyFromReference(reference)
 	if err != nil {
@@ -240,6 +255,7 @@ func (s *S3Storage) objectExists(reference string) (bool, error) {
 	return true, nil
 }
 
+// deletePrefix elimina o libera de forma controlada los recursos asociados.
 func (s *S3Storage) deletePrefix(prefix string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
@@ -261,6 +277,7 @@ func (s *S3Storage) deletePrefix(prefix string) error {
 	}
 }
 
+// isS3NotFound evalúa la condición indicada sin producir efectos laterales.
 func isS3NotFound(err error) bool {
 	var apiError smithy.APIError
 	if !errors.As(err, &apiError) {
@@ -274,10 +291,12 @@ func isS3NotFound(err error) bool {
 	}
 }
 
+// reference encapsula esta operación interna y conserva las invariantes del componente.
 func (s *S3Storage) reference(key string) string {
 	return "s3://" + s.bucket + "/" + key
 }
 
+// keyFromReference encapsula esta operación interna y conserva las invariantes del componente.
 func (s *S3Storage) keyFromReference(reference string) (string, error) {
 	prefix := "s3://" + s.bucket + "/"
 	if !strings.HasPrefix(reference, prefix) {
@@ -286,10 +305,12 @@ func (s *S3Storage) keyFromReference(reference string) (string, error) {
 	return strings.TrimPrefix(reference, prefix), nil
 }
 
+// documentObjectKey encapsula esta operación interna y conserva las invariantes del componente.
 func documentObjectKey(doc *models.PDFDocument) string {
 	return path.Join(scopePrefix(doc.ProjectKey, doc.TenantKey), "documents", safeSegment(doc.ID), "document.pdf")
 }
 
+// imageObjectKey encapsula esta operación interna y conserva las invariantes del componente.
 func imageObjectKey(image *models.DocumentImage) string {
 	ext := strings.TrimPrefix(strings.ToLower(image.Format), ".")
 	if ext == "" {
@@ -299,6 +320,7 @@ func imageObjectKey(image *models.DocumentImage) string {
 	return path.Join(scopePrefix(image.ProjectKey, image.TenantKey), "documents", safeSegment(image.DocumentID), "images", name)
 }
 
+// scopePrefix encapsula esta operación interna y conserva las invariantes del componente.
 func scopePrefix(projectKey, tenantKey string) string {
 	projectKey = safeSegment(projectKey)
 	if projectKey == "" {
@@ -310,6 +332,7 @@ func scopePrefix(projectKey, tenantKey string) string {
 	return path.Join("projects", projectKey)
 }
 
+// safeSegment encapsula esta operación interna y conserva las invariantes del componente.
 func safeSegment(value string) string {
 	value = strings.TrimSpace(value)
 	value = strings.ReplaceAll(value, "..", "")

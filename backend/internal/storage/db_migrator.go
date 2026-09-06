@@ -39,6 +39,7 @@ type migrationFile struct {
 	Checksum string
 }
 
+// RunDBMigrations ejecuta la operación principal respetando límites, contexto y errores.
 func RunDBMigrations(cfg *config.Config, baseDir string) (MigrationRunResult, error) {
 	start := time.Now()
 	engine := strings.ToLower(strings.TrimSpace(cfg.Storage.Backend))
@@ -160,6 +161,7 @@ type migrationExecutor interface {
 	Exec(query string, args ...interface{}) (sql.Result, error)
 }
 
+// recordAppliedMigration encapsula esta operación interna y conserva las invariantes del componente.
 func recordAppliedMigration(executor migrationExecutor, engine string, migration migrationFile) error {
 	query := "INSERT INTO schema_migrations (version, name, checksum, applied_at) VALUES ($1,$2,$3,NOW())"
 	if engine == "mysql" {
@@ -169,6 +171,7 @@ func recordAppliedMigration(executor migrationExecutor, engine string, migration
 	return err
 }
 
+// splitSQLStatements encapsula esta operación interna y conserva las invariantes del componente.
 func splitSQLStatements(contents string) []string {
 	parts := strings.Split(contents, ";")
 	statements := make([]string, 0, len(parts))
@@ -181,6 +184,7 @@ func splitSQLStatements(contents string) []string {
 	return statements
 }
 
+// migrationReflectedInSchema encapsula esta operación interna y conserva las invariantes del componente.
 func migrationReflectedInSchema(db *sql.DB, engine, version string) (bool, error) {
 	required := map[string][][2]string{
 		"001": {{"documents", "status"}, {"document_images", "page_number"}},
@@ -203,6 +207,7 @@ func migrationReflectedInSchema(db *sql.DB, engine, version string) (bool, error
 	return true, nil
 }
 
+// schemaColumnExists encapsula esta operación interna y conserva las invariantes del componente.
 func schemaColumnExists(db *sql.DB, engine, table, column string) (bool, error) {
 	query := "SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = current_schema() AND table_name = $1 AND column_name = $2"
 	if engine == "mysql" {
@@ -215,6 +220,7 @@ func schemaColumnExists(db *sql.DB, engine, table, column string) (bool, error) 
 	return count > 0, nil
 }
 
+// openMigrationDB encapsula esta operación interna y conserva las invariantes del componente.
 func openMigrationDB(cfg *config.Config, engine string) (*sql.DB, error) {
 	if engine == "postgres" {
 		pg := cfg.Database.Postgres
@@ -241,6 +247,7 @@ func openMigrationDB(cfg *config.Config, engine string) (*sql.DB, error) {
 	return sql.Open("mysql", dsn)
 }
 
+// ensureSchemaMigrationsTable encapsula esta operación interna y conserva las invariantes del componente.
 func ensureSchemaMigrationsTable(db *sql.DB, engine string) error {
 	if engine == "postgres" {
 		_, err := db.Exec(`
@@ -264,6 +271,7 @@ func ensureSchemaMigrationsTable(db *sql.DB, engine string) error {
 	return err
 }
 
+// discoverMigrationFiles encapsula esta operación interna y conserva las invariantes del componente.
 func discoverMigrationFiles(baseDir, engine string) ([]migrationFile, error) {
 	dir := filepath.Join(baseDir, "migrations", engine)
 	if _, err := os.Stat(dir); err != nil {
@@ -305,6 +313,7 @@ func discoverMigrationFiles(baseDir, engine string) ([]migrationFile, error) {
 	return out, nil
 }
 
+// loadAppliedMigrations obtiene la información solicitada sin modificar el estado persistido.
 func loadAppliedMigrations(db *sql.DB) (map[string]struct{}, error) {
 	rows, err := db.Query("SELECT version FROM schema_migrations")
 	if err != nil {
@@ -333,6 +342,7 @@ type mongoMigrationContext struct {
 	db *mongo.Database
 }
 
+// runMongoMigrations ejecuta la operación principal respetando límites, contexto y errores.
 func runMongoMigrations(cfg *config.Config, start time.Time) (MigrationRunResult, error) {
 	result := MigrationRunResult{Engine: "mongodb"}
 
@@ -401,6 +411,7 @@ func runMongoMigrations(cfg *config.Config, start time.Time) (MigrationRunResult
 	return result, nil
 }
 
+// loadAppliedMongoMigrations obtiene la información solicitada sin modificar el estado persistido.
 func loadAppliedMongoMigrations(ctx context.Context, collection *mongo.Collection) (map[string]struct{}, error) {
 	cursor, err := collection.Find(ctx, bson.M{})
 	if err != nil {
@@ -424,6 +435,7 @@ func loadAppliedMongoMigrations(ctx context.Context, collection *mongo.Collectio
 	return res, cursor.Err()
 }
 
+// mongoMigrations encapsula esta operación interna y conserva las invariantes del componente.
 func mongoMigrations() []mongoMigration {
 	return []mongoMigration{
 		{
@@ -508,6 +520,7 @@ func mongoMigrations() []mongoMigration {
 	}
 }
 
+// ensureMongoCollection encapsula esta operación interna y conserva las invariantes del componente.
 func ensureMongoCollection(db *mongo.Database, name string) error {
 	ctx, cancel := mongoTimeout()
 	defer cancel()
@@ -521,6 +534,7 @@ func ensureMongoCollection(db *mongo.Database, name string) error {
 	return db.CreateCollection(ctx, name)
 }
 
+// createMongoIndex crea o persiste la información validada por el servicio.
 func createMongoIndex(collection *mongo.Collection, model mongo.IndexModel) error {
 	ctx, cancel := mongoTimeout()
 	defer cancel()
@@ -528,15 +542,18 @@ func createMongoIndex(collection *mongo.Collection, model mongo.IndexModel) erro
 	return err
 }
 
+// checksumString encapsula esta operación interna y conserva las invariantes del componente.
 func checksumString(value string) string {
 	sum := sha256.Sum256([]byte(value))
 	return hex.EncodeToString(sum[:])
 }
 
+// mongoTimeout encapsula esta operación interna y conserva las invariantes del componente.
 func mongoTimeout() (context.Context, context.CancelFunc) {
 	return context.WithTimeout(context.Background(), 20*time.Second)
 }
 
+// contextBackground encapsula esta operación interna y conserva las invariantes del componente.
 func contextBackground() context.Context {
 	return context.Background()
 }

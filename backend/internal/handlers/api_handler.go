@@ -30,6 +30,7 @@ const (
 	defaultUploadDPI    = 150
 )
 
+// NewAPIHandler crea e inicializa la dependencia con una configuración válida.
 func NewAPIHandler(
 	pdfService *services.PDFService,
 	iiifService *services.IIIFService,
@@ -64,36 +65,37 @@ func NewAPIHandler(
 // @Failure 400 {object} errorResponse
 // @Failure 500 {object} errorResponse
 // @Router /api/v1/documents/upload [post]
+// UploadPDF encapsula esta operación interna y conserva las invariantes del componente.
 func (h *APIHandler) UploadPDF(c *gin.Context) {
 	// Obtener archivo
 	file, header, err := c.Request.FormFile("pdf")
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "No se pudo obtener el archivo"})
+		writeJSON(c, http.StatusBadRequest, gin.H{"error": "No se pudo obtener el archivo"})
 		return
 	}
 	defer file.Close()
 
 	// Validar tamaño
 	if header.Size > h.config.PDF.MaxFileSize {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Archivo demasiado grande"})
+		writeJSON(c, http.StatusBadRequest, gin.H{"error": "Archivo demasiado grande"})
 		return
 	}
 
 	// Obtener configuración de conversión
 	settings, err := h.conversionSettings(c)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		writeJSON(c, http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 
 	// Usar un nombre aleatorio evita colisiones entre cargas concurrentes con el mismo nombre.
 	if err := os.MkdirAll(h.config.PDF.TempPath, 0o750); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Error preparando almacenamiento temporal"})
+		writeJSON(c, http.StatusInternalServerError, gin.H{"error": "Error preparando almacenamiento temporal"})
 		return
 	}
 	tempFile, err := os.CreateTemp(h.config.PDF.TempPath, "upload-*.pdf")
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Error guardando archivo"})
+		writeJSON(c, http.StatusInternalServerError, gin.H{"error": "Error guardando archivo"})
 		return
 	}
 	tempPath := tempFile.Name()
@@ -101,30 +103,31 @@ func (h *APIHandler) UploadPDF(c *gin.Context) {
 
 	if _, err := io.Copy(tempFile, file); err != nil {
 		tempFile.Close()
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Error copiando archivo"})
+		writeJSON(c, http.StatusInternalServerError, gin.H{"error": "Error copiando archivo"})
 		return
 	}
 	if err := tempFile.Close(); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Error cerrando archivo temporal"})
+		writeJSON(c, http.StatusInternalServerError, gin.H{"error": "Error cerrando archivo temporal"})
 		return
 	}
 
 	scope, err := h.requestScope(c)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		writeJSON(c, http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 
 	// Procesar PDF
 	doc, err := h.pdfService.ProcessPDF(tempPath, header.Filename, settings, scope)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Error procesando PDF"})
+		writeJSON(c, http.StatusInternalServerError, gin.H{"error": "Error procesando PDF"})
 		return
 	}
 
-	c.JSON(http.StatusOK, doc)
+	writeJSON(c, http.StatusOK, doc)
 }
 
+// conversionSettings encapsula esta operación interna y conserva las invariantes del componente.
 func (h *APIHandler) conversionSettings(c *gin.Context) (models.ConversionSettings, error) {
 	dpi := h.config.Conversion.DPI
 	if dpi == 0 {
@@ -189,6 +192,7 @@ func (h *APIHandler) conversionSettings(c *gin.Context) (models.ConversionSettin
 	return settings, nil
 }
 
+// formInt encapsula esta operación interna y conserva las invariantes del componente.
 func formInt(c *gin.Context, name string, fallback int) (int, error) {
 	value := strings.TrimSpace(c.PostForm(name))
 	if value == "" {
@@ -211,6 +215,7 @@ func formInt(c *gin.Context, name string, fallback int) (int, error) {
 // @Success 200 {array} models.PDFDocument
 // @Failure 500 {object} errorResponse
 // @Router /api/v1/documents [get]
+// GetDocuments obtiene la información solicitada sin modificar el estado persistido.
 func (h *APIHandler) GetDocuments(c *gin.Context) {
 	project := strings.TrimSpace(c.Query("project"))
 	tenant := strings.TrimSpace(c.Query("tenant"))
@@ -222,14 +227,14 @@ func (h *APIHandler) GetDocuments(c *gin.Context) {
 		docs, err = h.documentService.GetAllDocuments()
 	}
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Error obteniendo documentos"})
+		writeJSON(c, http.StatusInternalServerError, gin.H{"error": "Error obteniendo documentos"})
 		return
 	}
 	if docs == nil {
 		docs = make([]*models.PDFDocument, 0)
 	}
 
-	c.JSON(http.StatusOK, docs)
+	writeJSON(c, http.StatusOK, docs)
 }
 
 // GetDocument godoc
@@ -240,15 +245,16 @@ func (h *APIHandler) GetDocuments(c *gin.Context) {
 // @Success 200 {object} models.PDFDocument
 // @Failure 404 {object} errorResponse
 // @Router /api/v1/documents/{id} [get]
+// GetDocument obtiene la información solicitada sin modificar el estado persistido.
 func (h *APIHandler) GetDocument(c *gin.Context) {
 	id := c.Param("id")
 	doc, err := h.documentService.GetDocument(id)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "Documento no encontrado"})
+		writeJSON(c, http.StatusNotFound, gin.H{"error": "Documento no encontrado"})
 		return
 	}
 
-	c.JSON(http.StatusOK, doc)
+	writeJSON(c, http.StatusOK, doc)
 }
 
 // DeleteDocument godoc
@@ -259,22 +265,24 @@ func (h *APIHandler) GetDocument(c *gin.Context) {
 // @Success 200 {object} okMessageResponse
 // @Failure 500 {object} errorResponse
 // @Router /api/v1/documents/{id} [delete]
+// DeleteDocument elimina o libera de forma controlada los recursos asociados.
 func (h *APIHandler) DeleteDocument(c *gin.Context) {
 	id := c.Param("id")
 	if err := h.documentService.DeleteDocument(id); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Error eliminando documento: " + err.Error()})
+		writeJSON(c, http.StatusInternalServerError, gin.H{"error": "Error eliminando documento: " + err.Error()})
 		return
 	}
 	if h.ocrService != nil {
 		if err := h.ocrService.Delete(id); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Documento eliminado, pero no se pudieron limpiar sus artefactos OCR: " + err.Error()})
+			writeJSON(c, http.StatusInternalServerError, gin.H{"error": "Documento eliminado, pero no se pudieron limpiar sus artefactos OCR: " + err.Error()})
 			return
 		}
 	}
 
-	c.JSON(http.StatusOK, gin.H{"message": "Documento, binarios y OCR eliminados"})
+	writeJSON(c, http.StatusOK, gin.H{"message": "Documento, binarios y OCR eliminados"})
 }
 
+// GetProperties obtiene la información solicitada sin modificar el estado persistido.
 func (h *APIHandler) GetProperties(c *gin.Context) {
 	props := models.ServerProperties{
 		Endpoint:       h.config.IIIF.BaseURL,
@@ -286,13 +294,14 @@ func (h *APIHandler) GetProperties(c *gin.Context) {
 		LogLevel:       h.config.Security.LogLevel,
 	}
 
-	c.JSON(http.StatusOK, props)
+	writeJSON(c, http.StatusOK, props)
 }
 
+// UpdateProperties actualiza el estado manteniendo las invariantes del componente.
 func (h *APIHandler) UpdateProperties(c *gin.Context) {
 	var props models.ServerProperties
 	if err := c.ShouldBindJSON(&props); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Datos inválidos"})
+		writeJSON(c, http.StatusBadRequest, gin.H{"error": "Datos inválidos"})
 		return
 	}
 
@@ -305,28 +314,29 @@ func (h *APIHandler) UpdateProperties(c *gin.Context) {
 	h.config.Security.EnableAuth = props.EnableAuth
 	h.config.Security.LogLevel = props.LogLevel
 
-	c.JSON(http.StatusOK, gin.H{"message": "Propiedades actualizadas"})
+	writeJSON(c, http.StatusOK, gin.H{"message": "Propiedades actualizadas"})
 }
 
 // IIIF Handlers - Formato Cantaloupe
 
 // GetManifest conserva el manifiesto Presentation API v2 para clientes heredados.
 // No se publica en Swagger: la API documentada usa exclusivamente IIIF v3.
+// GetManifest obtiene la información solicitada sin modificar el estado persistido.
 func (h *APIHandler) GetManifest(c *gin.Context) {
 	id := c.Param("id")
 	manifest, err := h.iiifService.GetManifest(id, c.Query("pages"))
 	if err != nil {
 		var selectionError *services.InvalidPageSelectionError
 		if errors.As(err, &selectionError) {
-			c.JSON(http.StatusBadRequest, gin.H{"error": selectionError.Error()})
+			writeJSON(c, http.StatusBadRequest, gin.H{"error": selectionError.Error()})
 			return
 		}
-		c.JSON(http.StatusNotFound, gin.H{"error": "Manifiesto no encontrado"})
+		writeJSON(c, http.StatusNotFound, gin.H{"error": "Manifiesto no encontrado"})
 		return
 	}
 
 	c.Header("Content-Type", "application/json")
-	c.JSON(http.StatusOK, manifest)
+	writeJSON(c, http.StatusOK, manifest)
 }
 
 // GetManifestV3 godoc
@@ -340,35 +350,37 @@ func (h *APIHandler) GetManifest(c *gin.Context) {
 // @Failure 400 {object} errorResponse
 // @Failure 404 {object} errorResponse
 // @Router /api/v1/iiif/{id}/manifest [get]
+// GetManifestV3 obtiene la información solicitada sin modificar el estado persistido.
 func (h *APIHandler) GetManifestV3(c *gin.Context) {
 	id := c.Param("id")
 	manifest, err := h.iiifService.GetManifestV3(id, c.Query("pages"))
 	if err != nil {
 		var selectionError *services.InvalidPageSelectionError
 		if errors.As(err, &selectionError) {
-			c.JSON(http.StatusBadRequest, gin.H{"error": selectionError.Error()})
+			writeJSON(c, http.StatusBadRequest, gin.H{"error": selectionError.Error()})
 			return
 		}
-		c.JSON(http.StatusNotFound, gin.H{"error": "Manifiesto no encontrado"})
+		writeJSON(c, http.StatusNotFound, gin.H{"error": "Manifiesto no encontrado"})
 		return
 	}
-	c.JSON(http.StatusOK, manifest)
+	writeJSON(c, http.StatusOK, manifest)
 }
 
 // GetImageInfoV2 conserva Image API v2 para clientes heredados.
 // No se publica en Swagger: la API documentada usa exclusivamente IIIF v3.
+// GetImageInfoV2 obtiene la información solicitada sin modificar el estado persistido.
 func (h *APIHandler) GetImageInfoV2(c *gin.Context) {
 	docID, page, err := h.parseIdentifier(c.Param("identifier"))
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Identificador inválido"})
+		writeJSON(c, http.StatusBadRequest, gin.H{"error": "Identificador inválido"})
 		return
 	}
 	info, err := h.iiifService.GetImageInfoV2(docID, page)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "Información de imagen no encontrada"})
+		writeJSON(c, http.StatusNotFound, gin.H{"error": "Información de imagen no encontrada"})
 		return
 	}
-	c.JSON(http.StatusOK, info)
+	writeJSON(c, http.StatusOK, info)
 }
 
 // GET /iiif/3/{identifier}/info.json
@@ -381,24 +393,25 @@ func (h *APIHandler) GetImageInfoV2(c *gin.Context) {
 // @Failure 400 {object} errorResponse
 // @Failure 404 {object} errorResponse
 // @Router /iiif/3/{identifier}/info.json [get]
+// GetImageInfo obtiene la información solicitada sin modificar el estado persistido.
 func (h *APIHandler) GetImageInfo(c *gin.Context) {
 	identifier := c.Param("identifier")
 
 	// Extraer documento ID y página del identificador
 	docID, page, err := h.parseIdentifier(identifier)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Identificador inválido"})
+		writeJSON(c, http.StatusBadRequest, gin.H{"error": "Identificador inválido"})
 		return
 	}
 
 	info, err := h.iiifService.GetImageInfo(docID, page)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "Información de imagen no encontrada"})
+		writeJSON(c, http.StatusNotFound, gin.H{"error": "Información de imagen no encontrada"})
 		return
 	}
 
 	c.Header("Content-Type", "application/json")
-	c.JSON(http.StatusOK, info)
+	writeJSON(c, http.StatusOK, info)
 }
 
 // GET /iiif/3/{identifier}/{region}/{size}/{rotation}/{quality}.{format}
@@ -415,6 +428,7 @@ func (h *APIHandler) GetImageInfo(c *gin.Context) {
 // @Failure 400 {object} errorResponse
 // @Failure 404 {object} errorResponse
 // @Router /iiif/3/{identifier}/{region}/{size}/{rotation}/{quality_format} [get]
+// GetImage obtiene la información solicitada sin modificar el estado persistido.
 func (h *APIHandler) GetImage(c *gin.Context) {
 	identifier := c.Param("identifier")
 	region := c.Param("region")
@@ -425,7 +439,7 @@ func (h *APIHandler) GetImage(c *gin.Context) {
 	// Parsear quality.format
 	parts := strings.Split(qualityFormat, ".")
 	if len(parts) != 2 {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Formato inválido"})
+		writeJSON(c, http.StatusBadRequest, gin.H{"error": "Formato inválido"})
 		return
 	}
 	quality := parts[0]
@@ -434,13 +448,13 @@ func (h *APIHandler) GetImage(c *gin.Context) {
 	// Extraer documento ID y página del identificador
 	docID, page, err := h.parseIdentifier(identifier)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Identificador inválido"})
+		writeJSON(c, http.StatusBadRequest, gin.H{"error": "Identificador inválido"})
 		return
 	}
 
 	data, contentType, err := h.iiifService.GetImageWithRegion(docID, page, region, size, rotation, quality, format)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "Imagen no encontrada"})
+		writeJSON(c, http.StatusNotFound, gin.H{"error": "Imagen no encontrada"})
 		return
 	}
 
@@ -449,19 +463,20 @@ func (h *APIHandler) GetImage(c *gin.Context) {
 }
 
 // GET /iiif/3/{identifier}/default.jpg (acceso directo)
+// GetImageDefault obtiene la información solicitada sin modificar el estado persistido.
 func (h *APIHandler) GetImageDefault(c *gin.Context) {
 	identifier := c.Param("identifier")
 
 	// Extraer documento ID y página del identificador
 	docID, page, err := h.parseIdentifier(identifier)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Identificador inválido"})
+		writeJSON(c, http.StatusBadRequest, gin.H{"error": "Identificador inválido"})
 		return
 	}
 
 	data, contentType, err := h.iiifService.GetImageWithRegion(docID, page, "full", "max", "0", "default", "jpg")
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "Imagen no encontrada"})
+		writeJSON(c, http.StatusNotFound, gin.H{"error": "Imagen no encontrada"})
 		return
 	}
 
@@ -475,6 +490,7 @@ func (h *APIHandler) GetImageDefault(c *gin.Context) {
 // - CJUOWBJGIFFZFOQXLRSEUNKE7M_page_2.png (página específica)
 // - documento.pdf_page_3 (PDF con página específica)
 // - documento_page_1 (sin extensión)
+// parseIdentifier analiza la entrada y devuelve una representación validada.
 func (h *APIHandler) parseIdentifier(identifier string) (string, int, error) {
 	if strings.Contains(identifier, "~") {
 		parts := strings.Split(identifier, "~")
@@ -520,12 +536,14 @@ func (h *APIHandler) parseIdentifier(identifier string) (string, int, error) {
 	return identifier, 1, nil
 }
 
+// requestScope encapsula esta operación interna y conserva las invariantes del componente.
 func (h *APIHandler) requestScope(c *gin.Context) (*models.Scope, error) {
 	project := firstNonEmpty(c.PostForm("project"), c.GetHeader("X-IIIF-Project"))
 	tenant := firstNonEmpty(c.PostForm("tenant"), c.GetHeader("X-IIIF-Tenant"))
 	return h.config.ResolveScope(project, tenant)
 }
 
+// firstNonEmpty encapsula esta operación interna y conserva las invariantes del componente.
 func firstNonEmpty(values ...string) string {
 	for _, value := range values {
 		if strings.TrimSpace(value) != "" {

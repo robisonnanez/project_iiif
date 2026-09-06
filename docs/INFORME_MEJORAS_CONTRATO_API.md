@@ -16,21 +16,27 @@ La condición se manifestó en producción al estar instalados todos los paquete
 
 No se cambiaron rutas, autenticación, configuración, Tesseract, base de datos ni mecanismos de instalación.
 
-## Mejoras prioritarias para próximas versiones
+## Mejoras prioritarias implementadas
 
-1. Definir una política transversal: toda colección de una API pública debe serializarse como arreglo vacío y probarse sobre el JSON real.
-2. Validar respuestas HTTP en tiempo de ejecución; los tipos TypeScript no validan datos recibidos.
-3. Incorporar un Error Boundary por ruta para sustituir pantallas blancas por una vista recuperable.
-4. Añadir a CI pruebas backend, frontend, build y contrato OpenAPI para valores nulos, vacíos y poblados.
-5. Agregar pruebas end-to-end de las vistas administrativas con respuestas controladas.
+1. Política transversal de respuestas JSON mediante `writeJSON`: inicializa recursivamente slices nulos sin alterar punteros nulos legítimos.
+2. Validación runtime de configuración, documentos y catálogo/instalación OCR antes de que React consuma los datos.
+3. Error Boundary por vista con mensaje recuperable y registro estructurado en consola.
+4. CI para pruebas, análisis estático, build, comentarios y consistencia del OpenAPI.
+5. Pruebas de componentes con respuestas controladas, incluidos estados nulos, vacíos, poblados y excepción de render.
 
-## Mejoras operativas
+## Mejoras operativas implementadas
 
-- Exponer versión, commit y fecha de compilación en un endpoint de diagnóstico.
-- Construir artefactos inmutables con checksums y asociar backend, frontend y OpenAPI a la misma versión.
-- Añadir monitoreo sintético de las vistas administrativas y captura estructurada de errores del navegador.
-- Mantener las ramas locales sincronizadas con sus referencias remotas antes de promover una versión.
-- Documentar y ensayar el rollback del binario y del frontend antes de cada despliegue.
+- `/api/v1/version` y `/health` exponen versión, commit y fecha incorporados con `ldflags`.
+- `deploy/build-release.sh` genera artefactos correlacionados, checksums y firma GPG opcional.
+- `deploy/project-iiif-smoke-test` valida salud, autenticación, catálogo y correspondencia frontend/backend.
+- La política Git, los controles de promoción y el rollback están documentados en `CALIDAD_Y_LIBERACIONES.md`.
+
+## Evolución todavía recomendada
+
+- Ejecutar pruebas E2E en navegador real dentro del pipeline y almacenar capturas ante fallos.
+- Integrar el smoke test con la plataforma corporativa de monitoreo y alertas.
+- Custodiar una clave de firma de releases en un servicio de secretos; el repositorio solo incorpora soporte opcional y no crea claves.
+- Ampliar gradualmente los validadores runtime a todos los DTO de baja criticidad.
 
 ## Criterios recomendados de liberación
 

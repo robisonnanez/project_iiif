@@ -6,6 +6,7 @@ import type { AppConfig, DocumentRecord, Notify, OCRAutocompleteItem, OCRJob, OC
 
 const terminal = new Set(["completed", "completed_with_errors", "failed", "cancelled"]);
 
+// OCRPage inicia trabajos OCR, supervisa su avance y permite buscar el texto resultante.
 export function OCRPage({ documents, config, notify }: { documents: DocumentRecord[]; config: AppConfig | null; notify: Notify }) {
   const ready = useMemo(() => documents.filter((item) => item.status === "completed"), [documents]);
   const [documentId, setDocumentId] = useState("");
@@ -65,13 +66,16 @@ export function OCRPage({ documents, config, notify }: { documents: DocumentReco
     return () => { current = false; controller.abort(); window.clearTimeout(timer); };
   }, [documentId, query, ready, scope]);
 
+  // toggleLanguage encapsula esta interacción y mantiene coherente el estado de la vista.
   const toggleLanguage = (language: string) => setLanguages((current) => current.includes(language) ? current.filter((item) => item !== language) : [...current, language]);
+  // start ejecuta la operación administrativa y controla sus errores.
   const start = async () => {
     if (!documentId) return; setBusy(true); setError("");
     try { setJob(await api.startOCR(documentId, { mode, language_mode: languageMode, languages: languageMode === "manual" ? languages : [], force })); notify("Trabajo OCR agregado a la cola."); }
     catch (cause) { setError(cause instanceof Error ? cause.message : "No se pudo iniciar OCR."); }
     finally { setBusy(false); }
   };
+  // search consulta y filtra resultados según la entrada actual.
   const search = async () => {
     if (query.trim().length < 2) { setError("Escribe al menos dos caracteres para buscar."); return; }
     setBusy(true); setError(""); setSearched(true);
@@ -82,9 +86,11 @@ export function OCRPage({ documents, config, notify }: { documents: DocumentReco
     } catch (cause) { setError(cause instanceof Error ? cause.message : "No se pudo buscar en OCR."); setResults([]); }
     finally { setBusy(false); }
   };
+  // chooseSuggestion encapsula esta interacción y mantiene coherente el estado de la vista.
   const chooseSuggestion = (item: OCRAutocompleteItem) => {
     skipAutocomplete.current = true; setQuery(item.text); setSuggestions([]); setSuggestionsOpen(false); setActiveSuggestion(-1);
   };
+  // handleQueryKeyDown encapsula esta interacción y mantiene coherente el estado de la vista.
   const handleQueryKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
     if (event.key === "ArrowDown" && suggestions.length) {
       event.preventDefault(); setSuggestionsOpen(true); setActiveSuggestion((current) => Math.min(current + 1, suggestions.length - 1)); return;

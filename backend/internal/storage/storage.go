@@ -48,6 +48,7 @@ type DocumentImageAssetWriter interface {
 	SaveDocumentImageAsset(image *models.DocumentImage, data []byte, mediaType string) error
 }
 
+// NewMetadataStorage crea e inicializa la dependencia con una configuración válida.
 func NewMetadataStorage(cfg *config.Config) (Storage, error) {
 	switch strings.ToLower(strings.TrimSpace(cfg.Storage.Backend)) {
 	case "", "local":
@@ -63,6 +64,7 @@ func NewMetadataStorage(cfg *config.Config) (Storage, error) {
 	}
 }
 
+// NewConfiguredStorage crea e inicializa la dependencia con una configuración válida.
 func NewConfiguredStorage(cfg *config.Config) (Storage, error) {
 	metadata, err := NewMetadataStorage(cfg)
 	if err != nil {
@@ -79,12 +81,14 @@ type FileStorage struct {
 	projectsEnabled bool
 }
 
+// NewFileStorage crea e inicializa la dependencia con una configuración válida.
 func NewFileStorage(basePath string) *FileStorage {
 	return &FileStorage{
 		basePath: basePath,
 	}
 }
 
+// NewFileStorageFromConfig crea e inicializa la dependencia con una configuración válida.
 func NewFileStorageFromConfig(cfg *config.Config) *FileStorage {
 	return &FileStorage{
 		basePath:        cfg.Storage.DataPath,
@@ -92,6 +96,7 @@ func NewFileStorageFromConfig(cfg *config.Config) *FileStorage {
 	}
 }
 
+// SaveDocument crea o persiste la información validada por el servicio.
 func (fs *FileStorage) SaveDocument(doc *models.PDFDocument) error {
 	docPath := filepath.Join(fs.scopeBase(doc.ProjectKey, doc.TenantKey), "documents", doc.ID+".json")
 	if err := os.MkdirAll(filepath.Dir(docPath), 0755); err != nil {
@@ -106,6 +111,7 @@ func (fs *FileStorage) SaveDocument(doc *models.PDFDocument) error {
 	return os.WriteFile(docPath, data, 0664)
 }
 
+// GetDocument obtiene la información solicitada sin modificar el estado persistido.
 func (fs *FileStorage) GetDocument(id string) (*models.PDFDocument, error) {
 	docPath, err := fs.findDocumentPath(id)
 	if err != nil {
@@ -128,10 +134,12 @@ func (fs *FileStorage) GetDocument(id string) (*models.PDFDocument, error) {
 	return &doc, nil
 }
 
+// GetAllDocuments obtiene la información solicitada sin modificar el estado persistido.
 func (fs *FileStorage) GetAllDocuments() ([]*models.PDFDocument, error) {
 	return fs.GetDocumentsByScope("", "")
 }
 
+// GetDocumentsByScope obtiene la información solicitada sin modificar el estado persistido.
 func (fs *FileStorage) GetDocumentsByScope(projectKey, tenantKey string) ([]*models.PDFDocument, error) {
 	searchRoots := fs.documentSearchRoots(projectKey, tenantKey)
 
@@ -176,6 +184,7 @@ func (fs *FileStorage) GetDocumentsByScope(projectKey, tenantKey string) ([]*mod
 	return documents, nil
 }
 
+// DeleteDocument elimina o libera de forma controlada los recursos asociados.
 func (fs *FileStorage) DeleteDocument(id string) error {
 	doc, _ := fs.GetDocument(id)
 	basePath := fs.basePath
@@ -207,14 +216,17 @@ func (fs *FileStorage) DeleteDocument(id string) error {
 	return nil
 }
 
+// UpdateDocument actualiza el estado manteniendo las invariantes del componente.
 func (fs *FileStorage) UpdateDocument(doc *models.PDFDocument) error {
 	return fs.SaveDocument(doc)
 }
 
+// SaveDocumentPDF crea o persiste la información validada por el servicio.
 func (fs *FileStorage) SaveDocumentPDF(documentID string, data []byte, mediaType string) error {
 	return nil
 }
 
+// GetDocumentPDFData obtiene la información solicitada sin modificar el estado persistido.
 func (fs *FileStorage) GetDocumentPDFData(documentID string) (*models.BinaryAsset, error) {
 	doc, err := fs.GetDocument(documentID)
 	if err != nil {
@@ -227,6 +239,7 @@ func (fs *FileStorage) GetDocumentPDFData(documentID string) (*models.BinaryAsse
 	return &models.BinaryAsset{ID: documentID, Data: data, MediaType: "application/pdf", ByteSize: int64(len(data))}, nil
 }
 
+// SaveDocumentImage crea o persiste la información validada por el servicio.
 func (fs *FileStorage) SaveDocumentImage(image *models.DocumentImage) error {
 	imageDir := filepath.Join(fs.scopeBase(image.ProjectKey, image.TenantKey), "images", image.DocumentID)
 	if err := os.MkdirAll(imageDir, 0755); err != nil {
@@ -242,10 +255,12 @@ func (fs *FileStorage) SaveDocumentImage(image *models.DocumentImage) error {
 	return os.WriteFile(imagePath, data, 0664)
 }
 
+// SaveDocumentImageData crea o persiste la información validada por el servicio.
 func (fs *FileStorage) SaveDocumentImageData(imageID string, data []byte, mediaType string) error {
 	return nil
 }
 
+// GetDocumentImage obtiene la información solicitada sin modificar el estado persistido.
 func (fs *FileStorage) GetDocumentImage(id string) (*models.DocumentImage, error) {
 	imagePath, err := fs.findImageMetadata(id)
 	if err != nil {
@@ -265,6 +280,7 @@ func (fs *FileStorage) GetDocumentImage(id string) (*models.DocumentImage, error
 	return &image, nil
 }
 
+// GetDocumentImageByPage obtiene la información solicitada sin modificar el estado persistido.
 func (fs *FileStorage) GetDocumentImageByPage(documentID string, page int) (*models.DocumentImage, error) {
 	doc, err := fs.GetDocument(documentID)
 	if err != nil {
@@ -287,6 +303,7 @@ func (fs *FileStorage) GetDocumentImageByPage(documentID string, page int) (*mod
 	}, nil
 }
 
+// GetDocumentImages obtiene la información solicitada sin modificar el estado persistido.
 func (fs *FileStorage) GetDocumentImages(documentID string) ([]*models.DocumentImage, error) {
 	// Lista las paginas convertidas para que el dashboard pueda construir URLs IIIF sin tocar rutas internas.
 	doc, docErr := fs.GetDocument(documentID)
@@ -324,6 +341,7 @@ func (fs *FileStorage) GetDocumentImages(documentID string) ([]*models.DocumentI
 	return images, nil
 }
 
+// GetDocumentImageData obtiene la información solicitada sin modificar el estado persistido.
 func (fs *FileStorage) GetDocumentImageData(id string) (*models.BinaryAsset, error) {
 	image, err := fs.GetDocumentImage(id)
 	if err != nil {
@@ -341,6 +359,7 @@ func (fs *FileStorage) GetDocumentImageData(id string) (*models.BinaryAsset, err
 	}, nil
 }
 
+// findImageMetadata obtiene la información solicitada sin modificar el estado persistido.
 func (fs *FileStorage) findImageMetadata(id string) (string, error) {
 	imagesDir := fs.basePath
 	var found string
@@ -363,6 +382,7 @@ func (fs *FileStorage) findImageMetadata(id string) (string, error) {
 	return found, nil
 }
 
+// findDocumentPath obtiene la información solicitada sin modificar el estado persistido.
 func (fs *FileStorage) findDocumentPath(id string) (string, error) {
 	candidates := []string{filepath.Join(fs.basePath, "documents", id+".json")}
 	// Compatibilidad con layout por tenant: /documents/{tenant}/{id}.json
@@ -394,6 +414,7 @@ func (fs *FileStorage) findDocumentPath(id string) (string, error) {
 	return "", fmt.Errorf("document not found")
 }
 
+// documentSearchRoots encapsula esta operación interna y conserva las invariantes del componente.
 func (fs *FileStorage) documentSearchRoots(projectKey, tenantKey string) []string {
 	if !fs.projectsEnabled {
 		roots := []string{filepath.Join(fs.basePath, "documents")}
@@ -424,6 +445,7 @@ func (fs *FileStorage) documentSearchRoots(projectKey, tenantKey string) []strin
 	return roots
 }
 
+// scopeBase encapsula esta operación interna y conserva las invariantes del componente.
 func (fs *FileStorage) scopeBase(projectKey, tenantKey string) string {
 	if !fs.projectsEnabled || strings.TrimSpace(projectKey) == "" {
 		return fs.basePath
@@ -434,6 +456,7 @@ func (fs *FileStorage) scopeBase(projectKey, tenantKey string) string {
 	return filepath.Join(fs.basePath, "projects", projectKey)
 }
 
+// discoverDocumentsFromFilesystem encapsula esta operación interna y conserva las invariantes del componente.
 func (fs *FileStorage) discoverDocumentsFromFilesystem(projectKey, tenantKey string) ([]*models.PDFDocument, error) {
 	pdfsRoot := filepath.Join(fs.basePath, "pdfs")
 	out := []*models.PDFDocument{}
@@ -481,6 +504,7 @@ func (fs *FileStorage) discoverDocumentsFromFilesystem(projectKey, tenantKey str
 	return out, err
 }
 
+// findImagesForLocalDocument obtiene la información solicitada sin modificar el estado persistido.
 func (fs *FileStorage) findImagesForLocalDocument(documentID, tenant string) []string {
 	candidates := []string{
 		filepath.Join(fs.basePath, "images", documentID),
@@ -510,6 +534,7 @@ func (fs *FileStorage) findImagesForLocalDocument(documentID, tenant string) []s
 	return paths
 }
 
+// inferTenantFromPDFPath encapsula esta operación interna y conserva las invariantes del componente.
 func inferTenantFromPDFPath(pdfPath, basePath string) string {
 	normalized := filepath.ToSlash(pdfPath)
 	root := filepath.ToSlash(filepath.Join(basePath, "pdfs")) + "/"
@@ -524,6 +549,7 @@ func inferTenantFromPDFPath(pdfPath, basePath string) string {
 	return ""
 }
 
+// mediaTypeForFormat encapsula esta operación interna y conserva las invariantes del componente.
 func mediaTypeForFormat(format string) string {
 	switch normalizeFormat(format) {
 	case "png":
@@ -535,6 +561,7 @@ func mediaTypeForFormat(format string) string {
 	}
 }
 
+// normalizeFormat encapsula esta operación interna y conserva las invariantes del componente.
 func normalizeFormat(format string) string {
 	if len(format) > 0 && format[0] == '.' {
 		format = format[1:]

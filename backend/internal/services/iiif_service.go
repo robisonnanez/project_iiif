@@ -26,6 +26,7 @@ type IIIFService struct {
 	cache   *cache.Cache
 }
 
+// NewIIIFService crea e inicializa la dependencia con una configuración válida.
 func NewIIIFService(config *config.Config, storage storage.Storage) *IIIFService {
 	var c *cache.Cache
 	if config.IIIF.CacheEnabled {
@@ -44,10 +45,12 @@ type InvalidPageSelectionError struct {
 	Reason    string
 }
 
+// Error encapsula esta operación interna y conserva las invariantes del componente.
 func (e *InvalidPageSelectionError) Error() string {
 	return fmt.Sprintf("seleccion de paginas invalida %q: %s", e.Selection, e.Reason)
 }
 
+// GetManifest obtiene la información solicitada sin modificar el estado persistido.
 func (s *IIIFService) GetManifest(documentID, pageSelection string) (*models.IIIFManifestV2, error) {
 	doc, err := s.storage.GetDocument(documentID)
 	if err != nil {
@@ -114,6 +117,7 @@ func (s *IIIFService) GetManifest(documentID, pageSelection string) (*models.III
 
 // GetManifestV3 preserves the previous Presentation API 3 representation for
 // clients that already consumed it. New integrations should use GetManifest.
+// GetManifestV3 obtiene la información solicitada sin modificar el estado persistido.
 func (s *IIIFService) GetManifestV3(documentID, pageSelection string) (*models.IIIFManifest, error) {
 	doc, err := s.storage.GetDocument(documentID)
 	if err != nil {
@@ -153,6 +157,7 @@ func (s *IIIFService) GetManifestV3(documentID, pageSelection string) (*models.I
 	return manifest, nil
 }
 
+// manifestPages encapsula esta operación interna y conserva las invariantes del componente.
 func manifestPages(selection string, totalPages int) ([]int, string, error) {
 	selection = strings.TrimSpace(selection)
 	if selection == "" || strings.EqualFold(selection, "all") {
@@ -207,6 +212,7 @@ func manifestPages(selection string, totalPages int) ([]int, string, error) {
 	return pages, strings.Join(normalized, ","), nil
 }
 
+// createCanvasV2 crea o persiste la información validada por el servicio.
 func (s *IIIFService) createCanvasV2(documentID string, page int, title string) models.IIIFCanvasV2 {
 	canvasID := s.canvasIDV2(documentID, page)
 	imageIdentifier := s.imageIdentifier(documentID, page, title)
@@ -246,6 +252,7 @@ func (s *IIIFService) createCanvasV2(documentID string, page int, title string) 
 	}
 }
 
+// createCanvasV3 crea o persiste la información validada por el servicio.
 func (s *IIIFService) createCanvasV3(documentID string, page int, title string) models.IIIFCanvas {
 	canvasID := fmt.Sprintf("%s/api/iiif/%s/canvas/%d", s.config.IIIF.BaseURL, documentID, page)
 
@@ -294,6 +301,7 @@ func (s *IIIFService) createCanvasV3(documentID string, page int, title string) 
 	}
 }
 
+// canvasIDV2 evalúa la condición indicada sin producir efectos laterales.
 func (s *IIIFService) canvasIDV2(documentID string, page int) string {
 	return fmt.Sprintf("%s/api/iiif/%s/canvases/%s_%04d", s.config.IIIF.BaseURL, documentID, documentID, page)
 }
@@ -305,6 +313,7 @@ type rangeCandidate struct {
 	children []*rangeCandidate
 }
 
+// createRangesV2 crea o persiste la información validada por el servicio.
 func (s *IIIFService) createRangesV2(documentID string, outline []models.PDFOutlineItem, pages []int, totalPages int) []models.IIIFRangeV2 {
 	if len(outline) == 0 || totalPages < 1 {
 		return nil
@@ -362,6 +371,7 @@ func (s *IIIFService) createRangesV2(documentID string, outline []models.PDFOutl
 	return result
 }
 
+// materializeRangeV2 encapsula esta operación interna y conserva las invariantes del componente.
 func (s *IIIFService) materializeRangeV2(documentID string, node *rangeCandidate, parentID string, selected map[int]struct{}) (models.IIIFRangeV2, bool) {
 	id := fmt.Sprintf("%s/api/iiif/%s/ranges/LOG_%04d", s.config.IIIF.BaseURL, documentID, node.index)
 	rangeValue := models.IIIFRangeV2{ID: id, Type: "sc:Range", Label: node.item.Title, Within: parentID}
@@ -378,6 +388,7 @@ func (s *IIIFService) materializeRangeV2(documentID string, node *rangeCandidate
 	return rangeValue, len(rangeValue.Canvases) > 0 || len(rangeValue.Ranges) > 0
 }
 
+// mediaTypeForIIIF encapsula esta operación interna y conserva las invariantes del componente.
 func mediaTypeForIIIF(format, stored string) string {
 	if strings.HasPrefix(stored, "image/") {
 		return stored
@@ -392,11 +403,13 @@ func mediaTypeForIIIF(format, stored string) string {
 	}
 }
 
+// isHTTPURL evalúa la condición indicada sin producir efectos laterales.
 func isHTTPURL(value string) bool {
 	parsed, err := url.Parse(strings.TrimSpace(value))
 	return err == nil && (parsed.Scheme == "http" || parsed.Scheme == "https") && parsed.Host != ""
 }
 
+// GetImageInfo obtiene la información solicitada sin modificar el estado persistido.
 func (s *IIIFService) GetImageInfo(documentID string, page int) (*models.IIIFImageInfo, error) {
 	cacheKey := fmt.Sprintf("info_%s_%d", documentID, page)
 	if s.cache != nil {
@@ -454,6 +467,7 @@ func (s *IIIFService) GetImageInfo(documentID string, page int) (*models.IIIFIma
 	return info, nil
 }
 
+// GetImageInfoV2 obtiene la información solicitada sin modificar el estado persistido.
 func (s *IIIFService) GetImageInfoV2(documentID string, page int) (*models.IIIFImageInfoV2, error) {
 	image, err := s.resolveImage(documentID, page)
 	if err != nil {
@@ -487,10 +501,12 @@ func (s *IIIFService) GetImageInfoV2(documentID string, page int) (*models.IIIFI
 	}, nil
 }
 
+// GetImage obtiene la información solicitada sin modificar el estado persistido.
 func (s *IIIFService) GetImage(documentID string, page int, size, rotation, quality, format string) ([]byte, string, error) {
 	return s.GetImageWithRegion(documentID, page, "full", size, rotation, quality, format)
 }
 
+// GetImageWithRegion obtiene la información solicitada sin modificar el estado persistido.
 func (s *IIIFService) GetImageWithRegion(documentID string, page int, region, size, rotation, quality, format string) ([]byte, string, error) {
 	docImage, err := s.resolveImage(documentID, page)
 	if err != nil {
@@ -542,6 +558,7 @@ func (s *IIIFService) GetImageWithRegion(documentID string, page int, region, si
 	return encoded.Bytes(), contentType, nil
 }
 
+// processRegion ejecuta la operación principal respetando límites, contexto y errores.
 func (s *IIIFService) processRegion(img image.Image, region string) image.Image {
 	if region == "full" {
 		return img
@@ -586,6 +603,7 @@ func (s *IIIFService) processRegion(img image.Image, region string) image.Image 
 	return img
 }
 
+// processSize ejecuta la operación principal respetando límites, contexto y errores.
 func (s *IIIFService) processSize(img image.Image, size string) image.Image {
 	if size == "full" || size == "max" {
 		return img
@@ -617,6 +635,7 @@ func (s *IIIFService) processSize(img image.Image, size string) image.Image {
 	return img
 }
 
+// getImageDimensions obtiene la información solicitada sin modificar el estado persistido.
 func (s *IIIFService) getImageDimensions(documentID string, page int) (int, int) {
 	image, err := s.resolveImage(documentID, page)
 	if err == nil {
@@ -669,6 +688,7 @@ func (s *IIIFService) getImageDimensions(documentID string, page int) (int, int)
 	return bounds.Dx(), bounds.Dy()
 }
 
+// resolveImage encapsula esta operación interna y conserva las invariantes del componente.
 func (s *IIIFService) resolveImage(identifier string, page int) (*models.DocumentImage, error) {
 	image, err := s.storage.GetDocumentImage(identifier)
 	if err == nil {
@@ -697,6 +717,7 @@ func (s *IIIFService) resolveImage(identifier string, page int) (*models.Documen
 	}, nil
 }
 
+// legacyImagePath encapsula esta operación interna y conserva las invariantes del componente.
 func (s *IIIFService) legacyImagePath(documentID string, page int) string {
 	if strings.Contains(documentID, ".") && !strings.Contains(documentID, ".pdf") {
 		if strings.Contains(documentID, "&") {
@@ -715,6 +736,7 @@ func (s *IIIFService) legacyImagePath(documentID string, page int) string {
 	return filepath.Join(s.config.Storage.ImagesPath, cleanID, fmt.Sprintf("page_%d.jpg", page))
 }
 
+// imageIdentifier encapsula esta operación interna y conserva las invariantes del componente.
 func (s *IIIFService) imageIdentifier(documentID string, page int, title string) string {
 	if image, err := s.storage.GetDocumentImageByPage(documentID, page); err == nil && image.ID != "" {
 		return image.ID
@@ -733,6 +755,7 @@ func (s *IIIFService) imageIdentifier(documentID string, page int, title string)
 	return fmt.Sprintf("%s_page_%d%s", baseID, page, ext)
 }
 
+// imageDimensions encapsula esta operación interna y conserva las invariantes del componente.
 func imageDimensions(imagePath string) (int, int) {
 	img, err := imaging.Open(imagePath)
 	if err != nil {
@@ -742,6 +765,7 @@ func imageDimensions(imagePath string) (int, int) {
 	return bounds.Dx(), bounds.Dy()
 }
 
+// openImage encapsula esta operación interna y conserva las invariantes del componente.
 func (s *IIIFService) openImage(docImage *models.DocumentImage) (image.Image, error) {
 	asset, err := s.storage.GetDocumentImageData(docImage.ID)
 	if err == nil && len(asset.Data) > 0 {

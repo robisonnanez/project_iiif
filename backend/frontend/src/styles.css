@@ -188,6 +188,8 @@ tbody tr:last-child td { border-bottom: 0; }
 .project-editor .card-heading { align-items: flex-start; }
 .tenant-sync-row { display: flex; align-items: center; gap: 14px; margin: -4px 0 16px; color: var(--muted); font-size: .84rem; }
 .tenants-textarea { min-height: 130px; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; line-height: 1.5; }
+.route-error { max-width: 760px; margin: 28px auto; }
+.route-error p { color: var(--muted); line-height: 1.6; }
 
 .modal-backdrop { position: fixed; inset: 0; z-index: 80; display: grid; place-items: center; padding: 20px; background: rgba(15,23,42,.62); backdrop-filter: blur(5px); }
 .modal { width: min(620px, 100%); max-height: calc(100vh - 40px); overflow-y: auto; padding: 24px; border-radius: 20px; background: white; box-shadow: 0 28px 80px rgba(0,0,0,.25); }

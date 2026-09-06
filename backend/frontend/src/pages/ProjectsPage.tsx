@@ -5,6 +5,7 @@ import type { AppConfig, Notify, ProjectConfig } from "../types";
 
 type ProjectSettings = AppConfig["projects"];
 
+// ProjectsPage administra proyectos, tenants y sincronización con fuentes externas.
 export function ProjectsPage({ config, onSaved, notify }: { config: AppConfig; onSaved: (config: AppConfig) => void; notify: Notify }) {
   const [settings, setSettings] = useState<ProjectSettings>(() => structuredClone(config.projects));
   const [busy, setBusy] = useState(false);
@@ -15,19 +16,23 @@ export function ProjectsPage({ config, onSaved, notify }: { config: AppConfig; o
 
   useEffect(() => setSettings(structuredClone(config.projects)), [config.projects]);
 
+  // updateProject valida y aplica el cambio solicitado.
   const updateProject = (index: number, change: Partial<ProjectConfig>) => setSettings((current) => ({ ...current, items: current.items.map((item, candidate) => candidate === index ? { ...item, ...change } : item) }));
+  // addProject encapsula esta interacción y mantiene coherente el estado de la vista.
   const addProject = () => {
     const used = new Set(settings.items.map((item) => item.key));
     let suffix = settings.items.length + 1;
     while (used.has(`proyecto-${suffix}`)) suffix += 1;
     setSettings((current) => ({ ...current, enabled: true, items: [...current.items, { key: `proyecto-${suffix}`, name: `Proyecto ${suffix}`, bulk_upload: false, multitenant: false, tenants: [], tenants_endpoint: "", tenants_auth_type: "none", tenants_auth_header: "", tenants_auth_token: "" }] }));
   };
+  // removeProject elimina el elemento después de validar la acción.
   const removeProject = (index: number) => setSettings((current) => {
     if (current.items.length === 1) return current;
     const removed = current.items[index];
     const items = current.items.filter((_, candidate) => candidate !== index);
     return { ...current, items, default_project: removed.key === current.default_project ? items[0].key : current.default_project };
   });
+  // validate comprueba el estado y comunica cualquier condición inválida.
   const validate = () => {
     const keys = settings.items.map((item) => item.key.trim());
     if (keys.some((key) => !/^[A-Za-z0-9._-]{1,128}$/.test(key) || key === "." || key === "..")) return "Cada proyecto necesita una clave válida sin espacios.";
@@ -35,6 +40,7 @@ export function ProjectsPage({ config, onSaved, notify }: { config: AppConfig; o
     if (!keys.includes(settings.default_project)) return "Selecciona un proyecto predeterminado existente.";
     return "";
   };
+  // persist encapsula esta interacción y mantiene coherente el estado de la vista.
   const persist = async (successMessage = true) => {
     const validation = validate();
     if (validation) throw new Error(validation);
@@ -48,12 +54,14 @@ export function ProjectsPage({ config, onSaved, notify }: { config: AppConfig; o
     }
     return payload;
   };
+  // save valida y aplica el cambio solicitado.
   const save = async () => {
     setBusy(true); setError(""); setMessage("");
     try { await persist(); }
     catch (cause) { setError(cause instanceof Error ? cause.message : "No se pudieron guardar los proyectos."); }
     finally { setBusy(false); }
   };
+  // sync encapsula esta interacción y mantiene coherente el estado de la vista.
   const sync = async (index: number) => {
     const project = settings.items[index];
     if (!project.tenants_endpoint?.trim()) { setError("Configura el endpoint de tenants antes de sincronizar."); return; }

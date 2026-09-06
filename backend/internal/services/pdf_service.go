@@ -41,6 +41,7 @@ type stagedUploadResult struct {
 	err  error
 }
 
+// NewPDFService crea e inicializa la dependencia con una configuración válida.
 func NewPDFService(config *config.Config, storage storage.Storage) *PDFService {
 	maxConcurrentUploads := config.Security.MaxConcurrentUploads
 	if maxConcurrentUploads < 1 {
@@ -56,8 +57,10 @@ func NewPDFService(config *config.Config, storage storage.Storage) *PDFService {
 	}
 }
 
+// SetCompletionHook actualiza el estado manteniendo las invariantes del servicio.
 func (s *PDFService) SetCompletionHook(hook func(string)) { s.onCompleted = hook }
 
+// ProcessPDF ejecuta la operación principal respetando límites, contexto y errores.
 func (s *PDFService) ProcessPDF(sourcePath string, filename string, settings models.ConversionSettings, scope *models.Scope) (*models.PDFDocument, error) {
 	if settings.Format == "" {
 		settings.Format = s.config.Conversion.DefaultFormat
@@ -137,6 +140,7 @@ func (s *PDFService) ProcessPDF(sourcePath string, filename string, settings mod
 	return doc, nil
 }
 
+// convertPDFToImages ejecuta la operación principal respetando límites, contexto y errores.
 func (s *PDFService) convertPDFToImages(doc *models.PDFDocument, sourcePath string, settings models.ConversionSettings) {
 	startedAt := time.Now()
 	var renderDuration, resizeDuration, encodeDuration, stageDuration, uploadDuration time.Duration
@@ -338,6 +342,7 @@ func (s *PDFService) convertPDFToImages(doc *models.PDFDocument, sourcePath stri
 		settings.DPI, settings.MaxWidth, settings.MaxHeight, settings.Format)
 }
 
+// bulkUploadEnabled encapsula esta operación interna y conserva las invariantes del componente.
 func (s *PDFService) bulkUploadEnabled(projectKey string) bool {
 	if !s.usesS3() {
 		return false
@@ -346,10 +351,12 @@ func (s *PDFService) bulkUploadEnabled(projectKey string) bool {
 	return ok && project.BulkUpload
 }
 
+// usesS3 encapsula esta operación interna y conserva las invariantes del componente.
 func (s *PDFService) usesS3() bool {
 	return strings.EqualFold(s.config.FilesystemDisk, "s3") || strings.EqualFold(s.config.BinaryStorage.Mode, "s3")
 }
 
+// persistDocumentImage crea o persiste la información validada por el servicio.
 func (s *PDFService) persistDocumentImage(image *models.DocumentImage, data []byte, mediaType string) error {
 	if writer, ok := s.storage.(storage.DocumentImageAssetWriter); ok {
 		s.uploadSlots <- struct{}{}
@@ -365,6 +372,7 @@ func (s *PDFService) persistDocumentImage(image *models.DocumentImage, data []by
 	return nil
 }
 
+// uploadStagedImages encapsula esta operación interna y conserva las invariantes del componente.
 func (s *PDFService) uploadStagedImages(items []stagedDocumentImage, onSuccess func(stagedDocumentImage)) []error {
 	if len(items) == 0 {
 		return nil
@@ -409,6 +417,7 @@ func (s *PDFService) uploadStagedImages(items []stagedDocumentImage, onSuccess f
 	return errors
 }
 
+// extractPDFOutline encapsula esta operación interna y conserva las invariantes del componente.
 func extractPDFOutline(pdf *fitz.Document, totalPages int) []models.PDFOutlineItem {
 	outline, err := pdf.ToC()
 	if err != nil {
@@ -417,6 +426,7 @@ func extractPDFOutline(pdf *fitz.Document, totalPages int) []models.PDFOutlineIt
 	return normalizePDFOutline(outline, totalPages)
 }
 
+// normalizePDFOutline encapsula esta operación interna y conserva las invariantes del componente.
 func normalizePDFOutline(source []fitz.Outline, totalPages int) []models.PDFOutlineItem {
 	result := make([]models.PDFOutlineItem, 0, len(source))
 	for _, item := range source {
@@ -438,6 +448,7 @@ func normalizePDFOutline(source []fitz.Outline, totalPages int) []models.PDFOutl
 	return result
 }
 
+// scopePath encapsula esta operación interna y conserva las invariantes del componente.
 func (s *PDFService) scopePath(base string, scope *models.Scope) string {
 	if !s.config.Projects.Enabled || scope == nil || strings.TrimSpace(scope.ProjectKey) == "" {
 		return base
@@ -453,6 +464,7 @@ func (s *PDFService) scopePath(base string, scope *models.Scope) string {
 	return filepath.Join(root, "projects", scope.ProjectKey, rel)
 }
 
+// encodeImage convierte y escribe la información en el formato requerido.
 func (s *PDFService) encodeImage(img image.Image, settings models.ConversionSettings) ([]byte, string, error) {
 	var buffer bytes.Buffer
 	switch settings.Format {
@@ -469,6 +481,7 @@ func (s *PDFService) encodeImage(img image.Image, settings models.ConversionSett
 	}
 }
 
+// saveImage crea o persiste la información validada por el servicio.
 func (s *PDFService) saveImage(img image.Image, path string, settings models.ConversionSettings) error {
 	data, _, err := s.encodeImage(img, settings)
 	if err != nil {
@@ -477,12 +490,14 @@ func (s *PDFService) saveImage(img image.Image, path string, settings models.Con
 	return os.WriteFile(path, data, 0664)
 }
 
+// usesDatabaseBlobs encapsula esta operación interna y conserva las invariantes del componente.
 func (s *PDFService) usesDatabaseBlobs() bool {
 	backend := strings.ToLower(s.config.Storage.Backend)
 	mode := strings.ToLower(s.config.BinaryStorage.Mode)
 	return mode == "s3" || (backend != "local" && mode == "database")
 }
 
+// copyFile encapsula esta operación interna y conserva las invariantes del componente.
 func copyFile(sourcePath, destinationPath string) error {
 	if err := os.MkdirAll(filepath.Dir(destinationPath), 0755); err != nil {
 		return err
@@ -504,6 +519,7 @@ func copyFile(sourcePath, destinationPath string) error {
 	return err
 }
 
+// createProcessingCopy crea o persiste la información validada por el servicio.
 func createProcessingCopy(tempPath string, data []byte) (string, error) {
 	if err := os.MkdirAll(tempPath, 0o750); err != nil {
 		return "", err

@@ -28,3 +28,12 @@ it("normaliza colecciones nulas del catálogo OCR sin ocultar errores HTTP", asy
     available: [],
   });
 });
+
+it("rechaza una configuración sin las secciones requeridas", async () => {
+  vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({ server: {} }), {
+    status: 200,
+    headers: { "Content-Type": "application/json" },
+  })));
+
+  await expect(api.config()).rejects.toThrow(/Respuesta inválida de configuración\.storage/);
+});

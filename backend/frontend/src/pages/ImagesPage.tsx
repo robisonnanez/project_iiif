@@ -6,6 +6,7 @@ import type { AppConfig, DocumentImage, DocumentRecord, Notify, ProjectConfig } 
 
 const pageSize = 10;
 
+// ImagesPage consulta y pagina las imágenes IIIF asociadas a un documento.
 export function ImagesPage({ documents, config, notify }: { documents: DocumentRecord[]; config: AppConfig | null; notify: Notify }) {
   const projects = useMemo<ProjectConfig[]>(() => config?.projects.items?.length ? config.projects.items : [{ key: "default", name: "Proyecto por defecto", multitenant: false, tenants: [] }], [config]);
   const [project, setProject] = useState("");
@@ -31,14 +32,17 @@ export function ImagesPage({ documents, config, notify }: { documents: DocumentR
     }
   }, [documentId, filteredDocumentIds, filteredDocuments]);
 
+  // changeProject encapsula esta interacción y mantiene coherente el estado de la vista.
   const changeProject = (value: string) => {
     setProject(value);
     const item = projects.find((candidate) => candidate.key === value);
     setTenant(item?.multitenant ? item.tenants[0] ?? "" : "");
     setImages([]); setPage(1);
   };
+  // changeTenant encapsula esta interacción y mantiene coherente el estado de la vista.
   const changeTenant = (value: string) => { setTenant(value); setImages([]); setPage(1); };
 
+  // loadImages actualiza los datos visibles desde la API.
   const loadImages = async () => {
     if (!documentId) return;
     setBusy(true); setError("");
@@ -84,6 +88,7 @@ export function ImagesPage({ documents, config, notify }: { documents: DocumentR
   </>;
 }
 
+// Pagination permite recorrer resultados manteniendo límites válidos.
 function Pagination({ page, total, onPage }: { page: number; total: number; onPage: (page: number) => void }) {
   const pages = Array.from({ length: total }, (_, index) => index + 1);
   return <nav className="pagination" aria-label="Paginación de imágenes">

@@ -3,11 +3,13 @@ import type { DocumentRecord } from "../types";
 import { normalizePageSelection } from "../lib/validation";
 import { Alert, Button, FormField, Input, Modal } from "./ui";
 
+// ManifestDialog recopila opciones de páginas y abre el manifiesto IIIF resultante.
 export function ManifestDialog({ document, onClose, onOpen = (url) => window.open(url, "_blank", "noopener,noreferrer") }: { document: DocumentRecord; onClose: () => void; onOpen?: (url: string) => void }) {
   const [mode, setMode] = useState<"all" | "selected">("all");
   const [pages, setPages] = useState("");
   const [error, setError] = useState("");
 
+  // submit encapsula esta interacción y mantiene coherente el estado de la vista.
   const submit = () => {
     try {
       const query = mode === "selected" ? `?pages=${encodeURIComponent(normalizePageSelection(pages, document.totalPages))}` : "";

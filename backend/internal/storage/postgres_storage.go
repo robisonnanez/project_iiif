@@ -20,6 +20,7 @@ type PostgresStorage struct {
 	basePath string
 }
 
+// NewPostgresStorage crea e inicializa la dependencia con una configuración válida.
 func NewPostgresStorage(cfg *config.Config) (*PostgresStorage, error) {
 	pg := cfg.Database.Postgres
 	if pg.SSLMode == "" {
@@ -44,14 +45,17 @@ func NewPostgresStorage(cfg *config.Config) (*PostgresStorage, error) {
 	return &PostgresStorage{db: db, basePath: cfg.Storage.DataPath}, nil
 }
 
+// SaveDocument crea o persiste la información validada por el servicio.
 func (ps *PostgresStorage) SaveDocument(doc *models.PDFDocument) error {
 	return ps.upsertDocument(doc)
 }
 
+// UpdateDocument actualiza el estado manteniendo las invariantes del componente.
 func (ps *PostgresStorage) UpdateDocument(doc *models.PDFDocument) error {
 	return ps.upsertDocument(doc)
 }
 
+// GetDocument obtiene la información solicitada sin modificar el estado persistido.
 func (ps *PostgresStorage) GetDocument(id string) (*models.PDFDocument, error) {
 	row := ps.db.QueryRow(`
 		SELECT id, original_name, COALESCE(project_key, 'default'), COALESCE(tenant_key, ''), COALESCE(migrated_from_local, false), status, total_pages, converted_pages,
@@ -78,10 +82,12 @@ func (ps *PostgresStorage) GetDocument(id string) (*models.PDFDocument, error) {
 	return doc, nil
 }
 
+// GetAllDocuments obtiene la información solicitada sin modificar el estado persistido.
 func (ps *PostgresStorage) GetAllDocuments() ([]*models.PDFDocument, error) {
 	return ps.GetDocumentsByScope("", "")
 }
 
+// GetDocumentsByScope obtiene la información solicitada sin modificar el estado persistido.
 func (ps *PostgresStorage) GetDocumentsByScope(projectKey, tenantKey string) ([]*models.PDFDocument, error) {
 	query := `
 		SELECT id, original_name, COALESCE(project_key, 'default'), COALESCE(tenant_key, ''), COALESCE(migrated_from_local, false), status, total_pages, converted_pages,
@@ -134,6 +140,7 @@ func (ps *PostgresStorage) GetDocumentsByScope(projectKey, tenantKey string) ([]
 	return docs, rows.Err()
 }
 
+// DeleteDocument elimina o libera de forma controlada los recursos asociados.
 func (ps *PostgresStorage) DeleteDocument(id string) error {
 	doc, _ := ps.GetDocument(id)
 	if _, err := ps.db.Exec("DELETE FROM documents WHERE id = $1", id); err != nil {
@@ -148,6 +155,7 @@ func (ps *PostgresStorage) DeleteDocument(id string) error {
 	return nil
 }
 
+// SaveDocumentPDF crea o persiste la información validada por el servicio.
 func (ps *PostgresStorage) SaveDocumentPDF(documentID string, data []byte, mediaType string) error {
 	_, err := ps.db.Exec(`
 		UPDATE documents SET pdf_blob = $1, pdf_media_type = $2, pdf_size = $3 WHERE id = $4
@@ -155,6 +163,7 @@ func (ps *PostgresStorage) SaveDocumentPDF(documentID string, data []byte, media
 	return err
 }
 
+// GetDocumentPDFData obtiene la información solicitada sin modificar el estado persistido.
 func (ps *PostgresStorage) GetDocumentPDFData(documentID string) (*models.BinaryAsset, error) {
 	row := ps.db.QueryRow(`SELECT id, pdf_blob, pdf_media_type, pdf_size FROM documents WHERE id = $1`, documentID)
 	asset := &models.BinaryAsset{}
@@ -176,6 +185,7 @@ func (ps *PostgresStorage) GetDocumentPDFData(documentID string) (*models.Binary
 	return asset, nil
 }
 
+// SaveDocumentImage crea o persiste la información validada por el servicio.
 func (ps *PostgresStorage) SaveDocumentImage(image *models.DocumentImage) error {
 	if image.CreatedAt.IsZero() {
 		image.CreatedAt = time.Now()
@@ -199,6 +209,7 @@ func (ps *PostgresStorage) SaveDocumentImage(image *models.DocumentImage) error 
 	return err
 }
 
+// SaveDocumentImageData crea o persiste la información validada por el servicio.
 func (ps *PostgresStorage) SaveDocumentImageData(imageID string, data []byte, mediaType string) error {
 	_, err := ps.db.Exec(`
 		UPDATE document_images SET image_blob = $1, media_type = $2, byte_size = $3 WHERE id = $4
@@ -206,6 +217,7 @@ func (ps *PostgresStorage) SaveDocumentImageData(imageID string, data []byte, me
 	return err
 }
 
+// GetDocumentImage obtiene la información solicitada sin modificar el estado persistido.
 func (ps *PostgresStorage) GetDocumentImage(id string) (*models.DocumentImage, error) {
 	row := ps.db.QueryRow(`
 		SELECT id, document_id, COALESCE(project_key, 'default'), COALESCE(tenant_key, ''), COALESCE(migrated_from_local, false), page_number, image_path, width, height, format, media_type, byte_size, created_at
@@ -214,6 +226,7 @@ func (ps *PostgresStorage) GetDocumentImage(id string) (*models.DocumentImage, e
 	return scanDocumentImage(row)
 }
 
+// GetDocumentImageByPage obtiene la información solicitada sin modificar el estado persistido.
 func (ps *PostgresStorage) GetDocumentImageByPage(documentID string, page int) (*models.DocumentImage, error) {
 	row := ps.db.QueryRow(`
 		SELECT id, document_id, COALESCE(project_key, 'default'), COALESCE(tenant_key, ''), COALESCE(migrated_from_local, false), page_number, image_path, width, height, format, media_type, byte_size, created_at
@@ -222,6 +235,7 @@ func (ps *PostgresStorage) GetDocumentImageByPage(documentID string, page int) (
 	return scanDocumentImage(row)
 }
 
+// GetDocumentImages obtiene la información solicitada sin modificar el estado persistido.
 func (ps *PostgresStorage) GetDocumentImages(documentID string) ([]*models.DocumentImage, error) {
 	rows, err := ps.db.Query(`
 		SELECT id, document_id, COALESCE(project_key, 'default'), COALESCE(tenant_key, ''), COALESCE(migrated_from_local, false), page_number, image_path, width, height, format, media_type, byte_size, created_at
@@ -242,6 +256,7 @@ func (ps *PostgresStorage) GetDocumentImages(documentID string) ([]*models.Docum
 	return images, rows.Err()
 }
 
+// GetDocumentImageData obtiene la información solicitada sin modificar el estado persistido.
 func (ps *PostgresStorage) GetDocumentImageData(id string) (*models.BinaryAsset, error) {
 	row := ps.db.QueryRow(`
 		SELECT id, image_blob, media_type, byte_size FROM document_images WHERE id = $1
@@ -265,6 +280,7 @@ func (ps *PostgresStorage) GetDocumentImageData(id string) (*models.BinaryAsset,
 	return asset, nil
 }
 
+// upsertDocument crea o persiste la información validada por el servicio.
 func (ps *PostgresStorage) upsertDocument(doc *models.PDFDocument) error {
 	if doc.UploadDate.IsZero() {
 		doc.UploadDate = time.Now()
@@ -300,6 +316,7 @@ func (ps *PostgresStorage) upsertDocument(doc *models.PDFDocument) error {
 	return err
 }
 
+// getImagePaths obtiene la información solicitada sin modificar el estado persistido.
 func (ps *PostgresStorage) getImagePaths(documentID string) []string {
 	rows, err := ps.db.Query("SELECT image_path FROM document_images WHERE document_id = $1 AND image_path IS NOT NULL ORDER BY page_number", documentID)
 	if err != nil {
@@ -316,6 +333,7 @@ func (ps *PostgresStorage) getImagePaths(documentID string) []string {
 	return paths
 }
 
+// HasDocumentPDFBlob evalúa la condición indicada sin producir efectos laterales.
 func (ps *PostgresStorage) HasDocumentPDFBlob(documentID string) (bool, error) {
 	row := ps.db.QueryRow("SELECT COALESCE(pdf_size, 0) FROM documents WHERE id = $1", documentID)
 	var pdfSize int64
@@ -328,6 +346,7 @@ func (ps *PostgresStorage) HasDocumentPDFBlob(documentID string) (bool, error) {
 	return pdfSize > 0, nil
 }
 
+// HasImageBlob evalúa la condición indicada sin producir efectos laterales.
 func (ps *PostgresStorage) HasImageBlob(imageID string) (bool, error) {
 	row := ps.db.QueryRow("SELECT COALESCE(byte_size, 0) FROM document_images WHERE id = $1", imageID)
 	var byteSize int64

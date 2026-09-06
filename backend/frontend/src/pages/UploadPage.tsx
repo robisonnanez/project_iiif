@@ -3,6 +3,7 @@ import { api } from "../api";
 import type { AppConfig, Notify, UploadSettings } from "../types";
 import { Alert, Button, Card, FormField, Input, Modal, PageHeader, Select, Spinner } from "../components/ui";
 
+// validate comprueba que los parámetros de conversión estén dentro de límites seguros.
 function validate(settings: UploadSettings): string {
   if (settings.width < 256 || settings.width > 8192) return "El ancho debe estar entre 256 y 8192 px.";
   if (settings.height < 256 || settings.height > 8192) return "El alto debe estar entre 256 y 8192 px.";
@@ -11,6 +12,7 @@ function validate(settings: UploadSettings): string {
   return "";
 }
 
+// UploadPage coordina selección, validación y carga secuencial o masiva de PDF.
 export function UploadPage({ config, onUploaded, notify }: { config: AppConfig | null; onUploaded: () => void; notify: Notify }) {
   const [file, setFile] = useState<File | null>(null);
   const [modal, setModal] = useState(false);
@@ -40,6 +42,7 @@ export function UploadPage({ config, onUploaded, notify }: { config: AppConfig |
   }), [config]);
   const [settings, setSettings] = useState<UploadSettings>(defaults);
 
+  // upload encapsula esta interacción y mantiene coherente el estado de la vista.
   const upload = async () => {
     const validationError = validate(settings);
     if (validationError) return setError(validationError);

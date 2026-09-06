@@ -4,6 +4,7 @@ import { applyMongoURI, mongoURIFromConfig } from "../lib/validation";
 import type { AppConfig, BinaryMode, DBMigrationResult, Engine, OCRLanguageCatalog } from "../types";
 import { Alert, Button, Card, Checkbox, FormField, Input, Modal, PageHeader, Select, Spinner } from "../components/ui";
 
+// ConfigPage administra configuración, migraciones, reinicio e idiomas OCR del servidor.
 export function ConfigPage({ initial, onSaved }: { initial: AppConfig; onSaved: (config: AppConfig) => void }) {
   const [config, setConfig] = useState(initial);
   const [mongoURI, setMongoURI] = useState(() => mongoURIFromConfig(initial.database.mongodb));
@@ -30,6 +31,7 @@ export function ConfigPage({ initial, onSaved }: { initial: AppConfig; onSaved: 
     let cancelled = false;
     let timer = 0;
     let attempts = 0;
+    // check comprueba el estado y comunica cualquier condición inválida.
     const check = async () => {
       try {
         const health = await api.serviceHealth();
@@ -55,10 +57,14 @@ export function ConfigPage({ initial, onSaved }: { initial: AppConfig; onSaved: 
     void api.ocrLanguages().then(setLanguageCatalog).catch((cause) => setLanguageCatalogError(cause instanceof Error ? cause.message : "No se pudieron consultar los idiomas de Tesseract."));
   }, []);
 
+  // setEngine valida y aplica el cambio solicitado.
   const setEngine = (value: Engine) => setConfig((current) => ({ ...current, storage: { ...current.storage, backend: value }, database: { ...current.database, DB_CONNECTION: value } }));
+  // setBinaryMode valida y aplica el cambio solicitado.
   const setBinaryMode = (value: BinaryMode) => setConfig((current) => ({ ...current, binary_storage: { ...current.binary_storage, mode: value }, s3: { ...current.s3, filesystem_disk: value === "s3" ? "s3" : "local" } }));
+  // updateDatabase valida y aplica el cambio solicitado.
   const updateDatabase = (name: string, value: string | boolean) => setConfig((current) => ({ ...current, database: { ...current.database, [engine]: { ...current.database[engine], [name]: value } } }));
 
+  // save valida y aplica el cambio solicitado.
   const save = async () => {
     setBusy(true); setError(""); setMessage("");
     try {
@@ -91,6 +97,7 @@ export function ConfigPage({ initial, onSaved }: { initial: AppConfig; onSaved: 
     setRestartError("");
   }, [restartBusy]);
 
+  // restart ejecuta la operación administrativa y controla sus errores.
   const restart = async () => {
     if (!sudoPassword.trim()) {
       setRestartError("Ingresa la contraseña del servidor para reiniciar el servicio.");
@@ -109,6 +116,7 @@ export function ConfigPage({ initial, onSaved }: { initial: AppConfig; onSaved: 
     } finally { setRestartBusy(false); }
   };
 
+  // runMigrations ejecuta la operación administrativa y controla sus errores.
   const runMigrations = async () => {
     setMigrationBusy(true); setMigrationError("");
     try {
@@ -120,6 +128,7 @@ export function ConfigPage({ initial, onSaved }: { initial: AppConfig; onSaved: 
     } finally { setMigrationBusy(false); }
   };
 
+  // installLanguages valida y aplica el cambio solicitado.
   const installLanguages = async () => {
     if (selectedLanguages.length === 0) return;
     setLanguageInstallBusy(true); setLanguageCatalogError(""); setMessage("");
@@ -248,5 +257,7 @@ const fallbackLanguageOptions = [
   { code: "fra", name: "Francés", installed: true, enabled: true, detection_supported: true },
   { code: "por", name: "Portugués", installed: true, enabled: true, detection_supported: true },
 ];
+// toggleList agrega o retira un valor sin producir duplicados.
 const toggleList = (values: string[], value: string, checked: boolean) => checked ? [...new Set([...values, value])] : values.filter((item) => item !== value);
+// parseCorsOrigins convierte texto multilínea en orígenes únicos y normalizados.
 const parseCorsOrigins = (value: string) => [...new Set(value.split(/\r?\n|,/).map((item) => item.trim()).filter(Boolean))];

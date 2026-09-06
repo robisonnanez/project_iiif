@@ -2,6 +2,8 @@
 
 Servidor Go para convertir PDF en imágenes, almacenar metadatos en MySQL, PostgreSQL o MongoDB y publicar contenido mediante IIIF. Los binarios pueden residir en disco, en la base de datos o en un servicio S3 compatible como RustFS. Incluye dashboard React, migración de históricos y OpenAPI.
 
+Las reglas de contratos JSON, integración continua, artefactos, smoke tests y promoción están documentadas en [Calidad y liberaciones](docs/CALIDAD_Y_LIBERACIONES.md).
+
 ## Arquitectura
 
 ```text

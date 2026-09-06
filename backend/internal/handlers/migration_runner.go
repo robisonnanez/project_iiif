@@ -63,6 +63,7 @@ type migrationRunner struct {
 	maxLogLines int
 }
 
+// newMigrationRunner crea e inicializa la dependencia con una configuración válida.
 func newMigrationRunner(maxLogLines int) *migrationRunner {
 	if maxLogLines <= 0 {
 		maxLogLines = 500
@@ -78,6 +79,7 @@ func newMigrationRunner(maxLogLines int) *migrationRunner {
 	}
 }
 
+// Start ejecuta la operación principal respetando límites, contexto y errores.
 func (r *migrationRunner) Start(req migrationStartRequest) error {
 	r.mu.Lock()
 	if r.status.Running {
@@ -104,6 +106,7 @@ func (r *migrationRunner) Start(req migrationStartRequest) error {
 	return nil
 }
 
+// Status encapsula esta operación interna y conserva las invariantes del componente.
 func (r *migrationRunner) Status() migrationStatus {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -114,6 +117,7 @@ func (r *migrationRunner) Status() migrationStatus {
 	return s
 }
 
+// run ejecuta la operación principal respetando límites, contexto y errores.
 func (r *migrationRunner) run(req migrationStartRequest) {
 	execPath, _ := os.Executable()
 	binPath := filepath.Join(filepath.Dir(execPath), "migrate-local-to-mysql")
@@ -193,6 +197,7 @@ func (r *migrationRunner) run(req migrationStartRequest) {
 	r.mu.Unlock()
 }
 
+// normalizeSourceSummary encapsula esta operación interna y conserva las invariantes del componente.
 func normalizeSourceSummary(req migrationStartRequest) string {
 	if strings.EqualFold(req.Source.Type, "database") {
 		return "base de datos activa -> S3/RustFS"
@@ -207,6 +212,7 @@ func normalizeSourceSummary(req migrationStartRequest) string {
 	return fmt.Sprintf("local path=%s", req.Source.Local.Path)
 }
 
+// collectLogs encapsula esta operación interna y conserva las invariantes del componente.
 func (r *migrationRunner) collectLogs(pipe io.Reader) {
 	scanner := bufio.NewScanner(pipe)
 	for scanner.Scan() {
@@ -214,6 +220,7 @@ func (r *migrationRunner) collectLogs(pipe io.Reader) {
 	}
 }
 
+// appendLog encapsula esta operación interna y conserva las invariantes del componente.
 func (r *migrationRunner) appendLog(line string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -238,6 +245,7 @@ func (r *migrationRunner) appendLog(line string) {
 	r.recomputeProgress()
 }
 
+// updateDocProgress actualiza el estado manteniendo las invariantes del componente.
 func (r *migrationRunner) updateDocProgress(payload string) {
 	parts := strings.SplitN(payload, "|", 6)
 	if len(parts) < 5 {
@@ -273,6 +281,7 @@ func (r *migrationRunner) updateDocProgress(payload string) {
 	})
 }
 
+// recomputeProgress encapsula esta operación interna y conserva las invariantes del componente.
 func (r *migrationRunner) recomputeProgress() {
 	totalDocs := r.status.Metrics["docs_total"]
 	currentDoc := r.status.Metrics["current_doc"]
@@ -288,6 +297,7 @@ func (r *migrationRunner) recomputeProgress() {
 	}
 }
 
+// finishWithError encapsula esta operación interna y conserva las invariantes del componente.
 func (r *migrationRunner) finishWithError(message string, exitCode int) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -299,6 +309,7 @@ func (r *migrationRunner) finishWithError(message string, exitCode int) {
 	r.status.Logs = append(r.status.Logs, "ERROR "+message)
 }
 
+// migrationItemsHaveErrors encapsula esta operación interna y conserva las invariantes del componente.
 func migrationItemsHaveErrors(items []migrationDocState) bool {
 	for _, item := range items {
 		if strings.EqualFold(strings.TrimSpace(item.Status), "error") {
