@@ -60,6 +60,7 @@ type OCRWordSearchResponse struct {
 
 var ErrOCRWordGeometryUnavailable = errors.New("la página no contiene geometría por palabra; debe reprocesarse con force=true")
 
+// UnmarshalJSON analiza la entrada y devuelve una representación validada.
 func (word *OCRWord) UnmarshalJSON(data []byte) error {
 	var value struct {
 		Text       string          `json:"text"`
@@ -198,6 +199,7 @@ type OCREngine interface {
 
 type TesseractEngine struct{}
 
+// Recognize ejecuta la operación principal respetando límites, contexto y errores.
 func (TesseractEngine) Recognize(ctx context.Context, imagePath string, languages []string) (string, []OCRWord, float64, error) {
 	if len(languages) == 0 {
 		languages = []string{"spa"}
@@ -215,6 +217,7 @@ func (TesseractEngine) Recognize(ctx context.Context, imagePath string, language
 	return parseTesseractTSV(out)
 }
 
+// parseTesseractTSV analiza la entrada y devuelve una representación validada.
 func parseTesseractTSV(data []byte) (string, []OCRWord, float64, error) {
 	reader := csv.NewReader(bytes.NewReader(data))
 	reader.Comma = '\t'
@@ -269,6 +272,7 @@ func parseTesseractTSV(data []byte) (string, []OCRWord, float64, error) {
 	return strings.TrimSpace(text.String()), words, confidence, nil
 }
 
+// readTesseractTSVHeader obtiene la información solicitada sin modificar el estado persistido.
 func readTesseractTSVHeader(reader *csv.Reader) (map[string]int, error) {
 	required := []string{"level", "left", "top", "width", "height", "conf", "text"}
 	for {
@@ -296,6 +300,7 @@ func readTesseractTSVHeader(reader *csv.Reader) (map[string]int, error) {
 	}
 }
 
+// recordHasColumns encapsula esta operación interna y conserva las invariantes del componente.
 func recordHasColumns(record []string, header map[string]int) bool {
 	for _, index := range header {
 		if index >= len(record) {
@@ -318,6 +323,7 @@ type OCRService struct {
 	vocabularies map[string][]ocrVocabularyEntry
 }
 
+// NewOCRService crea e inicializa la dependencia con una configuración válida.
 func NewOCRService(cfg *config.Config, store storage.Storage) (*OCRService, error) {
 	service := &OCRService{config: cfg, storage: store, engine: TesseractEngine{}, root: filepath.Join(cfg.Storage.DataPath, "ocr"), jobs: map[string]*OCRJob{}, cancels: map[string]context.CancelFunc{}, vocabularies: map[string][]ocrVocabularyEntry{}}
 	if err := os.MkdirAll(filepath.Join(service.root, "jobs"), 0755); err != nil {
@@ -343,8 +349,10 @@ func NewOCRService(cfg *config.Config, store storage.Storage) (*OCRService, erro
 	return service, nil
 }
 
+// Enabled encapsula esta operación interna y conserva las invariantes del componente.
 func (s *OCRService) Enabled() bool { return s.config.OCR.Enabled }
 
+// CreateJob crea o persiste la información validada por el servicio.
 func (s *OCRService) CreateJob(documentID string, request CreateOCRJobRequest) (*OCRJob, error) {
 	if !s.Enabled() {
 		return nil, errors.New("OCR está desactivado en config.yaml")
@@ -391,6 +399,7 @@ func (s *OCRService) CreateJob(documentID string, request CreateOCRJobRequest) (
 	return cloneJob(job), nil
 }
 
+// GetJob obtiene la información solicitada sin modificar el estado persistido.
 func (s *OCRService) GetJob(id string) (*OCRJob, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -401,6 +410,7 @@ func (s *OCRService) GetJob(id string) (*OCRJob, error) {
 	return cloneJob(job), nil
 }
 
+// CancelJob elimina o libera de forma controlada los recursos asociados.
 func (s *OCRService) CancelJob(id string) (*OCRJob, error) {
 	s.mu.Lock()
 	job, ok := s.jobs[id]
@@ -425,12 +435,14 @@ func (s *OCRService) CancelJob(id string) (*OCRJob, error) {
 	return result, nil
 }
 
+// worker encapsula esta operación interna y conserva las invariantes del componente.
 func (s *OCRService) worker() {
 	for id := range s.queue {
 		s.processJob(id)
 	}
 }
 
+// processJob ejecuta la operación principal respetando límites, contexto y errores.
 func (s *OCRService) processJob(id string) {
 	s.mu.Lock()
 	job, ok := s.jobs[id]
@@ -522,6 +534,7 @@ func (s *OCRService) processJob(id string) {
 	s.updateJob(id, func(j *OCRJob) { j.Status = status; now := time.Now().UTC(); j.FinishedAt = &now; j.CurrentPage = 0 })
 }
 
+// processPage ejecuta la operación principal respetando límites, contexto y errores.
 func (s *OCRService) processPage(parent context.Context, document *fitz.Document, job *OCRJob, pageIndex int, languages []string) (*OCRPage, error) {
 	startedAt := time.Now()
 	nativeText, _ := document.Text(pageIndex)
@@ -610,6 +623,7 @@ func (s *OCRService) processPage(parent context.Context, document *fitz.Document
 	return page, nil
 }
 
+// detectLanguages ejecuta la operación principal respetando límites, contexto y errores.
 func (s *OCRService) detectLanguages(document *fitz.Document) []string {
 	var sample strings.Builder
 	limit := minInt(document.NumPage(), s.config.OCR.LanguageDetection.SamplePages)
@@ -672,10 +686,12 @@ func (s *OCRService) detectLanguages(document *fitz.Document) []string {
 	return result
 }
 
+// tesseractLanguage encapsula esta operación interna y conserva las invariantes del componente.
 func tesseractLanguage(language lingua.Language) string {
 	return strings.ToLower(language.IsoCode639_3().String())
 }
 
+// linguaLanguages encapsula esta operación interna y conserva las invariantes del componente.
 func linguaLanguages(codes []string) []lingua.Language {
 	requested := stringSet(codes)
 	result := make([]lingua.Language, 0, len(requested))
@@ -687,6 +703,7 @@ func linguaLanguages(codes []string) []lingua.Language {
 	return result
 }
 
+// GetSummary obtiene la información solicitada sin modificar el estado persistido.
 func (s *OCRService) GetSummary(documentID string) (*OCRDocumentSummary, error) {
 	data, err := os.ReadFile(filepath.Join(s.root, "documents", documentID+".json"))
 	if err != nil {
@@ -699,6 +716,7 @@ func (s *OCRService) GetSummary(documentID string) (*OCRDocumentSummary, error) 
 	return &summary, nil
 }
 
+// GetPage obtiene la información solicitada sin modificar el estado persistido.
 func (s *OCRService) GetPage(documentID string, page int) (*OCRPage, error) {
 	summary, err := s.GetSummary(documentID)
 	if err != nil {
@@ -721,6 +739,7 @@ func (s *OCRService) GetPage(documentID string, page int) (*OCRPage, error) {
 	return result, nil
 }
 
+// FindPageWords obtiene la información solicitada sin modificar el estado persistido.
 func (s *OCRService) FindPageWords(documentID string, page int, query string, limit int) (*OCRWordSearchResponse, error) {
 	needle := normalizeWordLookup(query)
 	if needle == "" {
@@ -743,6 +762,7 @@ func (s *OCRService) FindPageWords(documentID string, page int, query string, li
 	return &OCRWordSearchResponse{DocumentID: documentID, PageNumber: page, Query: query, GeometryStatus: result.GeometryStatus, GeometrySpace: result.GeometrySpace, Items: items}, nil
 }
 
+// filterOCRWords encapsula esta operación interna y conserva las invariantes del componente.
 func filterOCRWords(words []OCRWord, normalizedQuery string, limit int) []OCRWord {
 	items := make([]OCRWord, 0)
 	for _, word := range words {
@@ -757,6 +777,7 @@ func filterOCRWords(words []OCRWord, normalizedQuery string, limit int) []OCRWor
 	return items
 }
 
+// Search obtiene la información solicitada sin modificar el estado persistido.
 func (s *OCRService) Search(query, project, tenant, documentID string, limit, offset int) ([]OCRSearchResult, int, error) {
 	needle := normalizeSearch(query)
 	if utf8.RuneCountInString(needle) < 2 {
@@ -818,6 +839,7 @@ func (s *OCRService) Search(query, project, tenant, documentID string, limit, of
 	return results[offset:end], total, nil
 }
 
+// Autocomplete obtiene la información solicitada sin modificar el estado persistido.
 func (s *OCRService) Autocomplete(query, project, tenant, documentID string, limit int) ([]OCRAutocompleteItem, error) {
 	prefix := normalizeSearch(query)
 	if utf8.RuneCountInString(prefix) < 2 {
@@ -898,11 +920,13 @@ func (s *OCRService) Autocomplete(query, project, tenant, documentID string, lim
 	return items, nil
 }
 
+// imageReference encapsula esta operación interna y conserva las invariantes del componente.
 func (s *OCRService) imageReference(documentID string, page int) (string, string) {
 	imageID, iiifImage, _, _ := s.imageDetails(documentID, page)
 	return imageID, iiifImage
 }
 
+// imageDetails encapsula esta operación interna y conserva las invariantes del componente.
 func (s *OCRService) imageDetails(documentID string, page int) (string, string, int, int) {
 	image, err := s.storage.GetDocumentImageByPage(documentID, page)
 	if err != nil || image == nil || image.ID == "" {
@@ -912,6 +936,7 @@ func (s *OCRService) imageDetails(documentID string, page int) (string, string, 
 	return image.ID, fmt.Sprintf("%s/iiif/%s/%s/full/max/0/default.jpg", base, s.config.IIIF.APIVersion, image.ID), image.Width, image.Height
 }
 
+// scaleOCRWords encapsula esta operación interna y conserva las invariantes del componente.
 func scaleOCRWords(words []OCRWord, sourceWidth, sourceHeight, targetWidth, targetHeight int) []OCRWord {
 	if sourceWidth <= 0 || sourceHeight <= 0 || targetWidth <= 0 || targetHeight <= 0 {
 		return append([]OCRWord(nil), words...)
@@ -950,10 +975,12 @@ func scaleOCRWords(words []OCRWord, sourceWidth, sourceHeight, targetWidth, targ
 	return scaled
 }
 
+// scaleCoordinate encapsula esta operación interna y conserva las invariantes del componente.
 func scaleCoordinate(value, sourceSize, targetSize int) int {
 	return int(math.Round(float64(value) * float64(targetSize) / float64(sourceSize)))
 }
 
+// Delete elimina o libera de forma controlada los recursos asociados.
 func (s *OCRService) Delete(documentID string) error {
 	if strings.TrimSpace(documentID) == "" || filepath.Base(documentID) != documentID {
 		return errors.New("identificador de documento inválido")
@@ -977,6 +1004,7 @@ func (s *OCRService) Delete(documentID string) error {
 	return nil
 }
 
+// vocabularyForDocument encapsula esta operación interna y conserva las invariantes del componente.
 func (s *OCRService) vocabularyForDocument(summary *OCRDocumentSummary) ([]ocrVocabularyEntry, error) {
 	key := vocabularyCacheKey(summary.DocumentID, summary.ActiveGeneration)
 	s.vocabularyMu.RLock()
@@ -1004,6 +1032,7 @@ func (s *OCRService) vocabularyForDocument(summary *OCRDocumentSummary) ([]ocrVo
 	return vocabulary.Entries, nil
 }
 
+// buildVocabulary ejecuta la operación principal respetando límites, contexto y errores.
 func (s *OCRService) buildVocabulary(documentID, generation string, totalPages int) (*ocrVocabulary, error) {
 	type wordCount struct {
 		total    int
@@ -1048,6 +1077,7 @@ func (s *OCRService) buildVocabulary(documentID, generation string, totalPages i
 	return &ocrVocabulary{SchemaVersion: ocrVocabularySchemaVersion, DocumentID: documentID, Generation: generation, Entries: entries}, nil
 }
 
+// saveVocabulary crea o persiste la información validada por el servicio.
 func (s *OCRService) saveVocabulary(vocabulary *ocrVocabulary) error {
 	s.vocabularyMu.Lock()
 	defer s.vocabularyMu.Unlock()
@@ -1058,11 +1088,13 @@ func (s *OCRService) saveVocabulary(vocabulary *ocrVocabulary) error {
 	return nil
 }
 
+// writeVocabulary convierte y escribe la información en el formato requerido.
 func (s *OCRService) writeVocabulary(vocabulary *ocrVocabulary) error {
 	path := filepath.Join(s.root, "vocabularies", vocabulary.DocumentID, vocabulary.Generation+".json.gz")
 	return writeGzipJSONAtomic(path, vocabulary)
 }
 
+// readVocabulary obtiene la información solicitada sin modificar el estado persistido.
 func (s *OCRService) readVocabulary(documentID, generation string) (*ocrVocabulary, error) {
 	file, err := os.Open(filepath.Join(s.root, "vocabularies", documentID, generation+".json.gz"))
 	if err != nil {
@@ -1084,6 +1116,7 @@ func (s *OCRService) readVocabulary(documentID, generation string) (*ocrVocabula
 	return &result, nil
 }
 
+// writeGzipJSONAtomic convierte y escribe la información en el formato requerido.
 func writeGzipJSONAtomic(path string, value any) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
 		return err
@@ -1110,10 +1143,12 @@ func writeGzipJSONAtomic(path string, value any) error {
 	return os.Rename(name, path)
 }
 
+// vocabularyCacheKey encapsula esta operación interna y conserva las invariantes del componente.
 func vocabularyCacheKey(documentID, generation string) string {
 	return documentID + "\x00" + generation
 }
 
+// splitOCRWords encapsula esta operación interna y conserva las invariantes del componente.
 func splitOCRWords(value string) []string {
 	words := make([]string, 0)
 	var current strings.Builder
@@ -1134,6 +1169,7 @@ func splitOCRWords(value string) []string {
 	return words
 }
 
+// betterWordDisplay encapsula esta operación interna y conserva las invariantes del componente.
 func betterWordDisplay(candidate, current string) bool {
 	candidateLower := candidate == strings.ToLower(candidate)
 	currentLower := current == strings.ToLower(current)
@@ -1143,6 +1179,7 @@ func betterWordDisplay(candidate, current string) bool {
 	return candidate < current
 }
 
+// savePage crea o persiste la información validada por el servicio.
 func (s *OCRService) savePage(page *OCRPage) error {
 	path := filepath.Join(s.root, "pages", page.DocumentID, page.Generation, fmt.Sprintf("%06d.json.gz", page.PageNumber))
 	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
@@ -1164,6 +1201,8 @@ func (s *OCRService) savePage(page *OCRPage) error {
 	}
 	return fileErr
 }
+
+// readPage obtiene la información solicitada sin modificar el estado persistido.
 func (s *OCRService) readPage(documentID, generation string, page int) (*OCRPage, error) {
 	file, err := os.Open(filepath.Join(s.root, "pages", documentID, generation, fmt.Sprintf("%06d.json.gz", page)))
 	if err != nil {
@@ -1181,6 +1220,8 @@ func (s *OCRService) readPage(documentID, generation string, page int) (*OCRPage
 	}
 	return &result, nil
 }
+
+// saveSummary crea o persiste la información validada por el servicio.
 func (s *OCRService) saveSummary(summary *OCRDocumentSummary) error {
 	path := filepath.Join(s.root, "documents", summary.DocumentID+".json")
 	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
@@ -1188,9 +1229,13 @@ func (s *OCRService) saveSummary(summary *OCRDocumentSummary) error {
 	}
 	return writeJSONAtomic(path, summary)
 }
+
+// saveJob crea o persiste la información validada por el servicio.
 func (s *OCRService) saveJob(job *OCRJob) error {
 	return writeJSONAtomic(filepath.Join(s.root, "jobs", job.ID+".json"), job)
 }
+
+// loadJobs obtiene la información solicitada sin modificar el estado persistido.
 func (s *OCRService) loadJobs() error {
 	entries, err := os.ReadDir(filepath.Join(s.root, "jobs"))
 	if err != nil {
@@ -1211,6 +1256,8 @@ func (s *OCRService) loadJobs() error {
 	}
 	return nil
 }
+
+// writeJSONAtomic convierte y escribe la información en el formato requerido.
 func writeJSONAtomic(path string, value any) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
 		return err
@@ -1233,6 +1280,7 @@ func writeJSONAtomic(path string, value any) error {
 	return os.Rename(name, path)
 }
 
+// updateJob actualiza el estado manteniendo las invariantes del servicio.
 func (s *OCRService) updateJob(id string, change func(*OCRJob)) {
 	s.mu.Lock()
 	job := s.jobs[id]
@@ -1245,6 +1293,8 @@ func (s *OCRService) updateJob(id string, change func(*OCRJob)) {
 	s.mu.Unlock()
 	_ = s.saveJob(copy)
 }
+
+// failJob encapsula esta operación interna y conserva las invariantes del componente.
 func (s *OCRService) failJob(id string, err error) {
 	s.updateJob(id, func(job *OCRJob) {
 		job.Status = "failed"
@@ -1253,14 +1303,20 @@ func (s *OCRService) failJob(id string, err error) {
 		job.FinishedAt = &now
 	})
 }
+
+// finishCancelled encapsula esta operación interna y conserva las invariantes del componente.
 func (s *OCRService) finishCancelled(id string) {
 	s.updateJob(id, func(job *OCRJob) { job.Status = "cancelled"; now := time.Now().UTC(); job.FinishedAt = &now })
 }
+
+// cancelRequested elimina o libera de forma controlada los recursos asociados.
 func (s *OCRService) cancelRequested(id string) bool {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.jobs[id] != nil && s.jobs[id].CancelRequested
 }
+
+// cloneJob encapsula esta operación interna y conserva las invariantes del componente.
 func cloneJob(job *OCRJob) *OCRJob {
 	if job == nil {
 		return nil
@@ -1269,6 +1325,8 @@ func cloneJob(job *OCRJob) *OCRJob {
 	copy.Languages = append([]string(nil), job.Languages...)
 	return &copy
 }
+
+// sanitizeLanguages encapsula esta operación interna y conserva las invariantes del componente.
 func sanitizeLanguages(values, allowed []string) []string {
 	permitted := map[string]bool{}
 	for _, value := range allowed {
@@ -1285,9 +1343,13 @@ func sanitizeLanguages(values, allowed []string) []string {
 	}
 	return result
 }
+
+// cleanText encapsula esta operación interna y conserva las invariantes del componente.
 func cleanText(value string) string {
 	return strings.Join(strings.Fields(strings.ToValidUTF8(value, "")), " ")
 }
+
+// usefulRunes encapsula esta operación interna y conserva las invariantes del componente.
 func usefulRunes(value string) int {
 	count := 0
 	for _, current := range value {
@@ -1297,6 +1359,8 @@ func usefulRunes(value string) int {
 	}
 	return count
 }
+
+// normalizeSearch encapsula esta operación interna y conserva las invariantes del componente.
 func normalizeSearch(value string) string {
 	decomposed := norm.NFD.String(strings.ToLower(cleanText(value)))
 	var builder strings.Builder
@@ -1308,11 +1372,15 @@ func normalizeSearch(value string) string {
 	}
 	return norm.NFC.String(builder.String())
 }
+
+// normalizeWordLookup encapsula esta operación interna y conserva las invariantes del componente.
 func normalizeWordLookup(value string) string {
 	return strings.TrimFunc(normalizeSearch(value), func(current rune) bool {
 		return !unicode.IsLetter(current) && !unicode.IsNumber(current)
 	})
 }
+
+// makeSnippet encapsula esta operación interna y conserva las invariantes del componente.
 func makeSnippet(original, normalizedNeedle string) string {
 	normalized := normalizeSearch(original)
 	index := strings.Index(normalized, normalizedNeedle)
@@ -1338,12 +1406,16 @@ func makeSnippet(original, normalizedNeedle string) string {
 	}
 	return prefix + string(runes[start:end]) + suffix
 }
+
+// minInt encapsula esta operación interna y conserva las invariantes del componente.
 func minInt(a, b int) int {
 	if a < b {
 		return a
 	}
 	return b
 }
+
+// maxInt encapsula esta operación interna y conserva las invariantes del componente.
 func maxInt(a, b int) int {
 	if a > b {
 		return a

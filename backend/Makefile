@@ -1,15 +1,20 @@
 BINARY_NAME=iiif-server
 MAIN_FILE=main.go
+VERSION ?= 1.0.0-dev
+COMMIT ?= $(shell git rev-parse HEAD 2>/dev/null || printf unknown)
+BUILD_DATE ?= $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
+BUILDINFO = iiif-pdf-server/internal/buildinfo
+LD_FLAGS = -X '$(BUILDINFO).Version=$(VERSION)' -X '$(BUILDINFO).Commit=$(COMMIT)' -X '$(BUILDINFO).BuildDate=$(BUILD_DATE)'
 
 .PHONY: build run clean test deps
 
 # Compilar el proyecto
 build:
-	go build -o $(BINARY_NAME) $(MAIN_FILE)
+	go build -ldflags="$(LD_FLAGS)" -o $(BINARY_NAME) $(MAIN_FILE)
 
 # Compilar para producción
 build-prod:
-	CGO_ENABLED=1 go build -ldflags="-s -w" -o $(BINARY_NAME) $(MAIN_FILE)
+	CGO_ENABLED=1 go build -ldflags="-s -w $(LD_FLAGS)" -o $(BINARY_NAME) $(MAIN_FILE)
 
 # Ejecutar en modo desarrollo
 run:

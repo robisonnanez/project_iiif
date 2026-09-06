@@ -1,5 +1,17 @@
 basePath: /
 definitions:
+  buildinfo.Info:
+    properties:
+      build_date:
+        example: "2026-09-06T15:56:00Z"
+        type: string
+      commit:
+        example: 9e0befef0bce9e200349ac2a5b86c231e5d02d29
+        type: string
+      version:
+        example: 1.1.0
+        type: string
+    type: object
   config.OCRConfig:
     properties:
       artifacts:
@@ -703,12 +715,14 @@ definitions:
   services.OCRLanguageCatalog:
     properties:
       available:
+        description: Siempre se serializa como arreglo, incluso cuando está vacío.
         items:
           $ref: '#/definitions/services.OCRLanguage'
         type: array
       installation_enabled:
         type: boolean
       installed:
+        description: Siempre se serializa como arreglo, incluso cuando está vacío.
         items:
           $ref: '#/definitions/services.OCRLanguage'
         type: array
@@ -1119,7 +1133,8 @@ paths:
   /api/v1/admin/ocr/languages:
     get:
       description: Obtiene los idiomas reconocidos por Tesseract y los paquetes APT
-        disponibles para instalar. Requiere sesión administrativa.
+        disponibles para instalar. installed y available siempre son arreglos, incluso
+        cuando no contienen elementos. Requiere sesión administrativa.
       produces:
       - application/json
       responses:
@@ -1701,6 +1716,20 @@ paths:
       summary: Buscar texto OCR por proyecto, tenant o documento
       tags:
       - OCR
+  /api/v1/version:
+    get:
+      description: Devuelve versión, commit y fecha de compilación incorporados al
+        binario.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/buildinfo.Info'
+      summary: Consultar versión desplegada
+      tags:
+      - Sistema
   /auth/login:
     post:
       consumes:

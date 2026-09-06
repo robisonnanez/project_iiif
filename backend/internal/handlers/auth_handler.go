@@ -21,6 +21,7 @@ type AuthHandler struct {
 	config *config.Config
 }
 
+// NewAuthHandler crea e inicializa la dependencia con una configuración válida.
 func NewAuthHandler(config *config.Config) *AuthHandler {
 	return &AuthHandler{config: config}
 }
@@ -36,25 +37,26 @@ func NewAuthHandler(config *config.Config) *AuthHandler {
 // @Failure 400 {object} errorResponse
 // @Failure 401 {object} errorResponse
 // @Router /auth/login [post]
+// Login encapsula esta operación interna y conserva las invariantes del componente.
 func (h *AuthHandler) Login(c *gin.Context) {
 	var payload struct {
 		Username string `json:"username"`
 		Password string `json:"password"`
 	}
 	if err := c.ShouldBindJSON(&payload); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "datos invalidos"})
+		writeJSON(c, http.StatusBadRequest, gin.H{"error": "datos invalidos"})
 		return
 	}
 
 	if payload.Username != h.config.Frontend.Username || payload.Password != h.config.Frontend.Password {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "usuario o password incorrectos"})
+		writeJSON(c, http.StatusUnauthorized, gin.H{"error": "usuario o password incorrectos"})
 		return
 	}
 
 	expiresAt := time.Now().Add(12 * time.Hour).Unix()
 	token := h.signSession(payload.Username, expiresAt)
 	c.SetCookie(sessionCookieName, token, 12*3600, "/", "", false, true)
-	c.JSON(http.StatusOK, gin.H{"authenticated": true})
+	writeJSON(c, http.StatusOK, gin.H{"authenticated": true})
 }
 
 // Logout godoc
@@ -64,9 +66,10 @@ func (h *AuthHandler) Login(c *gin.Context) {
 // @Produce json
 // @Success 200 {object} sessionResponse
 // @Router /auth/logout [post]
+// Logout encapsula esta operación interna y conserva las invariantes del componente.
 func (h *AuthHandler) Logout(c *gin.Context) {
 	c.SetCookie(sessionCookieName, "", -1, "/", "", false, true)
-	c.JSON(http.StatusOK, gin.H{"authenticated": false})
+	writeJSON(c, http.StatusOK, gin.H{"authenticated": false})
 }
 
 // Me godoc
@@ -76,11 +79,13 @@ func (h *AuthHandler) Logout(c *gin.Context) {
 // @Produce json
 // @Success 200 {object} sessionResponse
 // @Router /auth/me [get]
+// Me encapsula esta operación interna y conserva las invariantes del componente.
 func (h *AuthHandler) Me(c *gin.Context) {
 	username, ok := h.sessionUsername(c)
-	c.JSON(http.StatusOK, gin.H{"authenticated": ok, "username": username})
+	writeJSON(c, http.StatusOK, gin.H{"authenticated": ok, "username": username})
 }
 
+// RequireSession encapsula esta operación interna y conserva las invariantes del componente.
 func (h *AuthHandler) RequireSession() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if !h.config.Frontend.RequireAuth {
@@ -96,6 +101,7 @@ func (h *AuthHandler) RequireSession() gin.HandlerFunc {
 	}
 }
 
+// sessionUsername encapsula esta operación interna y conserva las invariantes del componente.
 func (h *AuthHandler) sessionUsername(c *gin.Context) (string, bool) {
 	token, err := c.Cookie(sessionCookieName)
 	if err != nil {
@@ -121,10 +127,12 @@ func (h *AuthHandler) sessionUsername(c *gin.Context) (string, bool) {
 	return username, true
 }
 
+// signSession encapsula esta operación interna y conserva las invariantes del componente.
 func (h *AuthHandler) signSession(username string, expiresAt int64) string {
 	return fmt.Sprintf("%s:%d:%s", username, expiresAt, h.signature(username, expiresAt))
 }
 
+// signature encapsula esta operación interna y conserva las invariantes del componente.
 func (h *AuthHandler) signature(username string, expiresAt int64) string {
 	key := h.config.Frontend.Password
 	if key == "" {

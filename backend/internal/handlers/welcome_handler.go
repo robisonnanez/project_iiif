@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strings"
 
+	"iiif-pdf-server/internal/buildinfo"
 	"iiif-pdf-server/internal/config"
 
 	"github.com/gin-gonic/gin"
@@ -15,12 +16,14 @@ type WelcomeHandler struct {
 	config *config.Config
 }
 
+// NewWelcomeHandler crea el controlador de portada, errores y diagnóstico público.
 func NewWelcomeHandler(config *config.Config) *WelcomeHandler {
 	return &WelcomeHandler{
 		config: config,
 	}
 }
 
+// Welcome renderiza la portada pública y el acceso al panel administrativo.
 func (h *WelcomeHandler) Welcome(c *gin.Context) {
 	loginButton := ""
 	docsButton := `<a class="button secondary" href="/swagger/index.html" target="_blank" rel="noopener noreferrer">Documentación API</a>`
@@ -107,18 +110,22 @@ func (h *WelcomeHandler) Welcome(c *gin.Context) {
 	c.String(http.StatusOK, htmlBody)
 }
 
+// ErrorPage renderiza una respuesta HTML segura para errores de navegación.
 func (h *WelcomeHandler) ErrorPage(c *gin.Context, status int, title, message string) {
 	body := fmt.Sprintf(`<!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>%s · Project IIIF</title><style>*{box-sizing:border-box}body{margin:0;min-height:100vh;display:grid;place-items:center;padding:24px;color:#26303d;background:#f4f6f9;font-family:Inter,system-ui,-apple-system,"Segoe UI",sans-serif}.error{width:min(560px,100%%);text-align:center}.art{position:relative;width:250px;height:210px;margin:0 auto 22px}.triangle{position:absolute;left:32px;top:22px;width:0;height:0;border-left:92px solid transparent;border-right:92px solid transparent;border-bottom:165px solid #e75b4f;filter:drop-shadow(0 18px 25px rgba(231,91,79,.2))}.mark{position:absolute;z-index:2;left:118px;top:91px;color:white;font-size:72px;font-weight:300;line-height:1}.circle{position:absolute;right:2px;top:5px;width:72px;height:72px;border:15px solid #dfe8ff;border-radius:50%%}.small{position:absolute;left:8px;top:58px;width:0;height:0;border-left:28px solid transparent;border-right:28px solid transparent;border-top:52px solid #aeb4bc;transform:rotate(12deg)}h1{margin:0 0 10px;font-size:clamp(2.2rem,7vw,4rem);letter-spacing:-.05em}p{margin:0 auto 28px;color:#718096;line-height:1.6}.code{display:block;margin-bottom:8px;color:#e75b4f;font-size:.78rem;font-weight:850;letter-spacing:.15em}.button{min-height:46px;display:inline-flex;align-items:center;padding:0 20px;border-radius:12px;color:white;background:#08766c;text-decoration:none;font-weight:750}</style></head><body><main class="error"><div class="art"><span class="circle"></span><span class="small"></span><span class="triangle"></span><span class="mark">!</span></div><span class="code">ERROR %d</span><h1>%s</h1><p>%s</p><a class="button" href="/">Volver al inicio</a></main></body></html>`, html.EscapeString(title), status, html.EscapeString(title), html.EscapeString(message))
 	c.Header("Content-Type", "text/html; charset=utf-8")
 	c.String(status, body)
 }
 
+// HealthCheck informa la salud operativa y la revisión exacta del servicio.
 func (h *WelcomeHandler) HealthCheck(c *gin.Context) {
 	s3Enabled := strings.EqualFold(h.config.FilesystemDisk, "s3") || strings.EqualFold(h.config.BinaryStorage.Mode, "s3")
-	c.JSON(http.StatusOK, gin.H{
+	build := buildinfo.Current()
+	writeJSON(c, http.StatusOK, gin.H{
 		"status":  "ok",
 		"message": "Servidor IIIF PDF funcionando correctamente",
-		"version": "1.0.0",
+		"version": build.Version,
+		"build":   build,
 		"port":    h.config.Server.Port,
 		"mode":    h.config.Server.Mode,
 		"frontend": gin.H{
@@ -143,4 +150,16 @@ func (h *WelcomeHandler) HealthCheck(c *gin.Context) {
 			"info":             "/iiif/3/{identifier}/info.json",
 		},
 	})
+}
+
+// Version devuelve metadatos mínimos para correlacionar backend, frontend y OpenAPI.
+// @Summary Consultar versión desplegada
+// @Description Devuelve versión, commit y fecha de compilación incorporados al binario.
+// @Tags Sistema
+// @Produce json
+// @Success 200 {object} buildinfo.Info
+// @Router /api/v1/version [get]
+// Version encapsula esta operación interna y conserva las invariantes del componente.
+func (h *WelcomeHandler) Version(c *gin.Context) {
+	writeJSON(c, http.StatusOK, buildinfo.Current())
 }

@@ -1,3 +1,4 @@
+// normalizePageSelection valida, ordena y compacta una selección textual de páginas.
 export function normalizePageSelection(value: string, totalPages: number): string {
   const trimmed = value.trim();
   if (!trimmed) throw new Error("Escribe páginas, por ejemplo 1-5,8,10-12.");
@@ -16,6 +17,7 @@ export function normalizePageSelection(value: string, totalPages: number): strin
   return [...selected].sort((a, b) => a - b).join(",");
 }
 
+// mongoURIFromConfig construye una URI MongoDB escapando credenciales y parámetros.
 export function mongoURIFromConfig(mongo: {
   host: string; port: string; user: string; password: string; database: string; auth_source: string; direct_connection: boolean; server_selection_timeout_ms: number;
 }): string {
@@ -27,6 +29,7 @@ export function mongoURIFromConfig(mongo: {
   return `mongodb://${credentials}${mongo.host || "localhost"}:${mongo.port || "27017"}/${mongo.database || "project_iiif"}?${params}`;
 }
 
+// applyMongoURI analiza una URI MongoDB y sincroniza sus valores con la configuración editable.
 export function applyMongoURI<T extends { database: { mongodb: Record<string, unknown>; DB_HOST: string; DB_PORT: string; DB_DATABASE: string; DB_USERNAME: string; DB_PASSWORD: string } }>(config: T, uri: string): T {
   const parsed = new URL(uri);
   if (parsed.protocol !== "mongodb:") throw new Error("La URI debe comenzar con mongodb://");

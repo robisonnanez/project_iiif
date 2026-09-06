@@ -12,6 +12,7 @@ import (
 	"iiif-pdf-server/internal/storage"
 )
 
+// main inicia el ejecutable y coordina sus dependencias.
 func main() {
 	configPath := strings.TrimSpace(os.Getenv("CONFIG_PATH"))
 	if configPath == "" {

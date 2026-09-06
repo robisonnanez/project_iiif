@@ -4,6 +4,7 @@ import type { AppConfig, DocumentRecord, NoticeTone, Notify } from "./types";
 import { Alert, Badge, Button, Card, EmptyState, Modal, PageHeader, Spinner } from "./components/ui";
 import { ManifestDialog } from "./components/ManifestDialog";
 import { ToastStack, type ToastNotice } from "./components/ToastStack";
+import { RouteErrorBoundary } from "./components/RouteErrorBoundary";
 import { ConfigPage } from "./pages/ConfigPage";
 import { ImagesPage } from "./pages/ImagesPage";
 import { MigrationPage } from "./pages/MigrationPage";
@@ -28,11 +29,13 @@ export const browserNavigation = {
   toHome: () => window.location.replace("/"),
 };
 
+// viewFromPath traduce la URL del navegador a la sección activa del panel.
 function viewFromPath(): View {
   if (location.pathname === "/dashboard/imagenes") return "iiif";
   return nav.find((item) => location.pathname === item.path)?.view ?? "dashboard";
 }
 
+// App coordina navegación, sesión, datos compartidos y aislamiento de errores por vista.
 export default function App() {
   const [view, setView] = useState<View>(viewFromPath);
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -81,14 +84,17 @@ export default function App() {
     return () => window.clearInterval(timer);
   }, [refreshDocuments]);
   useEffect(() => {
+    // pop encapsula esta interacción y mantiene coherente el estado de la vista.
     const pop = () => setView(viewFromPath());
     addEventListener("popstate", pop);
     return () => removeEventListener("popstate", pop);
   }, []);
 
+  // navigate abre el recurso o la vista seleccionada.
   const navigate = (item: (typeof nav)[number]) => {
     history.pushState({}, "", item.path); setView(item.view); setMobileOpen(false);
   };
+  // logout ejecuta la operación administrativa y controla sus errores.
   const logout = async () => {
     try { await api.logout(); }
     finally { browserNavigation.toHome(); }
@@ -108,7 +114,7 @@ export default function App() {
     </header>
     <main id="main-content" className="main-content">
       {error && <Alert tone="danger">{error}</Alert>}
-      {loading && documents.length === 0 ? <div className="loading-page"><Spinner label="Cargando dashboard" /></div> : <>
+      {loading && documents.length === 0 ? <div className="loading-page"><Spinner label="Cargando dashboard" /></div> : <RouteErrorBoundary routeKey={view}>
         {view === "dashboard" && <Dashboard documents={documents} completed={completed} config={config} onRefresh={refresh} />}
         {view === "documents" && <DocumentsPage documents={documents} onRefresh={refresh} notify={notify} />}
         {view === "upload" && <UploadPage config={config} onUploaded={() => void refreshDocuments(false)} notify={notify} />}
@@ -117,12 +123,13 @@ export default function App() {
         {view === "migration" && <MigrationPage config={config} notify={notify} />}
         {view === "projects" && (config ? <ProjectsPage config={config} onSaved={setConfig} notify={notify} /> : <Alert tone="danger">No se pudo cargar la configuración de proyectos.</Alert>)}
         {view === "config" && (config ? <ConfigPage initial={config} onSaved={setConfig} /> : <Alert tone="danger">No se pudo cargar la configuración.</Alert>)}
-      </>}
+      </RouteErrorBoundary>}
     </main>
     <ToastStack notices={notices} dismiss={dismissNotice} />
   </div>;
 }
 
+// Dashboard resume el estado de documentos, conversiones y almacenamiento activo.
 function Dashboard({ documents, completed, config, onRefresh }: { documents: DocumentRecord[]; completed: number; config: AppConfig | null; onRefresh: () => void }) {
   return <>
     <PageHeader eyebrow="Resumen" title="Dashboard" description="Estado operativo del servidor PDF e IIIF." actions={<Button variant="secondary" onClick={onRefresh}>Actualizar</Button>} />
@@ -136,11 +143,13 @@ function Dashboard({ documents, completed, config, onRefresh }: { documents: Doc
   </>;
 }
 
+// DocumentsPage administra consulta, manifiestos y eliminación confirmada de documentos.
 function DocumentsPage({ documents, onRefresh, notify }: { documents: DocumentRecord[]; onRefresh: () => void | Promise<void>; notify: Notify }) {
   const [selected, setSelected] = useState<DocumentRecord | null>(null);
   const [deleting, setDeleting] = useState<DocumentRecord | null>(null);
   const [deleteBusy, setDeleteBusy] = useState(false);
   const [deleteError, setDeleteError] = useState("");
+  // remove elimina el elemento después de validar la acción.
   const remove = async () => {
     if (!deleting) return;
     setDeleteBusy(true); setDeleteError("");
@@ -167,6 +176,7 @@ function DocumentsPage({ documents, onRefresh, notify }: { documents: DocumentRe
   </>;
 }
 
+// DocumentTable representa documentos en formato completo o compacto con acciones opcionales.
 function DocumentTable({ documents, onManifest, onDelete, compact = false }: { documents: DocumentRecord[]; onManifest?: (document: DocumentRecord) => void; onDelete?: (document: DocumentRecord) => void; compact?: boolean }) {
   if (!documents.length) return <EmptyState title="Sin documentos" description="Sube un PDF para comenzar." />;
   return <div className="table-wrap"><table><thead><tr><th>Documento</th><th>Estado</th><th>Páginas</th>{!compact && <th>Origen</th>}{(onManifest || onDelete) && <th><span className="sr-only">Acciones</span></th>}</tr></thead><tbody>{documents.map((document) => <tr key={document.id}><td><strong>{document.name}</strong><small className="table-secondary">{document.id}</small></td><td><Badge tone={document.status === "completed" ? "success" : document.status === "error" ? "danger" : "warning"}>{document.status}</Badge></td><td>{document.convertedPages} / {document.totalPages}</td>{!compact && <td>{document.migratedFromLocal ? "Migrado" : "Subido"}</td>}{(onManifest || onDelete) && <td><div className="button-row">{onManifest && <Button variant="secondary" disabled={document.status !== "completed"} onClick={() => onManifest(document)}>Generar manifiesto</Button>}{onDelete && <Button variant="danger" onClick={() => onDelete(document)}>Eliminar</Button>}</div></td>}</tr>)}</tbody></table></div>;

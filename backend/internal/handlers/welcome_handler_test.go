@@ -1,10 +1,12 @@
 package handlers
 
 import (
+	"encoding/json"
 	"net/http/httptest"
 	"strings"
 	"testing"
 
+	"iiif-pdf-server/internal/buildinfo"
 	"iiif-pdf-server/internal/config"
 
 	"github.com/gin-gonic/gin"
@@ -34,6 +36,26 @@ func TestWelcomeUsesModernLoginWithoutConfigReference(t *testing.T) {
 	}
 	if strings.Contains(body, "config.yaml") {
 		t.Fatal("login must not expose config.yaml implementation detail")
+	}
+}
+
+func TestVersionReturnsInjectedBuildMetadata(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	previousVersion, previousCommit, previousDate := buildinfo.Version, buildinfo.Commit, buildinfo.BuildDate
+	t.Cleanup(func() {
+		buildinfo.Version, buildinfo.Commit, buildinfo.BuildDate = previousVersion, previousCommit, previousDate
+	})
+	buildinfo.Version, buildinfo.Commit, buildinfo.BuildDate = "1.2.3", "abc123", "2026-09-06T12:00:00Z"
+
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	NewWelcomeHandler(config.Default()).Version(ctx)
+	var response buildinfo.Info
+	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+		t.Fatal(err)
+	}
+	if recorder.Code != 200 || response.Commit != "abc123" || response.BuildDate == "" {
+		t.Fatalf("status=%d response=%#v", recorder.Code, response)
 	}
 }
 

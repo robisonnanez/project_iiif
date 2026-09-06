@@ -26,6 +26,7 @@ type MongoStorage struct {
 	basePath    string
 }
 
+// NewMongoStorage crea e inicializa la dependencia con una configuración válida.
 func NewMongoStorage(cfg *config.Config) (*MongoStorage, error) {
 	mongoCfg := cfg.Database.MongoDB
 	uri := fmt.Sprintf("mongodb://%s:%s", mongoCfg.Host, mongoCfg.Port)
@@ -82,14 +83,17 @@ func NewMongoStorage(cfg *config.Config) (*MongoStorage, error) {
 	}, nil
 }
 
+// SaveDocument crea o persiste la información validada por el servicio.
 func (ms *MongoStorage) SaveDocument(doc *models.PDFDocument) error {
 	return ms.upsertDocument(doc)
 }
 
+// UpdateDocument actualiza el estado manteniendo las invariantes del componente.
 func (ms *MongoStorage) UpdateDocument(doc *models.PDFDocument) error {
 	return ms.upsertDocument(doc)
 }
 
+// GetDocument obtiene la información solicitada sin modificar el estado persistido.
 func (ms *MongoStorage) GetDocument(id string) (*models.PDFDocument, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -104,10 +108,12 @@ func (ms *MongoStorage) GetDocument(id string) (*models.PDFDocument, error) {
 	return doc, nil
 }
 
+// GetAllDocuments obtiene la información solicitada sin modificar el estado persistido.
 func (ms *MongoStorage) GetAllDocuments() ([]*models.PDFDocument, error) {
 	return ms.GetDocumentsByScope("", "")
 }
 
+// GetDocumentsByScope obtiene la información solicitada sin modificar el estado persistido.
 func (ms *MongoStorage) GetDocumentsByScope(projectKey, tenantKey string) ([]*models.PDFDocument, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -139,6 +145,7 @@ func (ms *MongoStorage) GetDocumentsByScope(projectKey, tenantKey string) ([]*mo
 	return docs, cursor.Err()
 }
 
+// DeleteDocument elimina o libera de forma controlada los recursos asociados.
 func (ms *MongoStorage) DeleteDocument(id string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
@@ -169,6 +176,7 @@ func (ms *MongoStorage) DeleteDocument(id string) error {
 	return err
 }
 
+// SaveDocumentPDF crea o persiste la información validada por el servicio.
 func (ms *MongoStorage) SaveDocumentPDF(documentID string, data []byte, mediaType string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -201,6 +209,7 @@ func (ms *MongoStorage) SaveDocumentPDF(documentID string, data []byte, mediaTyp
 	return err
 }
 
+// GetDocumentPDFData obtiene la información solicitada sin modificar el estado persistido.
 func (ms *MongoStorage) GetDocumentPDFData(documentID string) (*models.BinaryAsset, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -220,6 +229,7 @@ func (ms *MongoStorage) GetDocumentPDFData(documentID string) (*models.BinaryAss
 	return &models.BinaryAsset{ID: documentID, Data: buffer.Bytes(), MediaType: "application/pdf", ByteSize: int64(buffer.Len())}, nil
 }
 
+// SaveDocumentImage crea o persiste la información validada por el servicio.
 func (ms *MongoStorage) SaveDocumentImage(image *models.DocumentImage) error {
 	if image.CreatedAt.IsZero() {
 		image.CreatedAt = time.Now()
@@ -255,6 +265,7 @@ func (ms *MongoStorage) SaveDocumentImage(image *models.DocumentImage) error {
 	return err
 }
 
+// SaveDocumentImageData crea o persiste la información validada por el servicio.
 func (ms *MongoStorage) SaveDocumentImageData(imageID string, data []byte, mediaType string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -287,6 +298,7 @@ func (ms *MongoStorage) SaveDocumentImageData(imageID string, data []byte, media
 	return err
 }
 
+// GetDocumentImage obtiene la información solicitada sin modificar el estado persistido.
 func (ms *MongoStorage) GetDocumentImage(id string) (*models.DocumentImage, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -298,6 +310,7 @@ func (ms *MongoStorage) GetDocumentImage(id string) (*models.DocumentImage, erro
 	return decodeImage(raw), nil
 }
 
+// GetDocumentImageByPage obtiene la información solicitada sin modificar el estado persistido.
 func (ms *MongoStorage) GetDocumentImageByPage(documentID string, page int) (*models.DocumentImage, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -309,6 +322,7 @@ func (ms *MongoStorage) GetDocumentImageByPage(documentID string, page int) (*mo
 	return decodeImage(raw), nil
 }
 
+// GetDocumentImages obtiene la información solicitada sin modificar el estado persistido.
 func (ms *MongoStorage) GetDocumentImages(documentID string) ([]*models.DocumentImage, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -330,6 +344,7 @@ func (ms *MongoStorage) GetDocumentImages(documentID string) ([]*models.Document
 	return images, cursor.Err()
 }
 
+// GetDocumentImageData obtiene la información solicitada sin modificar el estado persistido.
 func (ms *MongoStorage) GetDocumentImageData(id string) (*models.BinaryAsset, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -366,6 +381,7 @@ func (ms *MongoStorage) GetDocumentImageData(id string) (*models.BinaryAsset, er
 	}, nil
 }
 
+// HasDocumentPDFBlob evalúa la condición indicada sin producir efectos laterales.
 func (ms *MongoStorage) HasDocumentPDFBlob(documentID string) (bool, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -373,6 +389,7 @@ func (ms *MongoStorage) HasDocumentPDFBlob(documentID string) (bool, error) {
 	return !fileID.IsZero(), err
 }
 
+// HasImageBlob evalúa la condición indicada sin producir efectos laterales.
 func (ms *MongoStorage) HasImageBlob(imageID string) (bool, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -380,6 +397,7 @@ func (ms *MongoStorage) HasImageBlob(imageID string) (bool, error) {
 	return !fileID.IsZero(), err
 }
 
+// upsertDocument crea o persiste la información validada por el servicio.
 func (ms *MongoStorage) upsertDocument(doc *models.PDFDocument) error {
 	if doc.UploadDate.IsZero() {
 		doc.UploadDate = time.Now()
@@ -421,6 +439,7 @@ func (ms *MongoStorage) upsertDocument(doc *models.PDFDocument) error {
 	return err
 }
 
+// getImagePaths obtiene la información solicitada sin modificar el estado persistido.
 func (ms *MongoStorage) getImagePaths(documentID string) []string {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -446,6 +465,7 @@ func (ms *MongoStorage) getImagePaths(documentID string) []string {
 	return paths
 }
 
+// documentBlobID encapsula esta operación interna y conserva las invariantes del componente.
 func (ms *MongoStorage) documentBlobID(ctx context.Context, documentID string) (primitive.ObjectID, error) {
 	var raw bson.M
 	if err := ms.documents.FindOne(ctx, bson.M{"id": documentID}, options.FindOne().SetProjection(bson.M{"pdf_gridfs_file_id": 1})).Decode(&raw); err != nil {
@@ -457,6 +477,7 @@ func (ms *MongoStorage) documentBlobID(ctx context.Context, documentID string) (
 	return objectIDFromMap(raw, "pdf_gridfs_file_id"), nil
 }
 
+// imageBlobID encapsula esta operación interna y conserva las invariantes del componente.
 func (ms *MongoStorage) imageBlobID(ctx context.Context, imageID string) (primitive.ObjectID, error) {
 	var raw bson.M
 	if err := ms.images.FindOne(ctx, bson.M{"id": imageID}, options.FindOne().SetProjection(bson.M{"image_gridfs_file_id": 1})).Decode(&raw); err != nil {
@@ -468,6 +489,7 @@ func (ms *MongoStorage) imageBlobID(ctx context.Context, imageID string) (primit
 	return objectIDFromMap(raw, "image_gridfs_file_id"), nil
 }
 
+// decodeDocument analiza la entrada y devuelve una representación validada.
 func decodeDocument(raw bson.M) *models.PDFDocument {
 	doc := &models.PDFDocument{
 		ID:                stringValue(raw, "id"),
@@ -495,6 +517,7 @@ func decodeDocument(raw bson.M) *models.PDFDocument {
 	return doc
 }
 
+// outlineValue encapsula esta operación interna y conserva las invariantes del componente.
 func outlineValue(raw bson.M, key string) []models.PDFOutlineItem {
 	values, ok := raw[key].(primitive.A)
 	if !ok {
@@ -519,6 +542,7 @@ func outlineValue(raw bson.M, key string) []models.PDFOutlineItem {
 	return result
 }
 
+// decodeImage analiza la entrada y devuelve una representación validada.
 func decodeImage(raw bson.M) *models.DocumentImage {
 	image := &models.DocumentImage{
 		ID:                stringValue(raw, "id"),
@@ -541,6 +565,7 @@ func decodeImage(raw bson.M) *models.DocumentImage {
 	return image
 }
 
+// stringValue encapsula esta operación interna y conserva las invariantes del componente.
 func stringValue(raw bson.M, key string) string {
 	if value, ok := raw[key].(string); ok {
 		return value
@@ -548,6 +573,7 @@ func stringValue(raw bson.M, key string) string {
 	return ""
 }
 
+// boolValue encapsula esta operación interna y conserva las invariantes del componente.
 func boolValue(raw bson.M, key string) bool {
 	if value, ok := raw[key].(bool); ok {
 		return value
@@ -555,6 +581,7 @@ func boolValue(raw bson.M, key string) bool {
 	return false
 }
 
+// intValue encapsula esta operación interna y conserva las invariantes del componente.
 func intValue(raw bson.M, key string) int {
 	switch value := raw[key].(type) {
 	case int:
@@ -569,6 +596,7 @@ func intValue(raw bson.M, key string) int {
 	return 0
 }
 
+// int64Value encapsula esta operación interna y conserva las invariantes del componente.
 func int64Value(raw bson.M, key string) int64 {
 	switch value := raw[key].(type) {
 	case int:
@@ -583,6 +611,7 @@ func int64Value(raw bson.M, key string) int64 {
 	return 0
 }
 
+// timeValue encapsula esta operación interna y conserva las invariantes del componente.
 func timeValue(raw bson.M, key string) time.Time {
 	if value, ok := raw[key].(primitive.DateTime); ok {
 		return value.Time()
@@ -593,6 +622,7 @@ func timeValue(raw bson.M, key string) time.Time {
 	return time.Time{}
 }
 
+// objectIDFromMap encapsula esta operación interna y conserva las invariantes del componente.
 func objectIDFromMap(raw bson.M, key string) primitive.ObjectID {
 	if value, ok := raw[key].(primitive.ObjectID); ok {
 		return value

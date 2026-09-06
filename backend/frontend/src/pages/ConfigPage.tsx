@@ -4,6 +4,7 @@ import { applyMongoURI, mongoURIFromConfig } from "../lib/validation";
 import type { AppConfig, BinaryMode, DBMigrationResult, Engine, OCRLanguageCatalog } from "../types";
 import { Alert, Button, Card, Checkbox, FormField, Input, Modal, PageHeader, Select, Spinner } from "../components/ui";
 
+// ConfigPage administra configuración, migraciones, reinicio e idiomas OCR del servidor.
 export function ConfigPage({ initial, onSaved }: { initial: AppConfig; onSaved: (config: AppConfig) => void }) {
   const [config, setConfig] = useState(initial);
   const [mongoURI, setMongoURI] = useState(() => mongoURIFromConfig(initial.database.mongodb));
@@ -30,6 +31,7 @@ export function ConfigPage({ initial, onSaved }: { initial: AppConfig; onSaved: 
     let cancelled = false;
     let timer = 0;
     let attempts = 0;
+    // check comprueba el estado y comunica cualquier condición inválida.
     const check = async () => {
       try {
         const health = await api.serviceHealth();
@@ -55,10 +57,14 @@ export function ConfigPage({ initial, onSaved }: { initial: AppConfig; onSaved: 
     void api.ocrLanguages().then(setLanguageCatalog).catch((cause) => setLanguageCatalogError(cause instanceof Error ? cause.message : "No se pudieron consultar los idiomas de Tesseract."));
   }, []);
 
+  // setEngine valida y aplica el cambio solicitado.
   const setEngine = (value: Engine) => setConfig((current) => ({ ...current, storage: { ...current.storage, backend: value }, database: { ...current.database, DB_CONNECTION: value } }));
+  // setBinaryMode valida y aplica el cambio solicitado.
   const setBinaryMode = (value: BinaryMode) => setConfig((current) => ({ ...current, binary_storage: { ...current.binary_storage, mode: value }, s3: { ...current.s3, filesystem_disk: value === "s3" ? "s3" : "local" } }));
+  // updateDatabase valida y aplica el cambio solicitado.
   const updateDatabase = (name: string, value: string | boolean) => setConfig((current) => ({ ...current, database: { ...current.database, [engine]: { ...current.database[engine], [name]: value } } }));
 
+  // save valida y aplica el cambio solicitado.
   const save = async () => {
     setBusy(true); setError(""); setMessage("");
     try {
@@ -91,6 +97,7 @@ export function ConfigPage({ initial, onSaved }: { initial: AppConfig; onSaved: 
     setRestartError("");
   }, [restartBusy]);
 
+  // restart ejecuta la operación administrativa y controla sus errores.
   const restart = async () => {
     if (!sudoPassword.trim()) {
       setRestartError("Ingresa la contraseña del servidor para reiniciar el servicio.");
@@ -109,6 +116,7 @@ export function ConfigPage({ initial, onSaved }: { initial: AppConfig; onSaved: 
     } finally { setRestartBusy(false); }
   };
 
+  // runMigrations ejecuta la operación administrativa y controla sus errores.
   const runMigrations = async () => {
     setMigrationBusy(true); setMigrationError("");
     try {
@@ -120,6 +128,7 @@ export function ConfigPage({ initial, onSaved }: { initial: AppConfig; onSaved: 
     } finally { setMigrationBusy(false); }
   };
 
+  // installLanguages valida y aplica el cambio solicitado.
   const installLanguages = async () => {
     if (selectedLanguages.length === 0) return;
     setLanguageInstallBusy(true); setLanguageCatalogError(""); setMessage("");
@@ -132,7 +141,8 @@ export function ConfigPage({ initial, onSaved }: { initial: AppConfig; onSaved: 
     } finally { setLanguageInstallBusy(false); }
   };
 
-  const installedLanguages = languageCatalog?.installed ?? fallbackLanguageOptions;
+  const installedLanguages = Array.isArray(languageCatalog?.installed) ? languageCatalog.installed : fallbackLanguageOptions;
+  const availableLanguages = Array.isArray(languageCatalog?.available) ? languageCatalog.available : [];
 
   return <>
     <PageHeader eyebrow="Administración" title="Configuración" description="Metadatos, almacenamiento, conversión, OCR y seguridad desde una sola vista." actions={<Button onClick={save} disabled={busy}>{busy ? <Spinner label="Guardando" /> : "Guardar cambios"}</Button>} />
@@ -206,8 +216,8 @@ export function ConfigPage({ initial, onSaved }: { initial: AppConfig; onSaved: 
         <div className="config-subsection"><h3>Idiomas por instalar</h3><p>Paquetes disponibles en APT que Tesseract todavía no reconoce. Instalar un idioma no lo habilita automáticamente.</p>
           {languageCatalogError && <Alert tone="danger">{languageCatalogError}</Alert>}
           {!languageCatalog && !languageCatalogError && <Spinner label="Consultando idiomas del sistema" />}
-          {languageCatalog && <><div className="language-options language-options-scroll">{languageCatalog.available.map((language) => <Checkbox key={language.code} label={`${language.name} (${language.code})`} checked={selectedLanguages.includes(language.code)} disabled={languageInstallBusy} onChange={(event) => setSelectedLanguages(toggleList(selectedLanguages, language.code, event.target.checked))} />)}</div>
-            <div className="tenant-sync-row"><Button type="button" variant="secondary" disabled={languageInstallBusy || selectedLanguages.length === 0 || !languageCatalog.installation_enabled} onClick={() => void installLanguages()}>{languageInstallBusy ? <Spinner label="Instalando idiomas" /> : "Instalar seleccionados"}</Button><span>{languageCatalog.installation_enabled ? `${languageCatalog.available.length} idioma(s) disponibles` : "Instalación deshabilitada en config.yaml"}</span></div></>}
+          {languageCatalog && <>{availableLanguages.length > 0 ? <div className="language-options language-options-scroll">{availableLanguages.map((language) => <Checkbox key={language.code} label={`${language.name} (${language.code})`} checked={selectedLanguages.includes(language.code)} disabled={languageInstallBusy} onChange={(event) => setSelectedLanguages(toggleList(selectedLanguages, language.code, event.target.checked))} />)}</div> : <p>No hay idiomas pendientes por instalar.</p>}
+            <div className="tenant-sync-row"><Button type="button" variant="secondary" disabled={languageInstallBusy || selectedLanguages.length === 0 || !languageCatalog.installation_enabled} onClick={() => void installLanguages()}>{languageInstallBusy ? <Spinner label="Instalando idiomas" /> : "Instalar seleccionados"}</Button><span>{languageCatalog.installation_enabled ? `${availableLanguages.length} idioma(s) disponibles` : "Instalación deshabilitada en config.yaml"}</span></div></>}
         </div>
         <div className="form-grid two-columns config-subsection">
           <Checkbox label="Detectar idioma automáticamente" checked={config.ocr.language_detection.enabled} onChange={(event) => setConfig({ ...config, ocr: { ...config.ocr, language_detection: { ...config.ocr.language_detection, enabled: event.target.checked } } })} />
@@ -247,5 +257,7 @@ const fallbackLanguageOptions = [
   { code: "fra", name: "Francés", installed: true, enabled: true, detection_supported: true },
   { code: "por", name: "Portugués", installed: true, enabled: true, detection_supported: true },
 ];
+// toggleList agrega o retira un valor sin producir duplicados.
 const toggleList = (values: string[], value: string, checked: boolean) => checked ? [...new Set([...values, value])] : values.filter((item) => item !== value);
+// parseCorsOrigins convierte texto multilínea en orígenes únicos y normalizados.
 const parseCorsOrigins = (value: string) => [...new Set(value.split(/\r?\n|,/).map((item) => item.trim()).filter(Boolean))];

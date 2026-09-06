@@ -16,6 +16,7 @@ type OCRHandler struct {
 	languageService *services.OCRLanguageService
 }
 
+// NewOCRHandler crea e inicializa la dependencia con una configuración válida.
 func NewOCRHandler(service *services.OCRService, languageServices ...*services.OCRLanguageService) *OCRHandler {
 	handler := &OCRHandler{service: service}
 	if len(languageServices) > 0 {
@@ -26,7 +27,7 @@ func NewOCRHandler(service *services.OCRService, languageServices ...*services.O
 
 // GetLanguages godoc
 // @Summary Consultar idiomas OCR del sistema
-// @Description Obtiene los idiomas reconocidos por Tesseract y los paquetes APT disponibles para instalar. Requiere sesión administrativa.
+// @Description Obtiene los idiomas reconocidos por Tesseract y los paquetes APT disponibles para instalar. installed y available siempre son arreglos, incluso cuando no contienen elementos. Requiere sesión administrativa.
 // @Tags OCR
 // @Security SessionCookie
 // @Produce json
@@ -34,17 +35,18 @@ func NewOCRHandler(service *services.OCRService, languageServices ...*services.O
 // @Failure 401 {object} errorResponse
 // @Failure 503 {object} errorResponse
 // @Router /api/v1/admin/ocr/languages [get]
+// GetLanguages obtiene la información solicitada sin modificar el estado persistido.
 func (h *OCRHandler) GetLanguages(c *gin.Context) {
 	if h.languageService == nil {
-		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "administración de idiomas OCR no disponible"})
+		writeJSON(c, http.StatusServiceUnavailable, gin.H{"error": "administración de idiomas OCR no disponible"})
 		return
 	}
 	catalog, err := h.languageService.Catalog(c.Request.Context())
 	if err != nil {
-		c.JSON(http.StatusServiceUnavailable, gin.H{"error": err.Error()})
+		writeJSON(c, http.StatusServiceUnavailable, gin.H{"error": err.Error()})
 		return
 	}
-	c.JSON(http.StatusOK, catalog)
+	writeJSON(c, http.StatusOK, catalog)
 }
 
 // InstallLanguages godoc
@@ -61,14 +63,15 @@ func (h *OCRHandler) GetLanguages(c *gin.Context) {
 // @Failure 409 {object} errorResponse
 // @Failure 503 {object} errorResponse
 // @Router /api/v1/admin/ocr/languages/install [post]
+// InstallLanguages ejecuta la operación principal respetando límites, contexto y errores.
 func (h *OCRHandler) InstallLanguages(c *gin.Context) {
 	if h.languageService == nil {
-		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "administración de idiomas OCR no disponible"})
+		writeJSON(c, http.StatusServiceUnavailable, gin.H{"error": "administración de idiomas OCR no disponible"})
 		return
 	}
 	var request services.InstallOCRLanguagesRequest
 	if err := c.ShouldBindJSON(&request); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "selección de idiomas inválida"})
+		writeJSON(c, http.StatusBadRequest, gin.H{"error": "selección de idiomas inválida"})
 		return
 	}
 	result, err := h.languageService.Install(c.Request.Context(), request.Languages)
@@ -79,10 +82,10 @@ func (h *OCRHandler) InstallLanguages(c *gin.Context) {
 		} else if strings.Contains(err.Error(), "deshabilitada") || strings.Contains(err.Error(), "no se pudo instalar") {
 			status = http.StatusServiceUnavailable
 		}
-		c.JSON(status, gin.H{"error": err.Error()})
+		writeJSON(c, status, gin.H{"error": err.Error()})
 		return
 	}
-	c.JSON(http.StatusOK, result)
+	writeJSON(c, http.StatusOK, result)
 }
 
 // CreateJob godoc
@@ -99,10 +102,11 @@ func (h *OCRHandler) InstallLanguages(c *gin.Context) {
 // @Failure 401 {object} errorResponse
 // @Failure 503 {object} errorResponse
 // @Router /api/v1/admin/documents/{id}/ocr/jobs [post]
+// CreateJob crea o persiste la información validada.
 func (h *OCRHandler) CreateJob(c *gin.Context) {
 	var request services.CreateOCRJobRequest
 	if err := c.ShouldBindJSON(&request); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "payload OCR inválido"})
+		writeJSON(c, http.StatusBadRequest, gin.H{"error": "payload OCR inválido"})
 		return
 	}
 	job, err := h.service.CreateJob(c.Param("id"), request)
@@ -111,10 +115,10 @@ func (h *OCRHandler) CreateJob(c *gin.Context) {
 		if !h.service.Enabled() {
 			status = http.StatusServiceUnavailable
 		}
-		c.JSON(status, gin.H{"error": err.Error()})
+		writeJSON(c, status, gin.H{"error": err.Error()})
 		return
 	}
-	c.JSON(http.StatusAccepted, job)
+	writeJSON(c, http.StatusAccepted, job)
 }
 
 // GetJob godoc
@@ -126,13 +130,14 @@ func (h *OCRHandler) CreateJob(c *gin.Context) {
 // @Success 200 {object} services.OCRJob
 // @Failure 404 {object} errorResponse
 // @Router /api/v1/admin/ocr/jobs/{job_id} [get]
+// GetJob obtiene la información solicitada sin modificar el estado persistido.
 func (h *OCRHandler) GetJob(c *gin.Context) {
 	job, err := h.service.GetJob(c.Param("job_id"))
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		writeJSON(c, http.StatusNotFound, gin.H{"error": err.Error()})
 		return
 	}
-	c.JSON(http.StatusOK, job)
+	writeJSON(c, http.StatusOK, job)
 }
 
 // CancelJob godoc
@@ -144,13 +149,14 @@ func (h *OCRHandler) GetJob(c *gin.Context) {
 // @Success 200 {object} services.OCRJob
 // @Failure 404 {object} errorResponse
 // @Router /api/v1/admin/ocr/jobs/{job_id}/cancel [post]
+// CancelJob elimina o libera de forma controlada los recursos asociados.
 func (h *OCRHandler) CancelJob(c *gin.Context) {
 	job, err := h.service.CancelJob(c.Param("job_id"))
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		writeJSON(c, http.StatusNotFound, gin.H{"error": err.Error()})
 		return
 	}
-	c.JSON(http.StatusOK, job)
+	writeJSON(c, http.StatusOK, job)
 }
 
 // GetSummary godoc
@@ -161,13 +167,14 @@ func (h *OCRHandler) CancelJob(c *gin.Context) {
 // @Success 200 {object} services.OCRDocumentSummary
 // @Failure 404 {object} errorResponse
 // @Router /api/v1/documents/{id}/ocr [get]
+// GetSummary obtiene la información solicitada sin modificar el estado persistido.
 func (h *OCRHandler) GetSummary(c *gin.Context) {
 	summary, err := h.service.GetSummary(c.Param("id"))
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		writeJSON(c, http.StatusNotFound, gin.H{"error": err.Error()})
 		return
 	}
-	c.JSON(http.StatusOK, summary)
+	writeJSON(c, http.StatusOK, summary)
 }
 
 // GetPage godoc
@@ -181,18 +188,19 @@ func (h *OCRHandler) GetSummary(c *gin.Context) {
 // @Failure 400 {object} errorResponse
 // @Failure 404 {object} errorResponse
 // @Router /api/v1/documents/{id}/ocr/pages/{page} [get]
+// GetPage obtiene la información solicitada sin modificar el estado persistido.
 func (h *OCRHandler) GetPage(c *gin.Context) {
 	page, err := strconv.Atoi(c.Param("page"))
 	if err != nil || page < 1 {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "page debe ser mayor a cero"})
+		writeJSON(c, http.StatusBadRequest, gin.H{"error": "page debe ser mayor a cero"})
 		return
 	}
 	result, err := h.service.GetPage(c.Param("id"), page)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "página OCR no encontrada"})
+		writeJSON(c, http.StatusNotFound, gin.H{"error": "página OCR no encontrada"})
 		return
 	}
-	c.JSON(http.StatusOK, result)
+	writeJSON(c, http.StatusOK, result)
 }
 
 // FindPageWords godoc
@@ -209,10 +217,11 @@ func (h *OCRHandler) GetPage(c *gin.Context) {
 // @Failure 404 {object} errorResponse
 // @Failure 409 {object} errorResponse
 // @Router /api/v1/documents/{id}/ocr/pages/{page}/words [get]
+// FindPageWords obtiene la información solicitada sin modificar el estado persistido.
 func (h *OCRHandler) FindPageWords(c *gin.Context) {
 	page, err := strconv.Atoi(c.Param("page"))
 	if err != nil || page < 1 {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "page debe ser mayor a cero"})
+		writeJSON(c, http.StatusBadRequest, gin.H{"error": "page debe ser mayor a cero"})
 		return
 	}
 	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "100"))
@@ -224,10 +233,10 @@ func (h *OCRHandler) FindPageWords(c *gin.Context) {
 		} else if !strings.Contains(err.Error(), "q debe") {
 			status = http.StatusNotFound
 		}
-		c.JSON(status, gin.H{"error": err.Error()})
+		writeJSON(c, status, gin.H{"error": err.Error()})
 		return
 	}
-	c.JSON(http.StatusOK, result)
+	writeJSON(c, http.StatusOK, result)
 }
 
 // SearchDocument godoc
@@ -241,6 +250,7 @@ func (h *OCRHandler) FindPageWords(c *gin.Context) {
 // @Success 200 {object} map[string]interface{}
 // @Failure 400 {object} errorResponse
 // @Router /api/v1/documents/{id}/ocr/search [get]
+// SearchDocument obtiene la información solicitada sin modificar el estado persistido.
 func (h *OCRHandler) SearchDocument(c *gin.Context) { h.search(c, c.Param("id")) }
 
 // Search godoc
@@ -256,7 +266,10 @@ func (h *OCRHandler) SearchDocument(c *gin.Context) { h.search(c, c.Param("id"))
 // @Success 200 {object} map[string]interface{}
 // @Failure 400 {object} errorResponse
 // @Router /api/v1/ocr/search [get]
+// Search obtiene la información solicitada sin modificar el estado persistido.
 func (h *OCRHandler) Search(c *gin.Context) { h.search(c, strings.TrimSpace(c.Query("document_id"))) }
+
+// search obtiene la información solicitada sin modificar el estado persistido.
 func (h *OCRHandler) search(c *gin.Context, documentID string) {
 	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "20"))
 	offset, _ := strconv.Atoi(c.DefaultQuery("offset", "0"))
@@ -271,10 +284,10 @@ func (h *OCRHandler) search(c *gin.Context, documentID string) {
 	}
 	results, total, err := h.service.Search(c.Query("q"), strings.TrimSpace(c.Query("project")), strings.TrimSpace(c.Query("tenant")), documentID, limit, offset)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		writeJSON(c, http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"results": results, "total": total, "limit": limit, "offset": offset})
+	writeJSON(c, http.StatusOK, gin.H{"results": results, "total": total, "limit": limit, "offset": offset})
 }
 
 // AutocompleteDocument godoc
@@ -288,6 +301,7 @@ func (h *OCRHandler) search(c *gin.Context, documentID string) {
 // @Success 200 {object} services.OCRAutocompleteResponse
 // @Failure 400 {object} errorResponse
 // @Router /api/v1/documents/{id}/ocr/autocomplete [get]
+// AutocompleteDocument obtiene la información solicitada sin modificar el estado persistido.
 func (h *OCRHandler) AutocompleteDocument(c *gin.Context) { h.autocomplete(c, c.Param("id")) }
 
 // Autocomplete godoc
@@ -303,10 +317,12 @@ func (h *OCRHandler) AutocompleteDocument(c *gin.Context) { h.autocomplete(c, c.
 // @Success 200 {object} services.OCRAutocompleteResponse
 // @Failure 400 {object} errorResponse
 // @Router /api/v1/ocr/autocomplete [get]
+// Autocomplete obtiene la información solicitada sin modificar el estado persistido.
 func (h *OCRHandler) Autocomplete(c *gin.Context) {
 	h.autocomplete(c, strings.TrimSpace(c.Query("document_id")))
 }
 
+// autocomplete obtiene la información solicitada sin modificar el estado persistido.
 func (h *OCRHandler) autocomplete(c *gin.Context, documentID string) {
 	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "10"))
 	if limit < 1 {
@@ -318,15 +334,16 @@ func (h *OCRHandler) autocomplete(c *gin.Context, documentID string) {
 	query := strings.TrimSpace(c.Query("q"))
 	items, err := h.service.Autocomplete(query, strings.TrimSpace(c.Query("project")), strings.TrimSpace(c.Query("tenant")), documentID, limit)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		writeJSON(c, http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-	c.JSON(http.StatusOK, services.OCRAutocompleteResponse{Query: query, Items: items})
+	writeJSON(c, http.StatusOK, services.OCRAutocompleteResponse{Query: query, Items: items})
 }
 
+// Delete elimina o libera de forma controlada los recursos asociados.
 func (h *OCRHandler) Delete(c *gin.Context) {
 	if err := h.service.Delete(c.Param("id")); err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		writeJSON(c, http.StatusNotFound, gin.H{"error": err.Error()})
 		return
 	}
 	c.Status(http.StatusNoContent)

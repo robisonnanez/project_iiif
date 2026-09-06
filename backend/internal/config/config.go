@@ -194,6 +194,7 @@ type ProjectConfig struct {
 	TenantsTokenConfigured bool     `yaml:"-" json:"tenants_token_configured,omitempty"`
 }
 
+// Load obtiene la información solicitada sin modificar el estado persistido.
 func Load(filename string) (*Config, error) {
 	data, err := os.ReadFile(filename)
 	if err != nil {
@@ -212,6 +213,7 @@ func Load(filename string) (*Config, error) {
 	return &config, nil
 }
 
+// applyEnvironment actualiza el estado manteniendo las invariantes del componente.
 func applyEnvironment(config *Config) {
 	stringValues := []struct {
 		name   string
@@ -244,6 +246,7 @@ func applyEnvironment(config *Config) {
 	}
 }
 
+// Save crea o persiste la información validada por el servicio.
 func Save(filename string, config *Config) error {
 	applyDefaults(config)
 	data, err := yaml.Marshal(config)
@@ -272,6 +275,7 @@ func Save(filename string, config *Config) error {
 	return os.Rename(tempName, filename)
 }
 
+// resolvedPath encapsula esta operación interna y conserva las invariantes del componente.
 func resolvedPath(filename string) string {
 	absolute, err := filepath.Abs(filename)
 	if err != nil {
@@ -284,10 +288,12 @@ func resolvedPath(filename string) string {
 	return resolved
 }
 
+// ApplyDefaults actualiza el estado manteniendo las invariantes del componente.
 func (config *Config) ApplyDefaults() {
 	applyDefaults(config)
 }
 
+// applyDefaults actualiza el estado manteniendo las invariantes del componente.
 func applyDefaults(config *Config) {
 	defaults := Default()
 	if config.OCR.DefaultMode == "" {
@@ -542,6 +548,7 @@ func applyDefaults(config *Config) {
 	}
 }
 
+// Default encapsula esta operación interna y conserva las invariantes del componente.
 func Default() *Config {
 	cfg := &Config{
 		Server: struct {
@@ -805,6 +812,7 @@ func Default() *Config {
 	return cfg
 }
 
+// ResolveScope encapsula esta operación interna y conserva las invariantes del componente.
 func (config *Config) ResolveScope(project, tenant string) (*models.Scope, error) {
 	project = strings.TrimSpace(project)
 	tenant = strings.TrimSpace(tenant)
@@ -838,6 +846,7 @@ func (config *Config) ResolveScope(project, tenant string) (*models.Scope, error
 	return &models.Scope{ProjectKey: project, TenantKey: tenant}, nil
 }
 
+// ProjectByKey encapsula esta operación interna y conserva las invariantes del componente.
 func (config *Config) ProjectByKey(key string) (ProjectConfig, bool) {
 	for _, item := range config.Projects.Items {
 		if strings.EqualFold(item.Key, key) {
@@ -847,6 +856,7 @@ func (config *Config) ProjectByKey(key string) (ProjectConfig, bool) {
 	return ProjectConfig{}, false
 }
 
+// hasTenant evalúa la condición indicada sin producir efectos laterales.
 func hasTenant(project ProjectConfig, tenant string) bool {
 	for _, item := range project.Tenants {
 		if strings.EqualFold(item, tenant) {
@@ -856,6 +866,7 @@ func hasTenant(project ProjectConfig, tenant string) bool {
 	return false
 }
 
+// normalizedEngine encapsula esta operación interna y conserva las invariantes del componente.
 func normalizedEngine(value string) string {
 	switch strings.ToLower(strings.TrimSpace(value)) {
 	case "postgresql":

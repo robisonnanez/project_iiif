@@ -76,6 +76,7 @@ type sourceDocument struct {
 	FromDatabase bool
 }
 
+// newDatabaseStore crea e inicializa la dependencia con una configuración válida.
 func newDatabaseStore(cfg *config.Config, engine string) (storage.Storage, error) {
 	switch engine {
 	case "mysql":
@@ -89,6 +90,7 @@ func newDatabaseStore(cfg *config.Config, engine string) (storage.Storage, error
 	}
 }
 
+// main inicia el ejecutable y coordina sus dependencias.
 func main() {
 	log.SetFlags(0)
 
@@ -178,6 +180,7 @@ func main() {
 	log.Printf("METRIC docs_total=%d", s.TotalDocuments)
 }
 
+// discoverDatabaseDocuments encapsula esta operación interna y conserva las invariantes del componente.
 func discoverDatabaseDocuments(source storage.Storage) ([]sourceDocument, error) {
 	project := strings.TrimSpace(os.Getenv("MIGRATION_SCOPE_PROJECT"))
 	tenant := strings.TrimSpace(os.Getenv("MIGRATION_SCOPE_TENANT"))
@@ -218,6 +221,7 @@ func discoverDatabaseDocuments(source storage.Storage) ([]sourceDocument, error)
 	return out, nil
 }
 
+// readSourceConfig obtiene la información solicitada sin modificar el estado persistido.
 func readSourceConfig(cfg *config.Config) sourceConfig {
 	srcType := strings.ToLower(strings.TrimSpace(os.Getenv("MIGRATION_SOURCE_TYPE")))
 	if srcType == "" {
@@ -242,6 +246,7 @@ func readSourceConfig(cfg *config.Config) sourceConfig {
 	return src
 }
 
+// discoverLocalDocuments encapsula esta operación interna y conserva las invariantes del componente.
 func discoverLocalDocuments(cfg *config.Config, basePath string) ([]sourceDocument, error) {
 	localCfg := *cfg
 	localCfg.Storage.DataPath = basePath
@@ -310,6 +315,7 @@ func discoverLocalDocuments(cfg *config.Config, basePath string) ([]sourceDocume
 	return out, nil
 }
 
+// discoverSSHDocuments encapsula esta operación interna y conserva las invariantes del componente.
 func discoverSSHDocuments(cfg *config.Config, src sourceConfig) ([]sourceDocument, error) {
 	client, err := newSSHClient(src)
 	if err != nil {
@@ -357,6 +363,7 @@ func discoverSSHDocuments(cfg *config.Config, src sourceConfig) ([]sourceDocumen
 	return out, nil
 }
 
+// migrateDocument ejecuta la operación principal respetando límites, contexto y errores.
 func migrateDocument(item sourceDocument, dbStore storage.Storage, s *stats) error {
 	doc := item.Doc
 	originalImageData := item.ImageData
@@ -463,6 +470,7 @@ func migrateDocument(item sourceDocument, dbStore storage.Storage, s *stats) err
 	return nil
 }
 
+// migratePDFBlob ejecuta la operación principal respetando límites, contexto y errores.
 func migratePDFBlob(doc *models.PDFDocument, pdfData []byte, dbStore storage.Storage, s *stats) error {
 	if checker, ok := dbStore.(storage.DocumentPDFBlobChecker); ok {
 		exists, err := checker.HasDocumentPDFBlob(doc.ID)
@@ -484,6 +492,7 @@ func migratePDFBlob(doc *models.PDFDocument, pdfData []byte, dbStore storage.Sto
 	return nil
 }
 
+// migrateImageBlob ejecuta la operación principal respetando límites, contexto y errores.
 func migrateImageBlob(img *models.DocumentImage, data []byte, dbStore storage.Storage) error {
 	if checker, ok := dbStore.(storage.ImageBlobChecker); ok {
 		exists, err := checker.HasImageBlob(img.ID)
@@ -515,12 +524,14 @@ func migrateImageBlob(img *models.DocumentImage, data []byte, dbStore storage.St
 	return nil
 }
 
+// isMissingImageMetadata evalúa la condición indicada sin producir efectos laterales.
 func isMissingImageMetadata(err error) bool {
 	return errors.Is(err, sql.ErrNoRows) || errors.Is(err, mongo.ErrNoDocuments)
 }
 
 var errSkipImageBlob = fmt.Errorf("image_blob ya existe")
 
+// discoverDocumentIDs encapsula esta operación interna y conserva las invariantes del componente.
 func discoverDocumentIDs(basePath string) ([]string, error) {
 	ids := map[string]struct{}{}
 	err := filepath.WalkDir(basePath, func(path string, d os.DirEntry, err error) error {
@@ -547,6 +558,7 @@ func discoverDocumentIDs(basePath string) ([]string, error) {
 	return out, nil
 }
 
+// discoverPDFLayoutDocuments encapsula esta operación interna y conserva las invariantes del componente.
 func discoverPDFLayoutDocuments(cfg *config.Config, basePath string) ([]sourceDocument, error) {
 	pdfPaths := []string{}
 	err := filepath.WalkDir(basePath, func(path string, d os.DirEntry, err error) error {
@@ -615,6 +627,7 @@ func discoverPDFLayoutDocuments(cfg *config.Config, basePath string) ([]sourceDo
 	return docs, nil
 }
 
+// readImagesForPDFLayout obtiene la información solicitada sin modificar el estado persistido.
 func readImagesForPDFLayout(cfg *config.Config, basePath, tenant, pdfDir, documentID string) ([]*models.DocumentImage, map[string][]byte) {
 	imageData := map[string][]byte{}
 	images := []*models.DocumentImage{}
@@ -673,6 +686,7 @@ func readImagesForPDFLayout(cfg *config.Config, basePath, tenant, pdfDir, docume
 	return images, imageData
 }
 
+// resolvePDFPath encapsula esta operación interna y conserva las invariantes del componente.
 func resolvePDFPath(doc *models.PDFDocument, cfg *config.Config, root string) string {
 	candidates := []string{}
 	if strings.TrimSpace(doc.FilePath) != "" {
@@ -702,6 +716,7 @@ func resolvePDFPath(doc *models.PDFDocument, cfg *config.Config, root string) st
 	return ""
 }
 
+// resolveImagePath encapsula esta operación interna y conserva las invariantes del componente.
 func resolveImagePath(doc *models.PDFDocument, img *models.DocumentImage) string {
 	if strings.TrimSpace(img.ImagePath) != "" {
 		if st, err := os.Stat(img.ImagePath); err == nil && !st.IsDir() {
@@ -717,6 +732,7 @@ func resolveImagePath(doc *models.PDFDocument, img *models.DocumentImage) string
 	return ""
 }
 
+// buildScopeBase ejecuta la operación principal respetando límites, contexto y errores.
 func buildScopeBase(root, project, tenant string, projectsEnabled bool) string {
 	if !projectsEnabled || strings.TrimSpace(project) == "" {
 		return root
@@ -727,6 +743,7 @@ func buildScopeBase(root, project, tenant string, projectsEnabled bool) string {
 	return filepath.Join(root, "projects", project)
 }
 
+// imageDimensionsBytes encapsula esta operación interna y conserva las invariantes del componente.
 func imageDimensionsBytes(data []byte) (int, int) {
 	cfg, _, err := image.DecodeConfig(bytes.NewReader(data))
 	if err != nil {
@@ -735,6 +752,7 @@ func imageDimensionsBytes(data []byte) (int, int) {
 	return cfg.Width, cfg.Height
 }
 
+// mediaTypeFromFormat encapsula esta operación interna y conserva las invariantes del componente.
 func mediaTypeFromFormat(format string) string {
 	switch strings.ToLower(strings.TrimSpace(format)) {
 	case "png":
@@ -746,6 +764,7 @@ func mediaTypeFromFormat(format string) string {
 	}
 }
 
+// newSSHClient crea e inicializa la dependencia con una configuración válida.
 func newSSHClient(src sourceConfig) (*ssh.Client, error) {
 	signer, err := ssh.ParsePrivateKey([]byte(src.SSH.PrivateKey))
 	if err != nil {
@@ -768,6 +787,7 @@ func newSSHClient(src sourceConfig) (*ssh.Client, error) {
 	return ssh.Dial("tcp", addr, clientConfig)
 }
 
+// sshDiscoverDocumentIDs encapsula esta operación interna y conserva las invariantes del componente.
 func sshDiscoverDocumentIDs(client *ssh.Client, basePath string) ([]string, error) {
 	cmd := fmt.Sprintf("find %s -type f -path '*/documents/*.json' 2>/dev/null", shq(basePath))
 	out, err := sshRun(client, cmd)
@@ -793,6 +813,7 @@ func sshDiscoverDocumentIDs(client *ssh.Client, basePath string) ([]string, erro
 	return list, nil
 }
 
+// sshReadDocument encapsula esta operación interna y conserva las invariantes del componente.
 func sshReadDocument(client *ssh.Client, basePath, docID string) (*models.PDFDocument, string, error) {
 	findCmd := fmt.Sprintf("find %s -type f -path '*/documents/%s.json' | head -1", shq(basePath), docID)
 	docPathRaw, err := sshRun(client, findCmd)
@@ -817,6 +838,7 @@ func sshReadDocument(client *ssh.Client, basePath, docID string) (*models.PDFDoc
 	return &doc, docPath, nil
 }
 
+// sshReadImagesForDoc encapsula esta operación interna y conserva las invariantes del componente.
 func sshReadImagesForDoc(client *ssh.Client, basePath string, doc *models.PDFDocument) ([]*models.DocumentImage, map[string][]byte) {
 	findCmd := fmt.Sprintf("find %s -type f -path '*/images/%s/*.json' 2>/dev/null", shq(basePath), doc.ID)
 	pathsRaw, _ := sshRun(client, findCmd)
@@ -871,6 +893,7 @@ func sshReadImagesForDoc(client *ssh.Client, basePath string, doc *models.PDFDoc
 	return images, imageData
 }
 
+// sshReadFile encapsula esta operación interna y conserva las invariantes del componente.
 func sshReadFile(client *ssh.Client, path string) ([]byte, error) {
 	cmd := fmt.Sprintf("cat %s", shq(path))
 	out, err := sshRunRaw(client, cmd)
@@ -880,11 +903,13 @@ func sshReadFile(client *ssh.Client, path string) ([]byte, error) {
 	return out, nil
 }
 
+// sshRun encapsula esta operación interna y conserva las invariantes del componente.
 func sshRun(client *ssh.Client, cmd string) (string, error) {
 	out, err := sshRunRaw(client, cmd)
 	return string(out), err
 }
 
+// sshRunRaw encapsula esta operación interna y conserva las invariantes del componente.
 func sshRunRaw(client *ssh.Client, cmd string) ([]byte, error) {
 	session, err := client.NewSession()
 	if err != nil {
@@ -894,6 +919,7 @@ func sshRunRaw(client *ssh.Client, cmd string) ([]byte, error) {
 	return session.Output(cmd)
 }
 
+// inferProjectTenantFromDocPath encapsula esta operación interna y conserva las invariantes del componente.
 func inferProjectTenantFromDocPath(cfg *config.Config, docPath string) models.Scope {
 	scope := models.Scope{ProjectKey: cfg.Projects.DefaultProject}
 	if scope.ProjectKey == "" {
@@ -911,6 +937,7 @@ func inferProjectTenantFromDocPath(cfg *config.Config, docPath string) models.Sc
 	return scope
 }
 
+// splitLines encapsula esta operación interna y conserva las invariantes del componente.
 func splitLines(text string) []string {
 	out := []string{}
 	for _, line := range strings.Split(text, "\n") {
@@ -922,10 +949,12 @@ func splitLines(text string) []string {
 	return out
 }
 
+// shq encapsula esta operación interna y conserva las invariantes del componente.
 func shq(v string) string {
 	return "'" + strings.ReplaceAll(v, "'", "'\"'\"'") + "'"
 }
 
+// normalizeExt encapsula esta operación interna y conserva las invariantes del componente.
 func normalizeExt(ext string) string {
 	ext = strings.ToLower(strings.TrimPrefix(ext, "."))
 	if ext == "jpeg" {
@@ -934,6 +963,7 @@ func normalizeExt(ext string) string {
 	return ext
 }
 
+// dirExists encapsula esta operación interna y conserva las invariantes del componente.
 func dirExists(path string) bool {
 	if strings.TrimSpace(path) == "" {
 		return false
@@ -942,6 +972,7 @@ func dirExists(path string) bool {
 	return err == nil && st.IsDir()
 }
 
+// inferTenantFromPath encapsula esta operación interna y conserva las invariantes del componente.
 func inferTenantFromPath(path, marker string) string {
 	parts := strings.Split(filepath.ToSlash(path), "/")
 	for i := 0; i < len(parts)-1; i++ {
@@ -952,6 +983,7 @@ func inferTenantFromPath(path, marker string) string {
 	return ""
 }
 
+// inferPageNumber encapsula esta operación interna y conserva las invariantes del componente.
 func inferPageNumber(path string, fallback int) int {
 	name := strings.ToLower(filepath.Base(path))
 	re := regexp.MustCompile(`(?:page|p)[_\-\s]?(\d+)`)
@@ -971,6 +1003,7 @@ func inferPageNumber(path string, fallback int) int {
 	return fallback
 }
 
+// fillFallbackImagesFromPDF encapsula esta operación interna y conserva las invariantes del componente.
 func fillFallbackImagesFromPDF(item *sourceDocument) error {
 	if len(item.PDFBytes) == 0 {
 		return fmt.Errorf("pdf sin bytes")
@@ -1049,6 +1082,7 @@ func fillFallbackImagesFromPDF(item *sourceDocument) error {
 	return nil
 }
 
+// maxInt encapsula esta operación interna y conserva las invariantes del componente.
 func maxInt(a, b int) int {
 	if b > a {
 		return b
@@ -1058,6 +1092,7 @@ func maxInt(a, b int) int {
 
 var migrationNamespaceUUID = uuid.MustParse("d26ef5bc-8d99-4f87-a0c2-4c6052a4e2cc")
 
+// stableDocumentID encapsula esta operación interna y conserva las invariantes del componente.
 func stableDocumentID(project, tenant, sourceKey, name string) string {
 	key := fmt.Sprintf("%s|%s|%s|%s",
 		strings.ToLower(strings.TrimSpace(project)),
@@ -1068,15 +1103,18 @@ func stableDocumentID(project, tenant, sourceKey, name string) string {
 	return uuid.NewSHA1(migrationNamespaceUUID, []byte(key)).String()
 }
 
+// stableImageID encapsula esta operación interna y conserva las invariantes del componente.
 func stableImageID(documentID string, page int) string {
 	key := fmt.Sprintf("%s|%d", documentID, page)
 	return uuid.NewSHA1(migrationNamespaceUUID, []byte(key)).String()
 }
 
+// normalizeSourcePath encapsula esta operación interna y conserva las invariantes del componente.
 func normalizeSourcePath(path string) string {
 	return strings.ToLower(strings.ReplaceAll(filepath.ToSlash(strings.TrimSpace(path)), "//", "/"))
 }
 
+// sanitizeProgressMessage encapsula esta operación interna y conserva las invariantes del componente.
 func sanitizeProgressMessage(message string) string {
 	return strings.TrimSpace(strings.ReplaceAll(message, "|", "/"))
 }

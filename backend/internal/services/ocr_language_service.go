@@ -29,8 +29,8 @@ type OCRLanguage struct {
 
 type OCRLanguageCatalog struct {
 	InstallationEnabled bool          `json:"installation_enabled"`
-	Installed           []OCRLanguage `json:"installed"`
-	Available           []OCRLanguage `json:"available"`
+	Installed           []OCRLanguage `json:"installed"` // Siempre se serializa como arreglo, incluso cuando está vacío.
+	Available           []OCRLanguage `json:"available"` // Siempre se serializa como arreglo, incluso cuando está vacío.
 }
 
 type InstallOCRLanguagesRequest struct {
@@ -48,6 +48,7 @@ type externalCommandRunner interface {
 
 type osCommandRunner struct{}
 
+// Run ejecuta la operación principal respetando límites, contexto y errores.
 func (osCommandRunner) Run(ctx context.Context, name string, args ...string) ([]byte, []byte, error) {
 	command := exec.CommandContext(ctx, name, args...)
 	var stdout, stderr bytes.Buffer
@@ -63,10 +64,12 @@ type OCRLanguageService struct {
 	mu     sync.Mutex
 }
 
+// NewOCRLanguageService crea e inicializa la dependencia con una configuración válida.
 func NewOCRLanguageService(cfg *config.Config) *OCRLanguageService {
 	return &OCRLanguageService{config: cfg, runner: osCommandRunner{}}
 }
 
+// Catalog encapsula esta operación interna y conserva las invariantes del componente.
 func (s *OCRLanguageService) Catalog(ctx context.Context) (OCRLanguageCatalog, error) {
 	installed, err := s.installed(ctx)
 	if err != nil {
@@ -77,7 +80,11 @@ func (s *OCRLanguageService) Catalog(ctx context.Context) (OCRLanguageCatalog, e
 		return OCRLanguageCatalog{}, err
 	}
 	enabled := stringSet(s.config.OCR.CandidateLanguages)
-	catalog := OCRLanguageCatalog{InstallationEnabled: s.config.OCR.LanguageInstallation.Enabled}
+	catalog := OCRLanguageCatalog{
+		InstallationEnabled: s.config.OCR.LanguageInstallation.Enabled,
+		Installed:           make([]OCRLanguage, 0),
+		Available:           make([]OCRLanguage, 0),
+	}
 	for code := range installed {
 		catalog.Installed = append(catalog.Installed, languageEntry(code, packages[code], true, enabled[code]))
 	}
@@ -91,6 +98,7 @@ func (s *OCRLanguageService) Catalog(ctx context.Context) (OCRLanguageCatalog, e
 	return catalog, nil
 }
 
+// Install ejecuta la operación principal respetando límites, contexto y errores.
 func (s *OCRLanguageService) Install(ctx context.Context, requested []string) (InstallOCRLanguagesResponse, error) {
 	if !s.config.OCR.LanguageInstallation.Enabled {
 		return InstallOCRLanguagesResponse{}, errors.New("la instalación de idiomas OCR está deshabilitada en config.yaml")
@@ -148,6 +156,7 @@ func (s *OCRLanguageService) Install(ctx context.Context, requested []string) (I
 	return InstallOCRLanguagesResponse{Installed: codes, Catalog: catalog}, nil
 }
 
+// installed ejecuta la operación principal respetando límites, contexto y errores.
 func (s *OCRLanguageService) installed(ctx context.Context) (map[string]bool, error) {
 	commandContext, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
@@ -165,6 +174,7 @@ func (s *OCRLanguageService) installed(ctx context.Context) (map[string]bool, er
 	return result, nil
 }
 
+// availablePackages encapsula esta operación interna y conserva las invariantes del componente.
 func (s *OCRLanguageService) availablePackages(ctx context.Context) (map[string]string, error) {
 	commandContext, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
@@ -188,6 +198,7 @@ func (s *OCRLanguageService) availablePackages(ctx context.Context) (map[string]
 	return result, nil
 }
 
+// normalizeRequestedLanguages encapsula esta operación interna y conserva las invariantes del componente.
 func normalizeRequestedLanguages(values []string) ([]string, error) {
 	if len(values) == 0 || len(values) > 10 {
 		return nil, errors.New("selecciona entre 1 y 10 idiomas")
@@ -207,6 +218,7 @@ func normalizeRequestedLanguages(values []string) ([]string, error) {
 	return result, nil
 }
 
+// stringSet encapsula esta operación interna y conserva las invariantes del componente.
 func stringSet(values []string) map[string]bool {
 	result := make(map[string]bool, len(values))
 	for _, value := range values {
@@ -215,10 +227,12 @@ func stringSet(values []string) map[string]bool {
 	return result
 }
 
+// languageEntry encapsula esta operación interna y conserva las invariantes del componente.
 func languageEntry(code, packageName string, installed, enabled bool) OCRLanguage {
 	return OCRLanguage{Code: code, Name: friendlyTesseractLanguageName(code), Package: packageName, Installed: installed, Enabled: enabled, DetectionSupported: len(linguaLanguages([]string{code})) == 1}
 }
 
+// sortLanguages encapsula esta operación interna y conserva las invariantes del componente.
 func sortLanguages(values []OCRLanguage) {
 	sort.Slice(values, func(i, j int) bool {
 		if values[i].Name == values[j].Name {
@@ -228,6 +242,7 @@ func sortLanguages(values []OCRLanguage) {
 	})
 }
 
+// friendlyTesseractLanguageName encapsula esta operación interna y conserva las invariantes del componente.
 func friendlyTesseractLanguageName(code string) string {
 	names := map[string]string{
 		"ara": "Árabe", "cat": "Catalán", "deu": "Alemán", "eng": "Inglés",

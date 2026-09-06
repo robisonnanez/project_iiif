@@ -20,6 +20,7 @@ type MySQLStorage struct {
 	basePath string
 }
 
+// NewMySQLStorage crea e inicializa la dependencia con una configuración válida.
 func NewMySQLStorage(cfg *config.Config) (*MySQLStorage, error) {
 	mysql := cfg.Database.MySQL
 	charset := mysql.Charset
@@ -55,14 +56,17 @@ func NewMySQLStorage(cfg *config.Config) (*MySQLStorage, error) {
 	return &MySQLStorage{db: db, basePath: cfg.Storage.DataPath}, nil
 }
 
+// SaveDocument crea o persiste la información validada por el servicio.
 func (ms *MySQLStorage) SaveDocument(doc *models.PDFDocument) error {
 	return ms.upsertDocument(doc)
 }
 
+// UpdateDocument actualiza el estado manteniendo las invariantes del componente.
 func (ms *MySQLStorage) UpdateDocument(doc *models.PDFDocument) error {
 	return ms.upsertDocument(doc)
 }
 
+// GetDocument obtiene la información solicitada sin modificar el estado persistido.
 func (ms *MySQLStorage) GetDocument(id string) (*models.PDFDocument, error) {
 	row := ms.db.QueryRow(`
 		SELECT id, original_name, COALESCE(project_key, 'default'), COALESCE(tenant_key, ''), COALESCE(migrated_from_local, 0), status, total_pages, converted_pages,
@@ -106,10 +110,12 @@ func (ms *MySQLStorage) GetDocument(id string) (*models.PDFDocument, error) {
 	return doc, nil
 }
 
+// GetAllDocuments obtiene la información solicitada sin modificar el estado persistido.
 func (ms *MySQLStorage) GetAllDocuments() ([]*models.PDFDocument, error) {
 	return ms.GetDocumentsByScope("", "")
 }
 
+// GetDocumentsByScope obtiene la información solicitada sin modificar el estado persistido.
 func (ms *MySQLStorage) GetDocumentsByScope(projectKey, tenantKey string) ([]*models.PDFDocument, error) {
 	query := `
 		SELECT id, original_name, COALESCE(project_key, 'default'), COALESCE(tenant_key, ''), COALESCE(migrated_from_local, 0), status, total_pages, converted_pages,
@@ -175,6 +181,7 @@ func (ms *MySQLStorage) GetDocumentsByScope(projectKey, tenantKey string) ([]*mo
 	return docs, rows.Err()
 }
 
+// DeleteDocument elimina o libera de forma controlada los recursos asociados.
 func (ms *MySQLStorage) DeleteDocument(id string) error {
 	doc, _ := ms.GetDocument(id)
 
@@ -193,6 +200,7 @@ func (ms *MySQLStorage) DeleteDocument(id string) error {
 	return nil
 }
 
+// SaveDocumentPDF crea o persiste la información validada por el servicio.
 func (ms *MySQLStorage) SaveDocumentPDF(documentID string, data []byte, mediaType string) error {
 	_, err := ms.db.Exec(`
 		UPDATE documents
@@ -202,6 +210,7 @@ func (ms *MySQLStorage) SaveDocumentPDF(documentID string, data []byte, mediaTyp
 	return err
 }
 
+// GetDocumentPDFData obtiene la información solicitada sin modificar el estado persistido.
 func (ms *MySQLStorage) GetDocumentPDFData(documentID string) (*models.BinaryAsset, error) {
 	row := ms.db.QueryRow(`SELECT id, pdf_blob, pdf_media_type, pdf_size FROM documents WHERE id = ?`, documentID)
 	asset := &models.BinaryAsset{}
@@ -223,6 +232,7 @@ func (ms *MySQLStorage) GetDocumentPDFData(documentID string) (*models.BinaryAss
 	return asset, nil
 }
 
+// SaveDocumentImage crea o persiste la información validada por el servicio.
 func (ms *MySQLStorage) SaveDocumentImage(image *models.DocumentImage) error {
 	if image.CreatedAt.IsZero() {
 		image.CreatedAt = time.Now()
@@ -248,6 +258,7 @@ func (ms *MySQLStorage) SaveDocumentImage(image *models.DocumentImage) error {
 	return err
 }
 
+// SaveDocumentImageData crea o persiste la información validada por el servicio.
 func (ms *MySQLStorage) SaveDocumentImageData(imageID string, data []byte, mediaType string) error {
 	_, err := ms.db.Exec(`
 		UPDATE document_images
@@ -257,6 +268,7 @@ func (ms *MySQLStorage) SaveDocumentImageData(imageID string, data []byte, media
 	return err
 }
 
+// GetDocumentImage obtiene la información solicitada sin modificar el estado persistido.
 func (ms *MySQLStorage) GetDocumentImage(id string) (*models.DocumentImage, error) {
 	row := ms.db.QueryRow(`
 		SELECT id, document_id, COALESCE(project_key, 'default'), COALESCE(tenant_key, ''), COALESCE(migrated_from_local, 0), page_number, image_path, width, height, format, media_type, byte_size, created_at
@@ -266,6 +278,7 @@ func (ms *MySQLStorage) GetDocumentImage(id string) (*models.DocumentImage, erro
 	return scanDocumentImage(row)
 }
 
+// GetDocumentImageByPage obtiene la información solicitada sin modificar el estado persistido.
 func (ms *MySQLStorage) GetDocumentImageByPage(documentID string, page int) (*models.DocumentImage, error) {
 	row := ms.db.QueryRow(`
 		SELECT id, document_id, COALESCE(project_key, 'default'), COALESCE(tenant_key, ''), COALESCE(migrated_from_local, 0), page_number, image_path, width, height, format, media_type, byte_size, created_at
@@ -275,6 +288,7 @@ func (ms *MySQLStorage) GetDocumentImageByPage(documentID string, page int) (*mo
 	return scanDocumentImage(row)
 }
 
+// GetDocumentImages obtiene la información solicitada sin modificar el estado persistido.
 func (ms *MySQLStorage) GetDocumentImages(documentID string) ([]*models.DocumentImage, error) {
 	// Entrega las paginas del documento ordenadas para la galeria administrativa.
 	rows, err := ms.db.Query(`
@@ -299,6 +313,7 @@ func (ms *MySQLStorage) GetDocumentImages(documentID string) ([]*models.Document
 	return images, rows.Err()
 }
 
+// GetDocumentImageData obtiene la información solicitada sin modificar el estado persistido.
 func (ms *MySQLStorage) GetDocumentImageData(id string) (*models.BinaryAsset, error) {
 	row := ms.db.QueryRow(`
 		SELECT id, image_blob, media_type, byte_size
@@ -325,6 +340,7 @@ func (ms *MySQLStorage) GetDocumentImageData(id string) (*models.BinaryAsset, er
 	return asset, nil
 }
 
+// upsertDocument crea o persiste la información validada por el servicio.
 func (ms *MySQLStorage) upsertDocument(doc *models.PDFDocument) error {
 	if doc.UploadDate.IsZero() {
 		doc.UploadDate = time.Now()
@@ -362,6 +378,7 @@ func (ms *MySQLStorage) upsertDocument(doc *models.PDFDocument) error {
 	return err
 }
 
+// decodeOutlineJSON analiza la entrada y devuelve una representación validada.
 func decodeOutlineJSON(value string) []models.PDFOutlineItem {
 	var outline []models.PDFOutlineItem
 	if strings.TrimSpace(value) == "" || json.Unmarshal([]byte(value), &outline) != nil {
@@ -370,6 +387,7 @@ func decodeOutlineJSON(value string) []models.PDFOutlineItem {
 	return outline
 }
 
+// getImagePaths obtiene la información solicitada sin modificar el estado persistido.
 func (ms *MySQLStorage) getImagePaths(documentID string) []string {
 	rows, err := ms.db.Query("SELECT image_path FROM document_images WHERE document_id = ? AND image_path IS NOT NULL ORDER BY page_number", documentID)
 	if err != nil {
@@ -387,6 +405,7 @@ func (ms *MySQLStorage) getImagePaths(documentID string) []string {
 	return paths
 }
 
+// scanDocumentImage encapsula esta operación interna y conserva las invariantes del componente.
 func scanDocumentImage(row *sql.Row) (*models.DocumentImage, error) {
 	image := &models.DocumentImage{}
 	var imagePath, mediaType sql.NullString
@@ -414,6 +433,7 @@ func scanDocumentImage(row *sql.Row) (*models.DocumentImage, error) {
 	return image, nil
 }
 
+// scanDocumentImageRows encapsula esta operación interna y conserva las invariantes del componente.
 func scanDocumentImageRows(rows *sql.Rows) (*models.DocumentImage, error) {
 	image := &models.DocumentImage{}
 	var imagePath, mediaType sql.NullString
@@ -441,10 +461,12 @@ func scanDocumentImageRows(rows *sql.Rows) (*models.DocumentImage, error) {
 	return image, nil
 }
 
+// nullString encapsula esta operación interna y conserva las invariantes del componente.
 func nullString(value string) sql.NullString {
 	return sql.NullString{String: value, Valid: strings.TrimSpace(value) != ""}
 }
 
+// defaultProject encapsula esta operación interna y conserva las invariantes del componente.
 func defaultProject(value string) string {
 	if strings.TrimSpace(value) == "" {
 		return "default"
@@ -452,6 +474,7 @@ func defaultProject(value string) string {
 	return value
 }
 
+// HasDocumentPDFBlob evalúa la condición indicada sin producir efectos laterales.
 func (ms *MySQLStorage) HasDocumentPDFBlob(documentID string) (bool, error) {
 	row := ms.db.QueryRow("SELECT COALESCE(pdf_size, 0) FROM documents WHERE id = ?", documentID)
 	var pdfSize int64
@@ -464,6 +487,7 @@ func (ms *MySQLStorage) HasDocumentPDFBlob(documentID string) (bool, error) {
 	return pdfSize > 0, nil
 }
 
+// HasImageBlob evalúa la condición indicada sin producir efectos laterales.
 func (ms *MySQLStorage) HasImageBlob(imageID string) (bool, error) {
 	row := ms.db.QueryRow("SELECT COALESCE(byte_size, 0) FROM document_images WHERE id = ?", imageID)
 	var byteSize int64

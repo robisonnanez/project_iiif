@@ -1,5 +1,7 @@
 import type { AppConfig, DBMigrationResult, DBMigrationStatus, DocumentImagesResponse, DocumentRecord, MigrationDirectory, MigrationPayload, MigrationStatus, OCRAutocompleteResponse, OCRJob, OCRLanguageCatalog, OCRSearchResponse, ProjectConfig, UploadScope, UploadSettings } from "./types";
+import { normalizeDocuments, normalizeLanguageInstallation, normalizeOCRLanguageCatalog, validateConfig } from "./lib/api-validation";
 
+// request ejecuta una petición con credenciales, interpreta el cuerpo y unifica los errores HTTP.
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
   const response = await fetch(url, { credentials: "same-origin", ...init });
   const contentType = response.headers.get("content-type") ?? "";
@@ -12,7 +14,7 @@ async function request<T>(url: string, init?: RequestInit): Promise<T> {
 }
 
 export const api = {
-  config: async () => normalizeConfig(await request<AppConfig>("/api/v1/admin/config")),
+  config: async () => normalizeConfig(validateConfig(await request<unknown>("/api/v1/admin/config"))),
   saveConfig: (config: AppConfig) => request<{ message: string }>("/api/v1/admin/config", {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
@@ -25,10 +27,7 @@ export const api = {
     body: JSON.stringify({ password }),
   }),
   serviceHealth: () => request<{ status: string }>("/health", { cache: "no-store" }),
-  documents: async () => {
-    const documents = await request<DocumentRecord[] | null>("/api/v1/documents");
-    return Array.isArray(documents) ? documents : [];
-  },
+  documents: async () => normalizeDocuments(await request<unknown>("/api/v1/documents")),
   dbMigrationStatus: () => request<DBMigrationStatus>("/api/v1/admin/db/migrations/status"),
   runDBMigrations: () => request<DBMigrationResult>("/api/v1/admin/db/migrations/run", { method: "POST" }),
   deleteDocument: (documentId: string) => request<{ message: string }>(`/api/v1/documents/${encodeURIComponent(documentId)}`, { method: "DELETE" }),
@@ -55,10 +54,12 @@ export const api = {
   startOCR: (documentId: string, payload: { mode: string; language_mode: string; languages: string[]; force: boolean }) => request<OCRJob>(`/api/v1/admin/documents/${encodeURIComponent(documentId)}/ocr/jobs`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }),
   ocrJob: (jobId: string) => request<OCRJob>(`/api/v1/admin/ocr/jobs/${encodeURIComponent(jobId)}`),
   cancelOCR: (jobId: string) => request<OCRJob>(`/api/v1/admin/ocr/jobs/${encodeURIComponent(jobId)}/cancel`, { method: "POST" }),
-  ocrLanguages: () => request<OCRLanguageCatalog>("/api/v1/admin/ocr/languages", { cache: "no-store" }),
-  installOCRLanguages: (languages: string[]) => request<{ installed: string[]; catalog: OCRLanguageCatalog }>("/api/v1/admin/ocr/languages/install", {
+  ocrLanguages: async () => {
+    return normalizeOCRLanguageCatalog(await request<unknown>("/api/v1/admin/ocr/languages", { cache: "no-store" }));
+  },
+  installOCRLanguages: async (languages: string[]) => normalizeLanguageInstallation(await request<unknown>("/api/v1/admin/ocr/languages/install", {
     method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ languages }),
-  }),
+  })),
   searchOCR: (query: string, documentId?: string, project?: string, tenant?: string) => {
     const params = new URLSearchParams({ q: query, limit: "100" });
     if (documentId) params.set("document_id", documentId); if (project) params.set("project", project); if (tenant) params.set("tenant", tenant);
@@ -72,6 +73,7 @@ export const api = {
   logout: () => request<void>("/auth/logout", { method: "POST" }),
 };
 
+// normalizeConfig sanea colecciones opcionales después de validar la estructura principal.
 function normalizeConfig(config: AppConfig): AppConfig {
   return {
     ...config,

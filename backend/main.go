@@ -26,6 +26,7 @@ import (
 // @securityDefinitions.apikey SessionCookie
 // @in cookie
 // @name project_iiif_session
+// main inicia el ejecutable y coordina sus dependencias.
 func main() {
 	// Cargar configuración
 	configPath := strings.TrimSpace(os.Getenv("CONFIG_PATH"))
@@ -102,6 +103,7 @@ func main() {
 	// Ruta de bienvenida
 	router.GET("/", welcomeHandler.Welcome)
 	router.GET("/health", welcomeHandler.HealthCheck)
+	router.GET("/api/v1/version", welcomeHandler.Version)
 	router.POST("/auth/login", authHandler.Login)
 	router.POST("/auth/logout", authHandler.Logout)
 	router.GET("/auth/me", authHandler.Me)
@@ -138,6 +140,7 @@ func main() {
 			dashboard.GET("/proyectos", frontendHandler.Dashboard)
 			dashboard.GET("/ocr", frontendHandler.Dashboard)
 			dashboard.Static("/assets", filepath.Join(cfg.Frontend.Path, "dist", "assets"))
+			dashboard.StaticFile("/build-meta.json", filepath.Join(cfg.Frontend.Path, "dist", "build-meta.json"))
 		}
 
 		// Expone rutas admin versionadas y mantiene aliases legacy durante la transicion.
@@ -262,11 +265,13 @@ func main() {
 	log.Fatal(router.Run(":" + cfg.Server.Port))
 }
 
+// envEnabled interpreta las variantes booleanas admitidas en variables de entorno.
 func envEnabled(name string) bool {
 	value := strings.TrimSpace(os.Getenv(name))
 	return value == "1" || strings.EqualFold(value, "true") || strings.EqualFold(value, "yes")
 }
 
+// createDirectories garantiza que existan todos los directorios de trabajo configurados.
 func createDirectories(cfg *config.Config) {
 	dirs := []string{
 		cfg.Storage.DataPath,
@@ -286,6 +291,7 @@ func createDirectories(cfg *config.Config) {
 	}
 }
 
+// newStorage construye el backend de persistencia seleccionado en la configuración.
 func newStorage(cfg *config.Config) (storage.Storage, error) {
 	return storage.NewConfiguredStorage(cfg)
 }

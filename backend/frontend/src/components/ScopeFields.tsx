@@ -1,6 +1,7 @@
 import type { ProjectConfig } from "../types";
 import { FormField, Input, Select } from "./ui";
 
+// ScopeFields mantiene coherentes las selecciones de proyecto y tenant disponibles.
 export function ScopeFields({ projects, project, tenant, allowAll = false, allowDynamic = false, onProject, onTenant }: {
   projects: ProjectConfig[];
   project: string;

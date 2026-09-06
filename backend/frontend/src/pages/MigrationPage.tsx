@@ -6,6 +6,7 @@ import type { AppConfig, MigrationDirectory, MigrationPayload, MigrationStatus, 
 
 type SourceType = "local" | "ssh" | "database";
 
+// MigrationPage configura, inicia y supervisa la migración de documentos al almacenamiento activo.
 export function MigrationPage({ config, notify }: { config: AppConfig | null; notify: Notify }) {
   const projects = useMemo<ProjectConfig[]>(() => config?.projects.items?.length ? config.projects.items : [{ key: "default", name: "Proyecto por defecto", multitenant: false, tenants: [] }], [config]);
   const [source, setSource] = useState<SourceType>("local");
@@ -45,22 +46,26 @@ export function MigrationPage({ config, notify }: { config: AppConfig | null; no
   const title = usesS3 ? `Migración hacia S3 / RustFS con catálogo ${dbLabel}` : `Migración local a ${dbLabel} BLOB`;
   const description = usesS3 ? `Copia binarios locales, remotos o almacenados en ${dbLabel} hacia el bucket S3 configurado.` : `Migra metadatos y binarios hacia ${dbLabel}.`;
 
+  // sourceError encapsula esta interacción y mantiene coherente el estado de la vista.
   const sourceError = () => {
     if (source === "local" && !localPath.trim()) return "La ruta local es obligatoria.";
     if (source === "ssh" && (!host.trim() || !user.trim() || !sshPath.trim() || !privateKey.trim())) return "Para SSH: host, usuario, ruta y clave privada son obligatorios.";
     return "";
   };
+  // openConfirmation abre el recurso o la vista seleccionada.
   const openConfirmation = () => {
     const message = sourceError();
     if (message) { setError(message); notify(message, "danger"); return; }
     setError(""); setConfirmOpen(true);
   };
   const sourcePreview = source === "database" ? "Base de datos activa (BLOB/GridFS) → S3/RustFS" : source === "ssh" ? `${user}@${host}:${sshPath}` : localPath;
+  // changeProject encapsula esta interacción y mantiene coherente el estado de la vista.
   const changeProject = (value: string) => {
     setProject(value);
     const item = projects.find((candidate) => candidate.key === value);
     setTenant(item?.multitenant ? item.tenants[0] ?? "" : "");
   };
+  // start ejecuta la operación administrativa y controla sus errores.
   const start = async () => {
     if (!project) { setError("Selecciona un proyecto para la migración."); return; }
     if (selectedProject?.multitenant && !tenant.trim()) { setError("Selecciona un tenant para el proyecto multitenant."); return; }
@@ -73,6 +78,7 @@ export function MigrationPage({ config, notify }: { config: AppConfig | null; no
     } catch (cause) { const message = cause instanceof Error ? cause.message : "No se pudo iniciar la migración."; setError(message); notify(message, "danger"); }
     finally { setBusy(false); }
   };
+  // browse encapsula esta interacción y mantiene coherente el estado de la vista.
   const browse = async () => {
     setBrowsing(true); setError("");
     try { const result = await api.browseMigrationPath(localPath.trim()); setLocalPath(result.path); setDirs(result.dirs ?? []); }
@@ -100,18 +106,22 @@ export function MigrationPage({ config, notify }: { config: AppConfig | null; no
   </>;
 }
 
+// MigrationBadge resume visualmente el estado general de la migración.
 function MigrationBadge({ status }: { status: MigrationStatus | null }) {
   if (!status || status.exit_code === -1 && !status.running) return <Badge>Sin ejecutar</Badge>;
   if (status.running) return <Badge tone="warning">En ejecución</Badge>;
   return <Badge tone={status.exit_code === 0 ? "success" : "danger"}>{status.exit_code === 0 ? "Completada" : "Con errores"}</Badge>;
 }
+// MigrationSummary presenta métricas globales de la ejecución actual o más reciente.
 function MigrationSummary({ status }: { status: MigrationStatus | null }) {
   if (!status) return <EmptyState title="Sin ejecuciones" description="Todavía no existe información de migración." />;
   return <dl className="summary-list"><div><dt>En ejecución</dt><dd>{status.running ? "Sí" : "No"}</dd></div><div><dt>Código de salida</dt><dd>{status.exit_code}</dd></div><div><dt>Inicio</dt><dd>{status.started_at ? new Date(status.started_at).toLocaleString() : "—"}</dd></div><div><dt>Fin</dt><dd>{status.finished_at ? new Date(status.finished_at).toLocaleString() : "—"}</dd></div><div><dt>Mensaje</dt><dd>{status.message || "—"}</dd></div></dl>;
 }
+// MigrationProgress muestra avance por documento y prioriza estados accionables.
 function MigrationProgress({ status }: { status: MigrationStatus | null }) {
   const percent = Math.max(0, Math.min(100, status?.progress_percent ?? 0));
   const items = [...(status?.items ?? [])].sort((a, b) => rank(a.status) - rank(b.status));
   return <><div className="progress-track" aria-label={`Progreso ${percent}%`}><div className="progress-fill" style={{ width: `${percent}%` }} /></div>{!items.length ? <EmptyState title="Sin detalle por documento" description="El detalle aparecerá cuando comience el procesamiento." /> : <div className="table-wrap"><table><thead><tr><th>PDF</th><th>Imágenes</th><th>Estado</th><th>Mensaje</th></tr></thead><tbody>{items.map((item) => <tr key={`${item.document_id}-${item.pdf_name}`}><td>{item.pdf_name || item.document_id || "—"}</td><td>{item.images_done || 0} / {item.images_total || 0}</td><td><Badge tone={item.status === "ok" ? "success" : item.status === "error" ? "danger" : "warning"}>{item.status === "ok" ? "OK" : item.status || "ejecutando"}</Badge></td><td>{item.message || "—"}</td></tr>)}</tbody></table></div>}</>;
 }
+// rank define el orden de prioridad visual de los estados de migración.
 function rank(status: string) { return status === "running" ? 0 : status === "error" ? 1 : status === "ok" ? 2 : 3; }

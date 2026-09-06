@@ -1,0 +1,39 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+BASE_URL="${1:-http://127.0.0.1:8080}"
+COOKIE_JAR="$(mktemp)"
+trap 'rm -f "$COOKIE_JAR"' EXIT
+
+health="$(curl --fail --silent --show-error "$BASE_URL/health")"
+version="$(curl --fail --silent --show-error "$BASE_URL/api/v1/version")"
+
+if [[ -n "${PROJECT_IIIF_USERNAME:-}" && -n "${PROJECT_IIIF_PASSWORD:-}" ]]; then
+	login_payload="$(python3 -c 'import json, os; print(json.dumps({"username": os.environ["PROJECT_IIIF_USERNAME"], "password": os.environ["PROJECT_IIIF_PASSWORD"]}))')"
+  curl --fail --silent --show-error -c "$COOKIE_JAR" -H 'Content-Type: application/json' \
+    --data "$login_payload" \
+    "$BASE_URL/auth/login" >/dev/null
+  catalog="$(curl --fail --silent --show-error -b "$COOKIE_JAR" "$BASE_URL/api/v1/admin/ocr/languages")"
+  frontend="$(curl --fail --silent --show-error -b "$COOKIE_JAR" "$BASE_URL/dashboard/build-meta.json")"
+  CATALOG="$catalog" VERSION_INFO="$version" FRONTEND_INFO="$frontend" python3 - <<'PY'
+import json, os
+catalog = json.loads(os.environ["CATALOG"])
+backend = json.loads(os.environ["VERSION_INFO"])
+frontend = json.loads(os.environ["FRONTEND_INFO"])
+assert isinstance(catalog.get("installed"), list)
+assert isinstance(catalog.get("available"), list)
+assert backend.get("commit") == frontend.get("commit"), (backend, frontend)
+print(f"catálogo=ok commit={backend['commit']} frontend=coincide")
+PY
+else
+  echo "Catálogo y frontend omitidos: define PROJECT_IIIF_USERNAME y PROJECT_IIIF_PASSWORD." >&2
+fi
+
+HEALTH="$health" VERSION_INFO="$version" python3 - <<'PY'
+import json, os
+health = json.loads(os.environ["HEALTH"])
+version = json.loads(os.environ["VERSION_INFO"])
+assert health.get("status") == "ok", health
+assert health.get("build", {}).get("commit") == version.get("commit"), (health, version)
+print(f"health=ok version={version['version']} commit={version['commit']}")
+PY

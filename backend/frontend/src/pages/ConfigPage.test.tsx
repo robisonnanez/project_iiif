@@ -4,6 +4,15 @@ import { vi } from "vitest";
 import { api } from "../api";
 import { ConfigPage } from "./ConfigPage";
 import { sampleConfig } from "../test/fixtures";
+import type { OCRLanguageCatalog } from "../types";
+
+it("mantiene visible la configuración cuando el catálogo heredado contiene null", async () => {
+  vi.spyOn(api, "ocrLanguages").mockResolvedValueOnce({ installation_enabled: false, installed: null, available: null } as unknown as OCRLanguageCatalog);
+  render(<ConfigPage initial={structuredClone(sampleConfig)} onSaved={() => undefined} />);
+  expect(await screen.findByText("No hay idiomas pendientes por instalar.")).toBeInTheDocument();
+  expect(screen.getByRole("heading", { name: "OCR e indexación" })).toBeInTheDocument();
+  expect(screen.getByText("Instalación deshabilitada en config.yaml")).toBeInTheDocument();
+});
 
 it("muestra idiomas del sistema e instala una selección sin habilitarla", async () => {
   const user = userEvent.setup();
@@ -35,8 +44,11 @@ it("muestra S3 únicamente cuando el modo es s3", async () => {
   expect(screen.getByLabelText("Endpoint")).toBeInTheDocument();
 });
 
-it("presenta los defaults de conversión", () => {
+it("presenta los defaults de conversión", async () => {
+  vi.spyOn(api, "dbMigrationStatus").mockRejectedValueOnce(new Error("sin migraciones en esta prueba"));
+  vi.spyOn(api, "ocrLanguages").mockResolvedValueOnce({ installation_enabled: false, installed: [], available: [] });
   render(<ConfigPage initial={structuredClone(sampleConfig)} onSaved={() => undefined} />);
+  await screen.findByText("No hay idiomas pendientes por instalar.");
   expect(screen.getByLabelText("Ancho máximo")).toHaveValue(1241);
   expect(screen.getByLabelText("Alto máximo")).toHaveValue(1754);
   expect(screen.getByLabelText("DPI")).toHaveValue(150);

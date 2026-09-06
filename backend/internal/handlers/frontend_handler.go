@@ -14,19 +14,22 @@ type FrontendHandler struct {
 	config *config.Config
 }
 
+// NewFrontendHandler crea e inicializa la dependencia con una configuración válida.
 func NewFrontendHandler(config *config.Config) *FrontendHandler {
 	return &FrontendHandler{config: config}
 }
 
+// Dashboard encapsula esta operación interna y conserva las invariantes del componente.
 func (h *FrontendHandler) Dashboard(c *gin.Context) {
 	indexPath := filepath.Join(h.config.Frontend.Path, "dist", "index.html")
 	if _, err := os.Stat(indexPath); err != nil {
-		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "frontend no compilado; ejecuta npm run build"})
+		writeJSON(c, http.StatusServiceUnavailable, gin.H{"error": "frontend no compilado; ejecuta npm run build"})
 		return
 	}
 	c.File(indexPath)
 }
 
+// Disabled encapsula esta operación interna y conserva las invariantes del componente.
 func (h *FrontendHandler) Disabled(c *gin.Context) {
-	c.JSON(http.StatusNotFound, gin.H{"error": "frontend deshabilitado"})
+	writeJSON(c, http.StatusNotFound, gin.H{"error": "frontend deshabilitado"})
 }
