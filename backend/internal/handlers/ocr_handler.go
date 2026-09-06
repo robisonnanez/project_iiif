@@ -26,7 +26,7 @@ func NewOCRHandler(service *services.OCRService, languageServices ...*services.O
 
 // GetLanguages godoc
 // @Summary Consultar idiomas OCR del sistema
-// @Description Obtiene los idiomas reconocidos por Tesseract y los paquetes APT disponibles para instalar. Requiere sesión administrativa.
+// @Description Obtiene los idiomas reconocidos por Tesseract y los paquetes APT disponibles para instalar. installed y available siempre son arreglos, incluso cuando no contienen elementos. Requiere sesión administrativa.
 // @Tags OCR
 // @Security SessionCookie
 // @Produce json

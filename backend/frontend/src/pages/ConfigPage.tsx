@@ -132,7 +132,8 @@ export function ConfigPage({ initial, onSaved }: { initial: AppConfig; onSaved: 
     } finally { setLanguageInstallBusy(false); }
   };
 
-  const installedLanguages = languageCatalog?.installed ?? fallbackLanguageOptions;
+  const installedLanguages = Array.isArray(languageCatalog?.installed) ? languageCatalog.installed : fallbackLanguageOptions;
+  const availableLanguages = Array.isArray(languageCatalog?.available) ? languageCatalog.available : [];
 
   return <>
     <PageHeader eyebrow="Administración" title="Configuración" description="Metadatos, almacenamiento, conversión, OCR y seguridad desde una sola vista." actions={<Button onClick={save} disabled={busy}>{busy ? <Spinner label="Guardando" /> : "Guardar cambios"}</Button>} />
@@ -206,8 +207,8 @@ export function ConfigPage({ initial, onSaved }: { initial: AppConfig; onSaved: 
         <div className="config-subsection"><h3>Idiomas por instalar</h3><p>Paquetes disponibles en APT que Tesseract todavía no reconoce. Instalar un idioma no lo habilita automáticamente.</p>
           {languageCatalogError && <Alert tone="danger">{languageCatalogError}</Alert>}
           {!languageCatalog && !languageCatalogError && <Spinner label="Consultando idiomas del sistema" />}
-          {languageCatalog && <><div className="language-options language-options-scroll">{languageCatalog.available.map((language) => <Checkbox key={language.code} label={`${language.name} (${language.code})`} checked={selectedLanguages.includes(language.code)} disabled={languageInstallBusy} onChange={(event) => setSelectedLanguages(toggleList(selectedLanguages, language.code, event.target.checked))} />)}</div>
-            <div className="tenant-sync-row"><Button type="button" variant="secondary" disabled={languageInstallBusy || selectedLanguages.length === 0 || !languageCatalog.installation_enabled} onClick={() => void installLanguages()}>{languageInstallBusy ? <Spinner label="Instalando idiomas" /> : "Instalar seleccionados"}</Button><span>{languageCatalog.installation_enabled ? `${languageCatalog.available.length} idioma(s) disponibles` : "Instalación deshabilitada en config.yaml"}</span></div></>}
+          {languageCatalog && <>{availableLanguages.length > 0 ? <div className="language-options language-options-scroll">{availableLanguages.map((language) => <Checkbox key={language.code} label={`${language.name} (${language.code})`} checked={selectedLanguages.includes(language.code)} disabled={languageInstallBusy} onChange={(event) => setSelectedLanguages(toggleList(selectedLanguages, language.code, event.target.checked))} />)}</div> : <p>No hay idiomas pendientes por instalar.</p>}
+            <div className="tenant-sync-row"><Button type="button" variant="secondary" disabled={languageInstallBusy || selectedLanguages.length === 0 || !languageCatalog.installation_enabled} onClick={() => void installLanguages()}>{languageInstallBusy ? <Spinner label="Instalando idiomas" /> : "Instalar seleccionados"}</Button><span>{languageCatalog.installation_enabled ? `${availableLanguages.length} idioma(s) disponibles` : "Instalación deshabilitada en config.yaml"}</span></div></>}
         </div>
         <div className="form-grid two-columns config-subsection">
           <Checkbox label="Detectar idioma automáticamente" checked={config.ocr.language_detection.enabled} onChange={(event) => setConfig({ ...config, ocr: { ...config.ocr, language_detection: { ...config.ocr.language_detection, enabled: event.target.checked } } })} />

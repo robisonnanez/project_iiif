@@ -27,7 +27,7 @@ export function OCRPage({ documents, config, notify }: { documents: DocumentReco
   const skipAutocomplete = useRef(false);
 
   useEffect(() => { if (!documentId && ready.length) setDocumentId(ready[0].id); }, [documentId, ready]);
-  useEffect(() => { void api.ocrLanguages().then((catalog) => setInstalledLanguages(catalog.installed)).catch(() => undefined); }, []);
+  useEffect(() => { void api.ocrLanguages().then((catalog) => setInstalledLanguages(Array.isArray(catalog.installed) ? catalog.installed : [])).catch(() => undefined); }, []);
   useEffect(() => {
     if (!job || terminal.has(job.status)) return;
     const timer = window.setInterval(async () => {

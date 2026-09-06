@@ -3,7 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { vi } from "vitest";
 import { api } from "../api";
 import { sampleConfig } from "../test/fixtures";
-import type { DocumentRecord } from "../types";
+import type { DocumentRecord, OCRLanguageCatalog } from "../types";
 import { OCRPage } from "./OCRPage";
 
 it("abre la imagen IIIF real y explica dónde se guardan los bbox", async () => {
@@ -40,4 +40,13 @@ it("autocompleta con debounce y permite seleccionar con teclado", async () => {
   await user.keyboard("{ArrowDown}{Enter}");
   expect(input).toHaveValue("funciones");
   expect(input).toHaveAttribute("aria-expanded", "false");
+});
+
+it("tolera un catálogo heredado con idiomas instalados null", async () => {
+  const user = userEvent.setup();
+  const document: DocumentRecord = { id: "doc-1", name: "Libro.pdf", migratedFromLocal: false, status: "completed", totalPages: 1, convertedPages: 1 };
+  vi.spyOn(api, "ocrLanguages").mockResolvedValueOnce({ installation_enabled: false, installed: null, available: [] } as unknown as OCRLanguageCatalog);
+  render(<OCRPage documents={[document]} config={structuredClone(sampleConfig)} notify={() => undefined} />);
+  await user.selectOptions(screen.getByLabelText("Idiomas"), "manual");
+  expect(screen.getByLabelText("spa (spa)")).toBeInTheDocument();
 });

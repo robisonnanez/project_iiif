@@ -55,7 +55,14 @@ export const api = {
   startOCR: (documentId: string, payload: { mode: string; language_mode: string; languages: string[]; force: boolean }) => request<OCRJob>(`/api/v1/admin/documents/${encodeURIComponent(documentId)}/ocr/jobs`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }),
   ocrJob: (jobId: string) => request<OCRJob>(`/api/v1/admin/ocr/jobs/${encodeURIComponent(jobId)}`),
   cancelOCR: (jobId: string) => request<OCRJob>(`/api/v1/admin/ocr/jobs/${encodeURIComponent(jobId)}/cancel`, { method: "POST" }),
-  ocrLanguages: () => request<OCRLanguageCatalog>("/api/v1/admin/ocr/languages", { cache: "no-store" }),
+  ocrLanguages: async () => {
+    const response = await request<OCRLanguageCatalog>("/api/v1/admin/ocr/languages", { cache: "no-store" });
+    return {
+      ...response,
+      installed: Array.isArray(response.installed) ? response.installed : [],
+      available: Array.isArray(response.available) ? response.available : [],
+    };
+  },
   installOCRLanguages: (languages: string[]) => request<{ installed: string[]; catalog: OCRLanguageCatalog }>("/api/v1/admin/ocr/languages/install", {
     method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ languages }),
   }),

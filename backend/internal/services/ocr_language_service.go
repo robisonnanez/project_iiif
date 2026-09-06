@@ -29,8 +29,8 @@ type OCRLanguage struct {
 
 type OCRLanguageCatalog struct {
 	InstallationEnabled bool          `json:"installation_enabled"`
-	Installed           []OCRLanguage `json:"installed"`
-	Available           []OCRLanguage `json:"available"`
+	Installed           []OCRLanguage `json:"installed"` // Siempre se serializa como arreglo, incluso cuando está vacío.
+	Available           []OCRLanguage `json:"available"` // Siempre se serializa como arreglo, incluso cuando está vacío.
 }
 
 type InstallOCRLanguagesRequest struct {
@@ -77,7 +77,11 @@ func (s *OCRLanguageService) Catalog(ctx context.Context) (OCRLanguageCatalog, e
 		return OCRLanguageCatalog{}, err
 	}
 	enabled := stringSet(s.config.OCR.CandidateLanguages)
-	catalog := OCRLanguageCatalog{InstallationEnabled: s.config.OCR.LanguageInstallation.Enabled}
+	catalog := OCRLanguageCatalog{
+		InstallationEnabled: s.config.OCR.LanguageInstallation.Enabled,
+		Installed:           make([]OCRLanguage, 0),
+		Available:           make([]OCRLanguage, 0),
+	}
 	for code := range installed {
 		catalog.Installed = append(catalog.Installed, languageEntry(code, packages[code], true, enabled[code]))
 	}

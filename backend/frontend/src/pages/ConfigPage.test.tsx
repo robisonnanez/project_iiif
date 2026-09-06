@@ -4,6 +4,15 @@ import { vi } from "vitest";
 import { api } from "../api";
 import { ConfigPage } from "./ConfigPage";
 import { sampleConfig } from "../test/fixtures";
+import type { OCRLanguageCatalog } from "../types";
+
+it("mantiene visible la configuración cuando el catálogo heredado contiene null", async () => {
+  vi.spyOn(api, "ocrLanguages").mockResolvedValueOnce({ installation_enabled: false, installed: null, available: null } as unknown as OCRLanguageCatalog);
+  render(<ConfigPage initial={structuredClone(sampleConfig)} onSaved={() => undefined} />);
+  expect(await screen.findByText("No hay idiomas pendientes por instalar.")).toBeInTheDocument();
+  expect(screen.getByRole("heading", { name: "OCR e indexación" })).toBeInTheDocument();
+  expect(screen.getByText("Instalación deshabilitada en config.yaml")).toBeInTheDocument();
+});
 
 it("muestra idiomas del sistema e instala una selección sin habilitarla", async () => {
   const user = userEvent.setup();

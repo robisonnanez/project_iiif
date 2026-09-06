@@ -2,6 +2,7 @@ package services
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"reflect"
 	"strings"
@@ -60,6 +61,49 @@ func TestOCRLanguageCatalogUsesSystemSources(t *testing.T) {
 	}
 	if !catalog.Installed[2].Enabled && !catalog.Installed[1].Enabled && !catalog.Installed[0].Enabled {
 		t.Fatal("spa debería aparecer habilitado")
+	}
+}
+
+func TestOCRLanguageCatalogSerializesEmptyCollectionsAsArrays(t *testing.T) {
+	tests := []struct {
+		name      string
+		installed string
+		available string
+		wantJSON  string
+	}{
+		{
+			name:      "todos los paquetes ya están instalados",
+			installed: "List of available languages (2):\neng\nspa\n",
+			available: "tesseract-ocr-eng\ntesseract-ocr-spa\n",
+			wantJSON:  `"available":[]`,
+		},
+		{
+			name:      "Tesseract no informa idiomas instalados",
+			installed: "List of available languages (0):\n",
+			available: "tesseract-ocr-deu\n",
+			wantJSON:  `"installed":[]`,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			cfg := config.Default()
+			service := NewOCRLanguageService(cfg)
+			service.runner = &fakeLanguageRunner{installed: test.installed, available: test.available}
+			catalog, err := service.Catalog(context.Background())
+			if err != nil {
+				t.Fatal(err)
+			}
+			encoded, err := json.Marshal(catalog)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(string(encoded), test.wantJSON) {
+				t.Fatalf("contrato JSON inesperado: %s; se esperaba %s", encoded, test.wantJSON)
+			}
+			if strings.Contains(string(encoded), `"installed":null`) || strings.Contains(string(encoded), `"available":null`) {
+				t.Fatalf("el catálogo no debe serializar colecciones nulas: %s", encoded)
+			}
+		})
 	}
 }
 

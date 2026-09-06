@@ -703,12 +703,14 @@ definitions:
   services.OCRLanguageCatalog:
     properties:
       available:
+        description: Siempre se serializa como arreglo, incluso cuando está vacío.
         items:
           $ref: '#/definitions/services.OCRLanguage'
         type: array
       installation_enabled:
         type: boolean
       installed:
+        description: Siempre se serializa como arreglo, incluso cuando está vacío.
         items:
           $ref: '#/definitions/services.OCRLanguage'
         type: array
@@ -1119,7 +1121,8 @@ paths:
   /api/v1/admin/ocr/languages:
     get:
       description: Obtiene los idiomas reconocidos por Tesseract y los paquetes APT
-        disponibles para instalar. Requiere sesión administrativa.
+        disponibles para instalar. installed y available siempre son arreglos, incluso
+        cuando no contienen elementos. Requiere sesión administrativa.
       produces:
       - application/json
       responses:

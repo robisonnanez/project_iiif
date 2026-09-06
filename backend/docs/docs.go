@@ -515,7 +515,7 @@ const docTemplate = `{
                         "SessionCookie": []
                     }
                 ],
-                "description": "Obtiene los idiomas reconocidos por Tesseract y los paquetes APT disponibles para instalar. Requiere sesión administrativa.",
+                "description": "Obtiene los idiomas reconocidos por Tesseract y los paquetes APT disponibles para instalar. installed y available siempre son arreglos, incluso cuando no contienen elementos. Requiere sesión administrativa.",
                 "produces": [
                     "application/json"
                 ],
@@ -2643,6 +2643,7 @@ const docTemplate = `{
             "type": "object",
             "properties": {
                 "available": {
+                    "description": "Siempre se serializa como arreglo, incluso cuando está vacío.",
                     "type": "array",
                     "items": {
                         "$ref": "#/definitions/services.OCRLanguage"
@@ -2652,6 +2653,7 @@ const docTemplate = `{
                     "type": "boolean"
                 },
                 "installed": {
+                    "description": "Siempre se serializa como arreglo, incluso cuando está vacío.",
                     "type": "array",
                     "items": {
                         "$ref": "#/definitions/services.OCRLanguage"
