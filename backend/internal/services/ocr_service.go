@@ -60,6 +60,14 @@ type OCRWordSearchResponse struct {
 
 var ErrOCRWordGeometryUnavailable = errors.New("la página no contiene geometría por palabra; debe reprocesarse con force=true")
 
+var (
+	ErrOCRDisabled         = errors.New("OCR está desactivado en config.yaml")
+	ErrOCRActiveJob        = errors.New("el documento ya tiene un trabajo OCR activo")
+	ErrOCRDocumentNotFound = errors.New("documento no encontrado")
+	ErrOCRNoLanguages      = errors.New("no hay idiomas Tesseract instalados compatibles con la configuración OCR")
+	ErrOCRPersistence      = errors.New("no se pudo persistir el trabajo OCR")
+)
+
 // UnmarshalJSON analiza la entrada y devuelve una representación validada.
 func (word *OCRWord) UnmarshalJSON(data []byte) error {
 	var value struct {
@@ -117,15 +125,18 @@ type OCRPage struct {
 }
 
 type OCRJob struct {
-	ID              string     `json:"id"`
-	DocumentID      string     `json:"document_id"`
+	ID              string     `json:"id" example:"6f4c52c4-770d-4ffe-9cb5-eb793e75da54"`
+	DocumentID      string     `json:"document_id" example:"23dfc57f-6a62-45ac-9ea9-126d007913b7"`
+	DocumentName    string     `json:"document_name,omitempty" example:"Libro.pdf"`
 	ProjectKey      string     `json:"project_key"`
 	TenantKey       string     `json:"tenant_key,omitempty"`
 	Generation      string     `json:"generation"`
 	Mode            string     `json:"mode"`
 	LanguageMode    string     `json:"language_mode"`
 	Languages       []string   `json:"languages"`
-	Status          string     `json:"status"`
+	Regeneration    bool       `json:"regeneration" example:"true"`
+	Status          string     `json:"status" example:"queued"`
+	Message         string     `json:"message,omitempty" example:"Esperando en cola"`
 	TotalPages      int        `json:"total_pages"`
 	ProcessedPages  int        `json:"processed_pages"`
 	FailedPages     int        `json:"failed_pages"`
@@ -135,6 +146,11 @@ type OCRJob struct {
 	CreatedAt       time.Time  `json:"created_at"`
 	StartedAt       *time.Time `json:"started_at,omitempty"`
 	FinishedAt      *time.Time `json:"finished_at,omitempty"`
+}
+
+type OCRJobListResponse struct {
+	Jobs  []*OCRJob `json:"jobs"`
+	Total int       `json:"total"`
 }
 
 type OCRDocumentSummary struct {
@@ -202,7 +218,7 @@ type TesseractEngine struct{}
 // Recognize ejecuta la operación principal respetando límites, contexto y errores.
 func (TesseractEngine) Recognize(ctx context.Context, imagePath string, languages []string) (string, []OCRWord, float64, error) {
 	if len(languages) == 0 {
-		languages = []string{"spa"}
+		return "", nil, 0, ErrOCRNoLanguages
 	}
 	cmd := exec.CommandContext(ctx, "tesseract", imagePath, "stdout", "-l", strings.Join(languages, "+"), "--psm", "3", "tsv")
 	var stderr bytes.Buffer
@@ -311,21 +327,22 @@ func recordHasColumns(record []string, header map[string]int) bool {
 }
 
 type OCRService struct {
-	config       *config.Config
-	storage      storage.Storage
-	engine       OCREngine
-	root         string
-	queue        chan string
-	mu           sync.RWMutex
-	jobs         map[string]*OCRJob
-	cancels      map[string]context.CancelFunc
-	vocabularyMu sync.RWMutex
-	vocabularies map[string][]ocrVocabularyEntry
+	config             *config.Config
+	storage            storage.Storage
+	engine             OCREngine
+	root               string
+	queue              chan string
+	mu                 sync.RWMutex
+	jobs               map[string]*OCRJob
+	cancels            map[string]context.CancelFunc
+	vocabularyMu       sync.RWMutex
+	vocabularies       map[string][]ocrVocabularyEntry
+	installedLanguages func(context.Context) ([]string, error)
 }
 
 // NewOCRService crea e inicializa la dependencia con una configuración válida.
 func NewOCRService(cfg *config.Config, store storage.Storage) (*OCRService, error) {
-	service := &OCRService{config: cfg, storage: store, engine: TesseractEngine{}, root: filepath.Join(cfg.Storage.DataPath, "ocr"), jobs: map[string]*OCRJob{}, cancels: map[string]context.CancelFunc{}, vocabularies: map[string][]ocrVocabularyEntry{}}
+	service := &OCRService{config: cfg, storage: store, engine: TesseractEngine{}, root: filepath.Join(cfg.Storage.DataPath, "ocr"), jobs: map[string]*OCRJob{}, cancels: map[string]context.CancelFunc{}, vocabularies: map[string][]ocrVocabularyEntry{}, installedLanguages: listInstalledTesseractLanguages}
 	if err := os.MkdirAll(filepath.Join(service.root, "jobs"), 0755); err != nil {
 		return nil, err
 	}
@@ -338,10 +355,17 @@ func NewOCRService(cfg *config.Config, store storage.Storage) (*OCRService, erro
 			go service.worker()
 		}
 		for id, job := range service.jobs {
-			if job.Status == "queued" || job.Status == "processing" || job.Status == "detecting_language" || job.Status == "indexing" {
+			if isActiveOCRStatus(job.Status) {
 				job.Status = "queued"
 				job.Error = ""
+				job.Message = "Recuperado después del reinicio; esperando en cola"
+				job.ProcessedPages = 0
+				job.FailedPages = 0
+				job.CurrentPage = 0
+				job.StartedAt = nil
+				job.FinishedAt = nil
 				_ = service.saveJob(job)
+				log.Printf("[OCR] job=%s document=%s recovered=true queued", job.ID, job.DocumentID)
 				service.queue <- id
 			}
 		}
@@ -354,12 +378,22 @@ func (s *OCRService) Enabled() bool { return s.config.OCR.Enabled }
 
 // CreateJob crea o persiste la información validada por el servicio.
 func (s *OCRService) CreateJob(documentID string, request CreateOCRJobRequest) (*OCRJob, error) {
+	return s.createJob(documentID, request, false)
+}
+
+// Regenerate crea una nueva generación usando exactamente el mismo worker OCR.
+func (s *OCRService) Regenerate(documentID string, request CreateOCRJobRequest) (*OCRJob, error) {
+	request.Force = true
+	return s.createJob(documentID, request, true)
+}
+
+func (s *OCRService) createJob(documentID string, request CreateOCRJobRequest, regeneration bool) (*OCRJob, error) {
 	if !s.Enabled() {
-		return nil, errors.New("OCR está desactivado en config.yaml")
+		return nil, ErrOCRDisabled
 	}
 	doc, err := s.storage.GetDocument(documentID)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("%w: %v", ErrOCRDocumentNotFound, err)
 	}
 	if doc.Status != "completed" {
 		return nil, errors.New("el documento debe terminar su conversión antes de ejecutar OCR")
@@ -378,25 +412,78 @@ func (s *OCRService) CreateJob(documentID string, request CreateOCRJobRequest) (
 	if languageMode != "auto" && languageMode != "manual" {
 		return nil, errors.New("language_mode debe ser auto o manual")
 	}
-	languages := sanitizeLanguages(request.Languages, s.config.OCR.CandidateLanguages)
-	if languageMode == "manual" && len(languages) == 0 {
-		return nil, errors.New("seleccione al menos un idioma")
+	installed, err := s.installedLanguages(context.Background())
+	if err != nil {
+		return nil, fmt.Errorf("consultar idiomas Tesseract: %w", err)
 	}
+	configured := sanitizeLanguages(s.config.OCR.CandidateLanguages, installed)
+	if len(configured) == 0 {
+		return nil, ErrOCRNoLanguages
+	}
+	languages := sanitizeLanguages(request.Languages, configured)
+	if languageMode == "manual" && len(languages) == 0 {
+		return nil, errors.New("seleccione al menos un idioma configurado e instalado")
+	}
+	s.mu.RLock()
+	for _, existing := range s.jobs {
+		if existing.DocumentID == documentID && isActiveOCRStatus(existing.Status) {
+			s.mu.RUnlock()
+			return nil, fmt.Errorf("%w: job=%s status=%s", ErrOCRActiveJob, existing.ID, existing.Status)
+		}
+	}
+	s.mu.RUnlock()
 	if !request.Force {
 		if summary, err := s.GetSummary(documentID); err == nil && summary.Status == "completed" {
 			return nil, errors.New("el documento ya tiene OCR activo; use force para crear una nueva generación")
 		}
 	}
 	now := time.Now().UTC()
-	job := &OCRJob{ID: uuid.NewString(), DocumentID: documentID, ProjectKey: doc.ProjectKey, TenantKey: doc.TenantKey, Generation: uuid.NewString(), Mode: mode, LanguageMode: languageMode, Languages: languages, Status: "queued", TotalPages: doc.TotalPages, CreatedAt: now}
+	job := &OCRJob{ID: uuid.NewString(), DocumentID: documentID, DocumentName: doc.Name, ProjectKey: doc.ProjectKey, TenantKey: doc.TenantKey, Generation: uuid.NewString(), Mode: mode, LanguageMode: languageMode, Languages: languages, Regeneration: regeneration, Status: "queued", Message: "Esperando en cola", TotalPages: doc.TotalPages, CreatedAt: now}
 	s.mu.Lock()
+	for _, existing := range s.jobs {
+		if existing.DocumentID == documentID && isActiveOCRStatus(existing.Status) {
+			s.mu.Unlock()
+			return nil, fmt.Errorf("%w: job=%s status=%s", ErrOCRActiveJob, existing.ID, existing.Status)
+		}
+	}
 	s.jobs[job.ID] = job
 	s.mu.Unlock()
 	if err := s.saveJob(job); err != nil {
-		return nil, err
+		s.mu.Lock()
+		delete(s.jobs, job.ID)
+		s.mu.Unlock()
+		return nil, fmt.Errorf("%w: %v", ErrOCRPersistence, err)
 	}
+	log.Printf("[OCR] job=%s document=%s regeneration=%t queued", job.ID, job.DocumentID, job.Regeneration)
 	s.queue <- job.ID
 	return cloneJob(job), nil
+}
+
+// ListJobs devuelve una instantánea ordenada de los jobs persistidos en memoria.
+func (s *OCRService) ListJobs(activeOnly bool, documentID string) OCRJobListResponse {
+	s.mu.RLock()
+	jobs := make([]*OCRJob, 0, len(s.jobs))
+	for _, job := range s.jobs {
+		if documentID != "" && job.DocumentID != documentID {
+			continue
+		}
+		if activeOnly && !isActiveOCRStatus(job.Status) {
+			continue
+		}
+		jobs = append(jobs, cloneJob(job))
+	}
+	s.mu.RUnlock()
+	sort.Slice(jobs, func(i, j int) bool { return jobs[i].CreatedAt.After(jobs[j].CreatedAt) })
+	return OCRJobListResponse{Jobs: jobs, Total: len(jobs)}
+}
+
+func isActiveOCRStatus(status string) bool {
+	switch status {
+	case "queued", "pending", "processing", "running", "detecting_language", "indexing", "cancelling":
+		return true
+	default:
+		return false
+	}
 }
 
 // GetJob obtiene la información solicitada sin modificar el estado persistido.
@@ -452,11 +539,13 @@ func (s *OCRService) processJob(id string) {
 	}
 	if job.CancelRequested {
 		job.Status = "cancelled"
+		job.Message = "OCR cancelado"
 		now := time.Now().UTC()
 		job.FinishedAt = &now
 		copy := cloneJob(job)
 		s.mu.Unlock()
 		_ = s.saveJob(copy)
+		log.Printf("[OCR] job=%s document=%s cancelled", id, job.DocumentID)
 		return
 	}
 	ctx, cancel := context.WithCancel(context.Background())
@@ -464,6 +553,7 @@ func (s *OCRService) processJob(id string) {
 	now := time.Now().UTC()
 	job.StartedAt = &now
 	job.Status = "detecting_language"
+	job.Message = "Detectando idioma"
 	copy := cloneJob(job)
 	s.mu.Unlock()
 	_ = s.saveJob(copy)
@@ -488,15 +578,37 @@ func (s *OCRService) processJob(id string) {
 	s.updateJob(id, func(j *OCRJob) { j.TotalPages = pageCount })
 	languages := job.Languages
 	if job.LanguageMode == "auto" {
-		languages = s.detectLanguages(document)
+		var detected string
+		languages, detected, err = s.detectLanguages(document)
+		if err != nil {
+			s.failJob(id, err)
+			return
+		}
 		s.updateJob(id, func(j *OCRJob) { j.Languages = languages })
+		log.Printf("[OCR] job=%s document=%s detected_language=%s tesseract_language=%s", id, job.DocumentID, detected, strings.Join(languages, "+"))
+	} else {
+		installed, languageErr := s.installedLanguages(ctx)
+		if languageErr != nil {
+			s.failJob(id, fmt.Errorf("consultar idiomas Tesseract: %w", languageErr))
+			return
+		}
+		languages = sanitizeLanguages(languages, installed)
+		if len(languages) == 0 {
+			s.failJob(id, ErrOCRNoLanguages)
+			return
+		}
+		log.Printf("[OCR] job=%s document=%s language_mode=manual tesseract_language=%s", id, job.DocumentID, strings.Join(languages, "+"))
 	}
 	for pageIndex := 0; pageIndex < pageCount; pageIndex++ {
 		if ctx.Err() != nil || s.cancelRequested(id) {
 			s.finishCancelled(id)
 			return
 		}
-		s.updateJob(id, func(j *OCRJob) { j.Status = "processing"; j.CurrentPage = pageIndex + 1 })
+		s.updateJob(id, func(j *OCRJob) {
+			j.Status = "processing"
+			j.CurrentPage = pageIndex + 1
+			j.Message = fmt.Sprintf("Procesando página %d de %d", pageIndex+1, pageCount)
+		})
 		page, pageErr := s.processPage(ctx, document, job, pageIndex, languages)
 		if pageErr != nil {
 			page = &OCRPage{SchemaVersion: ocrSchemaVersion, DocumentID: job.DocumentID, Generation: job.Generation, PageNumber: pageIndex + 1, Status: "failed", Source: "blank", Language: strings.Join(languages, "+"), Engine: "tesseract-cli", CreatedAt: time.Now().UTC(), Error: pageErr.Error()}
@@ -511,7 +623,7 @@ func (s *OCRService) processJob(id string) {
 			}
 		})
 	}
-	s.updateJob(id, func(j *OCRJob) { j.Status = "indexing" })
+	s.updateJob(id, func(j *OCRJob) { j.Status = "indexing"; j.Message = "Indexando resultados OCR" })
 	current, _ := s.GetJob(id)
 	status := "completed"
 	if current.FailedPages > 0 {
@@ -531,7 +643,14 @@ func (s *OCRService) processJob(id string) {
 		s.failJob(id, err)
 		return
 	}
-	s.updateJob(id, func(j *OCRJob) { j.Status = status; now := time.Now().UTC(); j.FinishedAt = &now; j.CurrentPage = 0 })
+	s.updateJob(id, func(j *OCRJob) {
+		j.Status = status
+		j.Message = "OCR completado"
+		now := time.Now().UTC()
+		j.FinishedAt = &now
+		j.CurrentPage = 0
+	})
+	log.Printf("[OCR] job=%s document=%s status=%s completed", id, job.DocumentID, status)
 }
 
 // processPage ejecuta la operación principal respetando límites, contexto y errores.
@@ -586,7 +705,7 @@ func (s *OCRService) processPage(parent context.Context, document *fitz.Document
 			page.Text = nativeText
 			page.GeometryError = err.Error()
 			page.SearchText = normalizeSearch(page.Text)
-			log.Printf("OCR page document=%s page=%d language=%s words=0 geometry=%s duration=%s tesseract_calls=%d error=%q", job.DocumentID, pageIndex+1, page.Language, page.GeometryStatus, time.Since(startedAt).Round(time.Millisecond), attempts, err.Error())
+			log.Printf("[OCR] job=%s document=%s page=%d/%d language=%s words=0 geometry=%s duration=%s tesseract_calls=%d error=%q", job.ID, job.DocumentID, pageIndex+1, job.TotalPages, page.Language, page.GeometryStatus, time.Since(startedAt).Round(time.Millisecond), attempts, err.Error())
 			return page, nil
 		}
 		return nil, err
@@ -619,12 +738,27 @@ func (s *OCRService) processPage(parent context.Context, document *fitz.Document
 		page.Source = "blank"
 	}
 	page.SearchText = normalizeSearch(page.Text)
-	log.Printf("OCR page document=%s page=%d language=%s words=%d geometry=%s duration=%s tesseract_calls=%d ocr_image=%dx%d canvas=%dx%d", job.DocumentID, pageIndex+1, page.Language, len(page.Words), page.GeometryStatus, time.Since(startedAt).Round(time.Millisecond), attempts, ocrWidth, ocrHeight, canvasWidth, canvasHeight)
+	log.Printf("[OCR] job=%s document=%s page=%d/%d language=%s words=%d geometry=%s duration=%s tesseract_calls=%d ocr_image=%dx%d canvas=%dx%d", job.ID, job.DocumentID, pageIndex+1, job.TotalPages, page.Language, len(page.Words), page.GeometryStatus, time.Since(startedAt).Round(time.Millisecond), attempts, ocrWidth, ocrHeight, canvasWidth, canvasHeight)
 	return page, nil
 }
 
 // detectLanguages ejecuta la operación principal respetando límites, contexto y errores.
-func (s *OCRService) detectLanguages(document *fitz.Document) []string {
+func (s *OCRService) detectLanguages(document *fitz.Document) ([]string, string, error) {
+	installed, err := s.installedLanguages(context.Background())
+	if err != nil {
+		return nil, "unavailable", fmt.Errorf("consultar idiomas Tesseract: %w", err)
+	}
+	candidates := sanitizeLanguages(s.config.OCR.CandidateLanguages, installed)
+	fallback := sanitizeLanguages(s.config.OCR.FallbackLanguages, installed)
+	if len(fallback) == 0 && len(candidates) > 0 {
+		fallback = []string{candidates[0]}
+	}
+	if len(candidates) == 0 || len(fallback) == 0 {
+		return nil, "unavailable", ErrOCRNoLanguages
+	}
+	if !s.config.OCR.LanguageDetection.Enabled {
+		return fallback, "disabled", nil
+	}
 	var sample strings.Builder
 	limit := minInt(document.NumPage(), s.config.OCR.LanguageDetection.SamplePages)
 	for page := 0; page < limit; page++ {
@@ -649,7 +783,7 @@ func (s *OCRService) detectLanguages(document *fitz.Document) []string {
 			path := temp.Name()
 			if png.Encode(temp, image) == nil && temp.Close() == nil {
 				ctx, cancel := context.WithTimeout(context.Background(), time.Duration(s.config.OCR.PageTimeoutSeconds)*time.Second)
-				text, _, _, recognizeErr := s.engine.Recognize(ctx, path, s.config.OCR.CandidateLanguages)
+				text, _, _, recognizeErr := s.engine.Recognize(ctx, path, candidates)
 				cancel()
 				if recognizeErr == nil {
 					sample.WriteString(text)
@@ -665,25 +799,87 @@ func (s *OCRService) detectLanguages(document *fitz.Document) []string {
 		}
 	}
 	if usefulRunes(sample.String()) < s.config.OCR.LanguageDetection.MinSampleChars {
-		return append([]string(nil), s.config.OCR.FallbackLanguages...)
+		return fallback, "fallback", nil
 	}
-	detectorLanguages := linguaLanguages(s.config.OCR.CandidateLanguages)
+	detectorLanguages := linguaLanguages(candidates)
 	if len(detectorLanguages) == 0 {
-		return append([]string(nil), s.config.OCR.FallbackLanguages...)
+		return fallback, "fallback", nil
 	}
+	selected := selectLanguagesFromSample(sample.String(), detectorLanguages, fallback, s.config.OCR.LanguageDetection.MinimumConfidence, s.config.OCR.LanguageDetection.MaxLanguages)
+	return selected, strings.Join(selected, "+"), nil
+}
+
+func selectLanguagesFromSample(sample string, detectorLanguages []lingua.Language, fallback []string, minimumConfidence float64, maxLanguages int) []string {
 	if len(detectorLanguages) == 1 {
 		return []string{tesseractLanguage(detectorLanguages[0])}
 	}
 	detector := lingua.NewLanguageDetectorBuilder().FromLanguages(detectorLanguages...).Build()
-	values := detector.ComputeLanguageConfidenceValues(sample.String())
-	if len(values) == 0 || values[0].Value() < s.config.OCR.LanguageDetection.MinimumConfidence {
-		return append([]string(nil), s.config.OCR.FallbackLanguages...)
+	if maxLanguages > 1 {
+		coverage := map[string]int{}
+		total := 0
+		for _, section := range detector.DetectMultipleLanguagesOf(sample) {
+			length := section.EndIndex() - section.StartIndex()
+			if length > 0 {
+				coverage[tesseractLanguage(section.Language())] += length
+				total += length
+			}
+		}
+		type languageCoverage struct {
+			language string
+			length   int
+		}
+		ranked := make([]languageCoverage, 0, len(coverage))
+		for language, length := range coverage {
+			ranked = append(ranked, languageCoverage{language: language, length: length})
+		}
+		sort.Slice(ranked, func(i, j int) bool { return ranked[i].length > ranked[j].length })
+		if len(ranked) > 1 && total > 0 && ranked[1].length*5 >= total {
+			limit := minInt(maxLanguages, len(ranked))
+			result := make([]string, 0, limit)
+			for _, item := range ranked[:limit] {
+				if item.length*5 >= total {
+					result = append(result, item.language)
+				}
+			}
+			if len(result) > 1 {
+				return result
+			}
+		}
+	}
+	values := detector.ComputeLanguageConfidenceValues(sample)
+	if len(values) == 0 {
+		return append([]string(nil), fallback...)
 	}
 	result := []string{tesseractLanguage(values[0].Language())}
-	if s.config.OCR.LanguageDetection.MaxLanguages > 1 && len(values) > 1 && values[1].Value() >= 0.25 && values[0].Value()-values[1].Value() <= 0.40 {
+	if maxLanguages > 1 && len(values) > 1 && values[0].Value() >= 0.25 && values[1].Value() >= 0.25 && values[0].Value()-values[1].Value() <= 0.40 {
 		result = append(result, tesseractLanguage(values[1].Language()))
+		return result
+	}
+	if values[0].Value() < minimumConfidence {
+		return append([]string(nil), fallback...)
 	}
 	return result
+}
+
+func listInstalledTesseractLanguages(ctx context.Context) ([]string, error) {
+	commandContext, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+	output, err := exec.CommandContext(commandContext, "tesseract", "--list-langs").CombinedOutput()
+	if err != nil {
+		return nil, fmt.Errorf("tesseract --list-langs: %w: %s", err, strings.TrimSpace(string(output)))
+	}
+	languages := make([]string, 0)
+	for _, line := range strings.Split(string(output), "\n") {
+		code := strings.ToLower(strings.TrimSpace(line))
+		if tesseractLanguageCode.MatchString(code) && code != "osd" {
+			languages = append(languages, code)
+		}
+	}
+	if len(languages) == 0 {
+		return nil, ErrOCRNoLanguages
+	}
+	sort.Strings(languages)
+	return languages, nil
 }
 
 // tesseractLanguage encapsula esta operación interna y conserva las invariantes del componente.
@@ -1251,6 +1447,11 @@ func (s *OCRService) loadJobs() error {
 		}
 		var job OCRJob
 		if json.Unmarshal(data, &job) == nil {
+			if job.DocumentName == "" {
+				if document, documentErr := s.storage.GetDocument(job.DocumentID); documentErr == nil {
+					job.DocumentName = document.Name
+				}
+			}
 			s.jobs[job.ID] = &job
 		}
 	}
@@ -1299,14 +1500,26 @@ func (s *OCRService) failJob(id string, err error) {
 	s.updateJob(id, func(job *OCRJob) {
 		job.Status = "failed"
 		job.Error = err.Error()
+		job.Message = "El procesamiento OCR falló"
 		now := time.Now().UTC()
 		job.FinishedAt = &now
 	})
+	if job, getErr := s.GetJob(id); getErr == nil {
+		log.Printf("[OCR] job=%s document=%s failed error=%q", id, job.DocumentID, err.Error())
+	}
 }
 
 // finishCancelled encapsula esta operación interna y conserva las invariantes del componente.
 func (s *OCRService) finishCancelled(id string) {
-	s.updateJob(id, func(job *OCRJob) { job.Status = "cancelled"; now := time.Now().UTC(); job.FinishedAt = &now })
+	s.updateJob(id, func(job *OCRJob) {
+		job.Status = "cancelled"
+		job.Message = "OCR cancelado"
+		now := time.Now().UTC()
+		job.FinishedAt = &now
+	})
+	if job, err := s.GetJob(id); err == nil {
+		log.Printf("[OCR] job=%s document=%s cancelled", id, job.DocumentID)
+	}
 }
 
 // cancelRequested elimina o libera de forma controlada los recursos asociados.

@@ -97,10 +97,14 @@ export interface AppConfig {
 }
 
 export interface OCRJob {
-  id: string; document_id: string; generation: string; mode: string; languages: string[];
+  id: string; document_id: string; document_name?: string; generation: string; mode: string; language_mode: string; languages: string[];
+  regeneration: boolean; message?: string;
   status: string; total_pages: number; processed_pages: number; failed_pages: number;
-  current_page?: number; error?: string;
+  current_page?: number; cancel_requested?: boolean; error?: string;
+  created_at: string; started_at?: string; finished_at?: string;
 }
+
+export interface OCRJobListResponse { jobs: OCRJob[]; total: number; }
 
 export interface OCRSearchResult {
   document_id: string; page_number: number; canvas_v2: string; canvas_v3: string;

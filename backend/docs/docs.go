@@ -282,6 +282,24 @@ const docTemplate = `{
                             "$ref": "#/definitions/handlers.errorResponse"
                         }
                     },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.errorResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.errorResponse"
+                        }
+                    },
+                    "422": {
+                        "description": "Unprocessable Entity",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.errorResponse"
+                        }
+                    },
                     "503": {
                         "description": "Service Unavailable",
                         "schema": {
@@ -423,6 +441,52 @@ const docTemplate = `{
                     },
                     "403": {
                         "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.errorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/admin/ocr/jobs": {
+            "get": {
+                "security": [
+                    {
+                        "SessionCookie": []
+                    }
+                ],
+                "description": "Recupera desde el backend los trabajos OCR persistidos. Por defecto devuelve solo estados activos; use active=false para incluir terminales.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "OCR"
+                ],
+                "summary": "Listar trabajos OCR",
+                "parameters": [
+                    {
+                        "type": "boolean",
+                        "default": true,
+                        "description": "Solo queued, detecting_language, processing, indexing o cancelling",
+                        "name": "active",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filtrar por documento",
+                        "name": "document_id",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/services.OCRJobListResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
                         "schema": {
                             "$ref": "#/definitions/handlers.errorResponse"
                         }
@@ -1146,6 +1210,87 @@ const docTemplate = `{
                     },
                     "409": {
                         "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.errorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/documents/{id}/ocr/regenerate": {
+            "post": {
+                "security": [
+                    {
+                        "SessionCookie": []
+                    }
+                ],
+                "description": "Crea una nueva generación OCR conservando las generaciones históricas y reutilizando el worker actual que produce texto, words, confidence y bbox. Devuelve 409 si ya existe un trabajo activo para el documento.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "OCR"
+                ],
+                "summary": "Regenerar completamente el OCR de un documento",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "ID del documento",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Modo e idiomas opcionales; force se aplica automáticamente",
+                        "name": "request",
+                        "in": "body",
+                        "schema": {
+                            "$ref": "#/definitions/services.CreateOCRJobRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "202": {
+                        "description": "Accepted",
+                        "schema": {
+                            "$ref": "#/definitions/services.OCRJob"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.errorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.errorResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.errorResponse"
+                        }
+                    },
+                    "422": {
+                        "description": "Unprocessable Entity",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.errorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.errorResponse"
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
                         "schema": {
                             "$ref": "#/definitions/handlers.errorResponse"
                         }
@@ -2598,7 +2743,12 @@ const docTemplate = `{
                     "type": "integer"
                 },
                 "document_id": {
-                    "type": "string"
+                    "type": "string",
+                    "example": "23dfc57f-6a62-45ac-9ea9-126d007913b7"
+                },
+                "document_name": {
+                    "type": "string",
+                    "example": "Libro.pdf"
                 },
                 "error": {
                     "type": "string"
@@ -2613,7 +2763,8 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "id": {
-                    "type": "string"
+                    "type": "string",
+                    "example": "6f4c52c4-770d-4ffe-9cb5-eb793e75da54"
                 },
                 "language_mode": {
                     "type": "string"
@@ -2624,6 +2775,10 @@ const docTemplate = `{
                         "type": "string"
                     }
                 },
+                "message": {
+                    "type": "string",
+                    "example": "Esperando en cola"
+                },
                 "mode": {
                     "type": "string"
                 },
@@ -2633,16 +2788,35 @@ const docTemplate = `{
                 "project_key": {
                     "type": "string"
                 },
+                "regeneration": {
+                    "type": "boolean",
+                    "example": true
+                },
                 "started_at": {
                     "type": "string"
                 },
                 "status": {
-                    "type": "string"
+                    "type": "string",
+                    "example": "queued"
                 },
                 "tenant_key": {
                     "type": "string"
                 },
                 "total_pages": {
+                    "type": "integer"
+                }
+            }
+        },
+        "services.OCRJobListResponse": {
+            "type": "object",
+            "properties": {
+                "jobs": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/services.OCRJob"
+                    }
+                },
+                "total": {
                     "type": "integer"
                 }
             }

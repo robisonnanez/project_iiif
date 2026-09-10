@@ -1,4 +1,4 @@
-import type { AppConfig, DBMigrationResult, DBMigrationStatus, DocumentImagesResponse, DocumentRecord, MigrationDirectory, MigrationPayload, MigrationStatus, OCRAutocompleteResponse, OCRJob, OCRLanguageCatalog, OCRSearchResponse, ProjectConfig, UploadScope, UploadSettings } from "./types";
+import type { AppConfig, DBMigrationResult, DBMigrationStatus, DocumentImagesResponse, DocumentRecord, MigrationDirectory, MigrationPayload, MigrationStatus, OCRAutocompleteResponse, OCRJob, OCRJobListResponse, OCRLanguageCatalog, OCRSearchResponse, ProjectConfig, UploadScope, UploadSettings } from "./types";
 import { normalizeDocuments, normalizeLanguageInstallation, normalizeOCRLanguageCatalog, validateConfig } from "./lib/api-validation";
 
 // request ejecuta una petición con credenciales, interpreta el cuerpo y unifica los errores HTTP.
@@ -52,6 +52,12 @@ export const api = {
   }),
   migrationStatus: () => request<MigrationStatus>("/api/v1/admin/migrations/local-to-db/status"),
   startOCR: (documentId: string, payload: { mode: string; language_mode: string; languages: string[]; force: boolean }) => request<OCRJob>(`/api/v1/admin/documents/${encodeURIComponent(documentId)}/ocr/jobs`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }),
+  regenerateOCR: (documentId: string, payload: { mode: string; language_mode: string; languages: string[] }) => request<OCRJob>(`/api/v1/documents/${encodeURIComponent(documentId)}/ocr/regenerate`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }),
+  activeOCRJobs: (documentId?: string) => {
+    const params = new URLSearchParams({ active: "true" });
+    if (documentId) params.set("document_id", documentId);
+    return request<OCRJobListResponse>(`/api/v1/admin/ocr/jobs?${params}`, { cache: "no-store" });
+  },
   ocrJob: (jobId: string) => request<OCRJob>(`/api/v1/admin/ocr/jobs/${encodeURIComponent(jobId)}`),
   cancelOCR: (jobId: string) => request<OCRJob>(`/api/v1/admin/ocr/jobs/${encodeURIComponent(jobId)}/cancel`, { method: "POST" }),
   ocrLanguages: async () => {
