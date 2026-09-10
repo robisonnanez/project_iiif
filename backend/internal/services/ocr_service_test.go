@@ -1,11 +1,15 @@
 package services
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -13,6 +17,167 @@ import (
 	"iiif-pdf-server/internal/models"
 	"iiif-pdf-server/internal/storage"
 )
+
+func TestTesseractEngineRejectsEmptyLanguages(t *testing.T) {
+	if _, _, _, err := (TesseractEngine{}).Recognize(context.Background(), "unused.png", nil); !errors.Is(err, ErrOCRNoLanguages) {
+		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestRegenerateRejectsDuplicateActiveJobAndListsIt(t *testing.T) {
+	service := newAutocompleteTestService(t, []autocompleteTestDocument{{id: "doc-a", project: "project-a", pages: []string{"texto"}}})
+	service.config.OCR.Enabled = true
+	service.config.OCR.CandidateLanguages = []string{"spa", "eng"}
+	service.config.OCR.FallbackLanguages = []string{"spa"}
+	service.installedLanguages = func(context.Context) ([]string, error) { return []string{"eng", "spa"}, nil }
+
+	start := make(chan struct{})
+	var wait sync.WaitGroup
+	var resultMu sync.Mutex
+	jobs := make([]*OCRJob, 0, 1)
+	errorsSeen := make([]error, 0, 7)
+	for index := 0; index < 8; index++ {
+		wait.Add(1)
+		go func() {
+			defer wait.Done()
+			<-start
+			job, err := service.Regenerate("doc-a", CreateOCRJobRequest{Mode: "ocr_only", LanguageMode: "manual", Languages: []string{"spa"}})
+			resultMu.Lock()
+			defer resultMu.Unlock()
+			if err != nil {
+				errorsSeen = append(errorsSeen, err)
+			} else {
+				jobs = append(jobs, job)
+			}
+		}()
+	}
+	close(start)
+	wait.Wait()
+	if len(jobs) != 1 || len(errorsSeen) != 7 {
+		t.Fatalf("jobs=%d errors=%d", len(jobs), len(errorsSeen))
+	}
+	for _, err := range errorsSeen {
+		if !errors.Is(err, ErrOCRActiveJob) {
+			t.Fatalf("duplicate error = %v", err)
+		}
+	}
+	job := jobs[0]
+	if !job.Regeneration || job.DocumentName != "doc-a.pdf" || job.Message != "Esperando en cola" {
+		t.Fatalf("job = %#v", job)
+	}
+	list := service.ListJobs(true, "doc-a")
+	if list.Total != 1 || len(list.Jobs) != 1 || list.Jobs[0].ID != job.ID {
+		t.Fatalf("active jobs = %#v", list)
+	}
+}
+
+func TestAutomaticLanguageSelectionSpanishEnglishAndMixed(t *testing.T) {
+	detectors := linguaLanguages([]string{"spa", "eng"})
+	fallback := []string{"spa"}
+	cases := []struct {
+		name   string
+		text   string
+		wanted map[string]bool
+	}{
+		{name: "spanish", text: strings.Repeat("Este documento contiene información histórica en español sobre cultura y patrimonio. ", 8), wanted: map[string]bool{"spa": true}},
+		{name: "english", text: strings.Repeat("This document contains historical information in English about culture and heritage. ", 8), wanted: map[string]bool{"eng": true}},
+		{name: "mixed", text: strings.Repeat("Este documento contiene información histórica en español. This document also contains historical information in English. ", 12), wanted: map[string]bool{"spa": true, "eng": true}},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			got := selectLanguagesFromSample(test.text, detectors, fallback, 0.70, 2)
+			if len(got) != len(test.wanted) {
+				t.Fatalf("languages = %#v", got)
+			}
+			for _, language := range got {
+				if !test.wanted[language] {
+					t.Fatalf("languages = %#v", got)
+				}
+			}
+		})
+	}
+}
+
+func TestOCRRegenerationIntegrationProducesWordsBBoxConfidenceAndEnglish(t *testing.T) {
+	if testing.Short() {
+		t.Skip("prueba OCR real")
+	}
+	if _, err := exec.LookPath("tesseract"); err != nil {
+		t.Skip("Tesseract no está instalado")
+	}
+	pdf, err := os.ReadFile(filepath.Join("testdata", "without_toc.pdf"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	root := t.TempDir()
+	cfg := &config.Config{}
+	cfg.ApplyDefaults()
+	cfg.Storage.DataPath = filepath.Join(root, "artifacts")
+	cfg.PDF.TempPath = filepath.Join(root, "temp")
+	cfg.OCR.Enabled = true
+	cfg.OCR.Workers = 1
+	cfg.OCR.CandidateLanguages = []string{"spa", "eng"}
+	cfg.OCR.FallbackLanguages = []string{"eng"}
+	cfg.OCR.LanguageDetection.Enabled = true
+	cfg.OCR.LanguageDetection.SamplePages = 2
+	cfg.OCR.LanguageDetection.MinSampleChars = 10
+	cfg.OCR.LanguageDetection.MinimumConfidence = 0.60
+	if err := os.MkdirAll(cfg.PDF.TempPath, 0755); err != nil {
+		t.Fatal(err)
+	}
+	metadata := storage.NewFileStorage(filepath.Join(root, "metadata"))
+	document := &models.PDFDocument{ID: "english-fixture", Name: "english-fixture.pdf", Status: "completed", TotalPages: 2, ConvertedPages: 2, UploadDate: time.Now().UTC()}
+	if err := metadata.SaveDocument(document); err != nil {
+		t.Fatal(err)
+	}
+	store := &ocrIntegrationStorage{Storage: metadata, pdf: pdf}
+	service, err := NewOCRService(cfg, store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	job, err := service.Regenerate(document.ID, CreateOCRJobRequest{Mode: "ocr_only", LanguageMode: "auto"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(90 * time.Second)
+	for time.Now().Before(deadline) {
+		job, err = service.GetJob(job.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !isActiveOCRStatus(job.Status) {
+			break
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	if job.Status != "completed" {
+		t.Fatalf("job status=%s error=%s", job.Status, job.Error)
+	}
+	if strings.Join(job.Languages, "+") != "eng" {
+		t.Fatalf("tesseract languages = %#v", job.Languages)
+	}
+	page, err := service.GetPage(document.ID, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if page.Text == "" || page.Confidence <= 0 || len(page.Words) == 0 || page.GeometryStatus != "word" {
+		t.Fatalf("OCR page missing current geometry: text=%q confidence=%v words=%d geometry=%s", page.Text, page.Confidence, len(page.Words), page.GeometryStatus)
+	}
+	for _, word := range page.Words {
+		if word.Confidence <= 0 || word.BBox.X1 <= word.BBox.X0 || word.BBox.Y1 <= word.BBox.Y0 {
+			t.Fatalf("invalid OCR word: %#v", word)
+		}
+	}
+}
+
+type ocrIntegrationStorage struct {
+	storage.Storage
+	pdf []byte
+}
+
+func (s *ocrIntegrationStorage) GetDocumentPDFData(string) (*models.BinaryAsset, error) {
+	return &models.BinaryAsset{ID: "english-fixture", Data: s.pdf, MediaType: "application/pdf", ByteSize: int64(len(s.pdf))}, nil
+}
 
 func TestParseTesseractTSV(t *testing.T) {
 	input := strings.Join([]string{

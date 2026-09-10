@@ -15,7 +15,7 @@ export function OCRPage({ documents, config, notify }: { documents: DocumentReco
   const [languages, setLanguages] = useState<string[]>(["spa"]);
   const [installedLanguages, setInstalledLanguages] = useState<OCRLanguage[]>([]);
   const [force, setForce] = useState(false);
-  const [job, setJob] = useState<OCRJob | null>(null);
+  const [jobs, setJobs] = useState<OCRJob[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [query, setQuery] = useState("");
@@ -30,15 +30,29 @@ export function OCRPage({ documents, config, notify }: { documents: DocumentReco
   useEffect(() => { if (!documentId && ready.length) setDocumentId(ready[0].id); }, [documentId, ready]);
   useEffect(() => { void api.ocrLanguages().then((catalog) => setInstalledLanguages(Array.isArray(catalog.installed) ? catalog.installed : [])).catch(() => undefined); }, []);
   useEffect(() => {
-    if (!job || terminal.has(job.status)) return;
+    let current = true;
+    void api.activeOCRJobs().then((response) => { if (current) setJobs(Array.isArray(response.jobs) ? response.jobs : []); }).catch((cause) => { if (current) setError(cause instanceof Error ? cause.message : "No se pudieron recuperar los trabajos OCR activos."); });
+    return () => { current = false; };
+  }, []);
+  useEffect(() => {
+    const active = jobs.filter((item) => !terminal.has(item.status));
+    if (!active.length) return;
     const timer = window.setInterval(async () => {
       try {
-        const next = await api.ocrJob(job.id); setJob(next);
-        if (terminal.has(next.status)) notify(next.status.startsWith("completed") ? "OCR finalizado e indexado." : `OCR terminó: ${next.status}`, next.status.startsWith("completed") ? "success" : "danger");
+        const refreshed = await Promise.all(active.map((item) => api.ocrJob(item.id)));
+        const activeResponse = await api.activeOCRJobs();
+        const nextByID = new Map(activeResponse.jobs.map((item) => [item.id, item]));
+        for (const item of refreshed) {
+          if (terminal.has(item.status)) {
+            nextByID.set(item.id, item);
+            notify(item.status.startsWith("completed") ? "OCR finalizado e indexado." : `OCR terminó: ${item.status}`, item.status.startsWith("completed") ? "success" : "danger");
+          }
+        }
+        setJobs([...nextByID.values()]);
       } catch (cause) { setError(cause instanceof Error ? cause.message : "No se pudo actualizar el trabajo OCR."); }
-    }, 1500);
+    }, 3000);
     return () => window.clearInterval(timer);
-  }, [job, notify]);
+  }, [jobs, notify]);
   useEffect(() => {
     if (skipAutocomplete.current) {
       skipAutocomplete.current = false;
@@ -71,7 +85,12 @@ export function OCRPage({ documents, config, notify }: { documents: DocumentReco
   // start ejecuta la operación administrativa y controla sus errores.
   const start = async () => {
     if (!documentId) return; setBusy(true); setError("");
-    try { setJob(await api.startOCR(documentId, { mode, language_mode: languageMode, languages: languageMode === "manual" ? languages : [], force })); notify("Trabajo OCR agregado a la cola."); }
+    try {
+      const payload = { mode, language_mode: languageMode, languages: languageMode === "manual" ? languages : [] };
+      const next = force ? await api.regenerateOCR(documentId, payload) : await api.startOCR(documentId, { ...payload, force: false });
+      setJobs((current) => [next, ...current.filter((item) => item.id !== next.id)]);
+      notify(force ? "Regeneración OCR agregada a la cola." : "Trabajo OCR agregado a la cola.");
+    }
     catch (cause) { setError(cause instanceof Error ? cause.message : "No se pudo iniciar OCR."); }
     finally { setBusy(false); }
   };
@@ -107,7 +126,7 @@ export function OCRPage({ documents, config, notify }: { documents: DocumentReco
       else void search();
     }
   };
-  const progress = job?.total_pages ? Math.round(job.processed_pages * 100 / job.total_pages) : 0;
+  const activeForDocument = jobs.some((item) => item.document_id === documentId && !terminal.has(item.status));
 
   return <>
     <PageHeader eyebrow="Texto indexado" title="OCR por página" description="Extrae texto de todas las páginas y localiza cada coincidencia en su Canvas IIIF." />
@@ -124,8 +143,12 @@ export function OCRPage({ documents, config, notify }: { documents: DocumentReco
         </div>
         {languageMode === "manual" && <div className="language-options">{(installedLanguages.length ? installedLanguages : fallbackManualLanguages).filter((language) => language.code !== "osd").map((language) => <label className="checkbox" key={language.code}><input type="checkbox" checked={languages.includes(language.code)} onChange={() => toggleLanguage(language.code)} />{language.name} ({language.code})</label>)}</div>}
         <label className="checkbox"><input type="checkbox" checked={force} onChange={(event) => setForce(event.target.checked)} />Crear una nueva generación aunque ya exista OCR</label>
-        <Button disabled={!config?.ocr?.enabled || !documentId || busy || (!!job && !terminal.has(job.status))} onClick={start}>{busy ? "Procesando…" : "Iniciar OCR"}</Button>
-        {job && <div className="job-progress"><div className="job-progress-heading"><strong>{job.status.replaceAll("_", " ")}</strong><span>{job.processed_pages} / {job.total_pages} páginas</span></div><div className="progress-track"><div className="progress-fill" style={{ width: `${progress}%` }} /></div>{job.error && <p className="inline-error">{job.error}</p>}{!terminal.has(job.status) && <Button variant="danger" onClick={async () => setJob(await api.cancelOCR(job.id))}>Cancelar</Button>}</div>}
+        <Button disabled={!config?.ocr?.enabled || !documentId || busy || activeForDocument} onClick={start}>{busy ? "Procesando…" : "Iniciar OCR"}</Button>
+        {activeForDocument && <p className="field-help">Este documento ya tiene un trabajo OCR activo.</p>}
+        {jobs.length > 0 && <div className="job-progress-list"><h3>Procesamiento OCR en curso</h3>{jobs.map((job) => <OCRJobProgress key={job.id} job={job} documents={ready} onCancel={async () => {
+          const cancelled = await api.cancelOCR(job.id);
+          setJobs((current) => current.map((item) => item.id === cancelled.id ? cancelled : item));
+        }} />)}</div>}
       </Card>
       <Card>
         <div className="card-heading"><div><h2>Buscar texto</h2><p>Los resultados siempre indican documento, página y Canvas.</p></div></div>
@@ -138,6 +161,33 @@ export function OCRPage({ documents, config, notify }: { documents: DocumentReco
     </div>
     <Card className="ocr-results"><div className="card-heading"><div><h2>Coincidencias</h2><p>{searched ? `${results.length} páginas encontradas` : "Ejecuta una búsqueda para ver las páginas."}</p></div></div>{searched && !results.length ? <EmptyState title="Sin coincidencias" description="Prueba otra palabra o verifica que el documento tenga OCR activo." /> : <div className="table-wrap"><table><thead><tr><th>Documento</th><th>Página</th><th>Origen</th><th>Coincidencia</th><th>IIIF</th></tr></thead><tbody>{results.map((result) => <tr key={`${result.document_id}-${result.page_number}`}><td><code>{result.document_id.slice(0, 12)}…</code></td><td><strong>{result.page_number}</strong></td><td><Badge tone={result.source === "ocr" ? "info" : "success"}>{result.source}</Badge></td><td><span className="ocr-snippet">{result.snippet}</span><small className="table-secondary">{result.matches} coincidencia(s)</small></td><td>{result.image_id ? <a className="button button-secondary compact-button" href={`/iiif/3/${encodeURIComponent(result.image_id)}/full/max/0/default.jpg`} target="_blank" rel="noreferrer">Abrir imagen IIIF</a> : <span className="table-secondary">Imagen no disponible</span>}</td></tr>)}</tbody></table></div>}</Card>
   </>;
+}
+
+function OCRJobProgress({ job, documents, onCancel }: { job: OCRJob; documents: DocumentRecord[]; onCancel: () => Promise<void> }) {
+  const progress = job.total_pages ? Math.min(100, Math.round(job.processed_pages * 100 / job.total_pages)) : 0;
+  const documentName = job.document_name || documents.find((item) => item.id === job.document_id)?.name || job.document_id;
+  const active = !terminal.has(job.status);
+  const statusLabels: Record<string, string> = {
+    queued: "En cola", detecting_language: "Detectando idioma", processing: "Procesando", indexing: "Indexando",
+    cancelling: "Cancelando", completed: "Completado", completed_with_errors: "Completado con errores", failed: "Fallido", cancelled: "Cancelado",
+  };
+  const tone: "success" | "danger" | "warning" | "info" = job.status.startsWith("completed") ? "success" : job.status === "failed" || job.status === "cancelled" ? "danger" : job.status === "queued" ? "warning" : "info";
+  return <article className="job-progress">
+    <div className="job-progress-heading"><strong>{documentName}</strong><Badge tone={tone}>{statusLabels[job.status] || job.status.replaceAll("_", " ")}</Badge></div>
+    <div className="job-details">
+      <div><span>Job</span><code>{job.id}</code></div>
+      <div><span>Documento</span><code>{job.document_id}</code></div>
+      <div><span>Página</span><strong>{job.current_page || job.processed_pages} / {job.total_pages}</strong></div>
+      <div><span>Progreso</span><strong>{progress} %</strong></div>
+      <div><span>Idioma</span><strong>{job.languages.length ? job.languages.join("+") : "Por detectar"}</strong></div>
+      <div><span>Cobertura</span><strong>{job.mode}{job.regeneration ? " · regeneración" : ""}</strong></div>
+      <div><span>Inicio</span><strong>{new Date(job.started_at || job.created_at).toLocaleString()}</strong></div>
+      <div><span>Mensaje</span><strong>{job.message || statusLabels[job.status] || job.status}</strong></div>
+    </div>
+    <div className="progress-track" aria-label={`Progreso OCR ${progress}%`}><div className="progress-fill" style={{ width: `${progress}%` }} /></div>
+    {job.error && <p className="inline-error">{job.error}</p>}
+    {active && <Button variant="danger" disabled={job.status === "cancelling"} onClick={() => void onCancel()}>Cancelar</Button>}
+  </article>;
 }
 
 const fallbackManualLanguages = ["spa", "eng", "fra", "por"].map((code) => ({ code, name: code, installed: true, enabled: true, detection_supported: true }));

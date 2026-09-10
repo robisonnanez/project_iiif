@@ -659,6 +659,10 @@ definitions:
       current_page:
         type: integer
       document_id:
+        example: 23dfc57f-6a62-45ac-9ea9-126d007913b7
+        type: string
+      document_name:
+        example: Libro.pdf
         type: string
       error:
         type: string
@@ -669,6 +673,7 @@ definitions:
       generation:
         type: string
       id:
+        example: 6f4c52c4-770d-4ffe-9cb5-eb793e75da54
         type: string
       language_mode:
         type: string
@@ -676,19 +681,35 @@ definitions:
         items:
           type: string
         type: array
+      message:
+        example: Esperando en cola
+        type: string
       mode:
         type: string
       processed_pages:
         type: integer
       project_key:
         type: string
+      regeneration:
+        example: true
+        type: boolean
       started_at:
         type: string
       status:
+        example: queued
         type: string
       tenant_key:
         type: string
       total_pages:
+        type: integer
+    type: object
+  services.OCRJobListResponse:
+    properties:
+      jobs:
+        items:
+          $ref: '#/definitions/services.OCRJob'
+        type: array
+      total:
         type: integer
     type: object
   services.OCRLanguage:
@@ -986,6 +1007,18 @@ paths:
           description: Unauthorized
           schema:
             $ref: '#/definitions/handlers.errorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.errorResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/handlers.errorResponse'
+        "422":
+          description: Unprocessable Entity
+          schema:
+            $ref: '#/definitions/handlers.errorResponse'
         "503":
           description: Service Unavailable
           schema:
@@ -1082,6 +1115,36 @@ paths:
       summary: Explorar directorios locales permitidos para migracion
       tags:
       - Admin
+  /api/v1/admin/ocr/jobs:
+    get:
+      description: Recupera desde el backend los trabajos OCR persistidos. Por defecto
+        devuelve solo estados activos; use active=false para incluir terminales.
+      parameters:
+      - default: true
+        description: Solo queued, detecting_language, processing, indexing o cancelling
+        in: query
+        name: active
+        type: boolean
+      - description: Filtrar por documento
+        in: query
+        name: document_id
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/services.OCRJobListResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.errorResponse'
+      security:
+      - SessionCookie: []
+      summary: Listar trabajos OCR
+      tags:
+      - OCR
   /api/v1/admin/ocr/jobs/{job_id}:
     get:
       parameters:
@@ -1497,6 +1560,60 @@ paths:
           schema:
             $ref: '#/definitions/handlers.errorResponse'
       summary: Buscar una palabra y sus bounding boxes en una página OCR
+      tags:
+      - OCR
+  /api/v1/documents/{id}/ocr/regenerate:
+    post:
+      consumes:
+      - application/json
+      description: Crea una nueva generación OCR conservando las generaciones históricas
+        y reutilizando el worker actual que produce texto, words, confidence y bbox.
+        Devuelve 409 si ya existe un trabajo activo para el documento.
+      parameters:
+      - description: ID del documento
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Modo e idiomas opcionales; force se aplica automáticamente
+        in: body
+        name: request
+        schema:
+          $ref: '#/definitions/services.CreateOCRJobRequest'
+      produces:
+      - application/json
+      responses:
+        "202":
+          description: Accepted
+          schema:
+            $ref: '#/definitions/services.OCRJob'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.errorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.errorResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/handlers.errorResponse'
+        "422":
+          description: Unprocessable Entity
+          schema:
+            $ref: '#/definitions/handlers.errorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.errorResponse'
+        "503":
+          description: Service Unavailable
+          schema:
+            $ref: '#/definitions/handlers.errorResponse'
+      security:
+      - SessionCookie: []
+      summary: Regenerar completamente el OCR de un documento
       tags:
       - OCR
   /api/v1/documents/{id}/ocr/search:

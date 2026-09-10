@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"errors"
+	"io"
 	"net/http"
 	"strconv"
 	"strings"
@@ -100,6 +101,9 @@ func (h *OCRHandler) InstallLanguages(c *gin.Context) {
 // @Success 202 {object} services.OCRJob
 // @Failure 400 {object} errorResponse
 // @Failure 401 {object} errorResponse
+// @Failure 404 {object} errorResponse
+// @Failure 409 {object} errorResponse
+// @Failure 422 {object} errorResponse
 // @Failure 503 {object} errorResponse
 // @Router /api/v1/admin/documents/{id}/ocr/jobs [post]
 // CreateJob crea o persiste la información validada.
@@ -111,14 +115,74 @@ func (h *OCRHandler) CreateJob(c *gin.Context) {
 	}
 	job, err := h.service.CreateJob(c.Param("id"), request)
 	if err != nil {
-		status := http.StatusBadRequest
-		if !h.service.Enabled() {
-			status = http.StatusServiceUnavailable
-		}
-		writeJSON(c, status, gin.H{"error": err.Error()})
+		writeJSON(c, ocrJobErrorStatus(err), gin.H{"error": err.Error()})
 		return
 	}
 	writeJSON(c, http.StatusAccepted, job)
+}
+
+// Regenerate godoc
+// @Summary Regenerar completamente el OCR de un documento
+// @Description Crea una nueva generación OCR conservando las generaciones históricas y reutilizando el worker actual que produce texto, words, confidence y bbox. Devuelve 409 si ya existe un trabajo activo para el documento.
+// @Tags OCR
+// @Security SessionCookie
+// @Accept json
+// @Produce json
+// @Param id path string true "ID del documento"
+// @Param request body services.CreateOCRJobRequest false "Modo e idiomas opcionales; force se aplica automáticamente"
+// @Success 202 {object} services.OCRJob
+// @Failure 400 {object} errorResponse
+// @Failure 404 {object} errorResponse
+// @Failure 409 {object} errorResponse
+// @Failure 422 {object} errorResponse
+// @Failure 500 {object} errorResponse
+// @Failure 503 {object} errorResponse
+// @Router /api/v1/documents/{id}/ocr/regenerate [post]
+func (h *OCRHandler) Regenerate(c *gin.Context) {
+	var request services.CreateOCRJobRequest
+	if err := c.ShouldBindJSON(&request); err != nil && !errors.Is(err, io.EOF) {
+		writeJSON(c, http.StatusBadRequest, gin.H{"error": "payload OCR inválido"})
+		return
+	}
+	job, err := h.service.Regenerate(c.Param("id"), request)
+	if err != nil {
+		writeJSON(c, ocrJobErrorStatus(err), gin.H{"error": err.Error()})
+		return
+	}
+	writeJSON(c, http.StatusAccepted, job)
+}
+
+// ListJobs godoc
+// @Summary Listar trabajos OCR
+// @Description Recupera desde el backend los trabajos OCR persistidos. Por defecto devuelve solo estados activos; use active=false para incluir terminales.
+// @Tags OCR
+// @Security SessionCookie
+// @Produce json
+// @Param active query bool false "Solo queued, detecting_language, processing, indexing o cancelling" default(true)
+// @Param document_id query string false "Filtrar por documento"
+// @Success 200 {object} services.OCRJobListResponse
+// @Failure 401 {object} errorResponse
+// @Router /api/v1/admin/ocr/jobs [get]
+func (h *OCRHandler) ListJobs(c *gin.Context) {
+	active := !strings.EqualFold(strings.TrimSpace(c.DefaultQuery("active", "true")), "false")
+	writeJSON(c, http.StatusOK, h.service.ListJobs(active, strings.TrimSpace(c.Query("document_id"))))
+}
+
+func ocrJobErrorStatus(err error) int {
+	switch {
+	case errors.Is(err, services.ErrOCRDisabled):
+		return http.StatusServiceUnavailable
+	case errors.Is(err, services.ErrOCRDocumentNotFound):
+		return http.StatusNotFound
+	case errors.Is(err, services.ErrOCRActiveJob):
+		return http.StatusConflict
+	case errors.Is(err, services.ErrOCRNoLanguages), strings.Contains(err.Error(), "debe terminar"):
+		return http.StatusUnprocessableEntity
+	case errors.Is(err, services.ErrOCRPersistence):
+		return http.StatusInternalServerError
+	default:
+		return http.StatusBadRequest
+	}
 }
 
 // GetJob godoc
