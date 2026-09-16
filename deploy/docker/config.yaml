@@ -93,6 +93,14 @@ security:
   log_level: "info"
   cors_origins: ["http://localhost:8080"]
   max_concurrent_uploads: 4
+  integration_auth:
+    enabled: false
+    hmac_secret: ""
+    issuer: "project_iiif"
+    default_ttl_seconds: 300
+    max_ttl_seconds: 3600
+    rate_per_minute: 60
+    burst: 20
 frontend:
   enabled: true
   path: "./frontend"
