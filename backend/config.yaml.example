@@ -127,6 +127,14 @@ security:
     - "http://localhost:3000"
     - "http://localhost:5173"
   max_concurrent_uploads: 5
+  integration_auth:
+    enabled: false
+    hmac_secret: "" # O use TEXT_LAYER_HMAC_SECRET; mínimo 32 caracteres al activar.
+    issuer: "project_iiif"
+    default_ttl_seconds: 300
+    max_ttl_seconds: 3600
+    rate_per_minute: 60
+    burst: 20
 
 frontend:
   enabled: false

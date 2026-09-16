@@ -26,6 +26,9 @@ import (
 // @securityDefinitions.apikey SessionCookie
 // @in cookie
 // @name project_iiif_session
+// @securityDefinitions.apikey IntegrationBearer
+// @in header
+// @name Authorization
 // main inicia el ejecutable y coordina sus dependencias.
 func main() {
 	// Cargar configuración
@@ -98,7 +101,12 @@ func main() {
 	frontendHandler := handlers.NewFrontendHandler(cfg)
 	adminHandler := handlers.NewAdminHandler(cfg, documentService)
 	ocrHandler := handlers.NewOCRHandler(ocrService, ocrLanguageService)
+	textLayerHandler := handlers.NewTextLayerHandler(ocrService)
 	authHandler := handlers.NewAuthHandler(cfg)
+	integrationAuth, err := handlers.NewIntegrationAuth(cfg, store, authHandler)
+	if err != nil {
+		log.Fatalf("Error inicializando autenticación de integración: %v", err)
+	}
 
 	// Ruta de bienvenida
 	router.GET("/", welcomeHandler.Welcome)
@@ -107,6 +115,7 @@ func main() {
 	router.POST("/auth/login", authHandler.Login)
 	router.POST("/auth/logout", authHandler.Logout)
 	router.GET("/auth/me", authHandler.Me)
+	router.POST("/api/v1/admin/integration-tokens", authHandler.RequireSession(), integrationAuth.IssueToken)
 	router.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))
 	router.NoRoute(func(c *gin.Context) {
 		path := c.Request.URL.Path
@@ -199,16 +208,19 @@ func main() {
 	{
 		documentV1.POST("/upload", apiHandler.UploadPDF)
 		registerDocumentRoutes(documentV1)
-		documentV1.GET("/:id/ocr", ocrHandler.GetSummary)
+		documentV1.GET("/:id/ocr", integrationAuth.RequireRead(), ocrHandler.GetSummary)
 		documentV1.POST("/:id/ocr/regenerate", authHandler.RequireSession(), ocrHandler.Regenerate)
-		documentV1.GET("/:id/ocr/pages/:page", ocrHandler.GetPage)
-		documentV1.GET("/:id/ocr/pages/:page/words", ocrHandler.FindPageWords)
-		documentV1.GET("/:id/ocr/search", ocrHandler.SearchDocument)
-		documentV1.GET("/:id/ocr/autocomplete", ocrHandler.AutocompleteDocument)
+		documentV1.GET("/:id/ocr/pages/:page", integrationAuth.RequireRead(), ocrHandler.GetPage)
+		documentV1.GET("/:id/ocr/pages/:page/words", integrationAuth.RequireRead(), ocrHandler.FindPageWords)
+		documentV1.GET("/:id/ocr/search", integrationAuth.RequireRead(), ocrHandler.SearchDocument)
+		documentV1.GET("/:id/ocr/autocomplete", integrationAuth.RequireRead(), ocrHandler.AutocompleteDocument)
+		documentV1.GET("/:id/ocr/generations", integrationAuth.RequireRead(), textLayerHandler.Generations)
+		documentV1.GET("/:id/text-layer/status", integrationAuth.RequireRead(), textLayerHandler.Status)
+		documentV1.GET("/:id/text-layer/pages/:page", integrationAuth.RequireRead(), textLayerHandler.Page)
 	}
 	apiV1OCR := router.Group("/api/v1/ocr")
-	apiV1OCR.GET("/search", ocrHandler.Search)
-	apiV1OCR.GET("/autocomplete", ocrHandler.Autocomplete)
+	apiV1OCR.GET("/search", integrationAuth.RequireRead(), ocrHandler.Search)
+	apiV1OCR.GET("/autocomplete", integrationAuth.RequireRead(), ocrHandler.Autocomplete)
 	apiV1IIIF := router.Group("/api/v1/iiif")
 	apiV1IIIF.GET("/:id/manifest", apiHandler.GetManifestV3)
 	apiV1IIIF.GET("/:id/manifest/v3", apiHandler.GetManifestV3)

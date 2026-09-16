@@ -106,6 +106,11 @@ Endpoints públicos de lectura para integraciones externas:
 - `GET /api/v1/ocr/autocomplete?q=func&project=default&tenant=tenant&limit=10`
 - `GET /api/v1/iiif/{id}/manifest`
 - `GET /api/v1/iiif/{id}/manifest/v3`
+- `GET /api/v1/documents/{id}/text-layer/status`
+- `GET /api/v1/documents/{id}/text-layer/pages/{page}?generation={uuid}`
+- `GET /api/v1/documents/{id}/ocr/generations`
+
+Cuando `security.integration_auth.enabled` está activo, todos los endpoints públicos que exponen contenido OCR requieren Bearer con scope `text-layer:read` o una sesión administrativa. Consulte `TEXT_LAYER_ANNOTATION_TARGETS.md` para emisión, ámbitos, ETag, caché y anclaje de anotaciones.
 
 Las llamadas desde un frontend ubicado en otro dominio deben agregar ese origen exacto en **Configuración → Seguridad y CORS**. CORS no afecta las integraciones servidor a servidor.
 

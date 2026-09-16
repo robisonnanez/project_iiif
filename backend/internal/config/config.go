@@ -112,10 +112,11 @@ type Config struct {
 	OCR OCRConfig `yaml:"ocr"`
 
 	Security struct {
-		EnableAuth           bool     `yaml:"enable_auth"`
-		LogLevel             string   `yaml:"log_level"`
-		CorsOrigins          []string `yaml:"cors_origins"`
-		MaxConcurrentUploads int      `yaml:"max_concurrent_uploads"`
+		EnableAuth           bool                  `yaml:"enable_auth"`
+		LogLevel             string                `yaml:"log_level"`
+		CorsOrigins          []string              `yaml:"cors_origins"`
+		MaxConcurrentUploads int                   `yaml:"max_concurrent_uploads"`
+		IntegrationAuth      IntegrationAuthConfig `yaml:"integration_auth"`
 	} `yaml:"security"`
 
 	Frontend struct {
@@ -181,6 +182,16 @@ type OCRConfig struct {
 	} `yaml:"language_installation" json:"language_installation"`
 }
 
+type IntegrationAuthConfig struct {
+	Enabled           bool   `yaml:"enabled" json:"enabled"`
+	HMACSecret        string `yaml:"hmac_secret" json:"-"`
+	Issuer            string `yaml:"issuer" json:"issuer"`
+	DefaultTTLSeconds int    `yaml:"default_ttl_seconds" json:"default_ttl_seconds"`
+	MaxTTLSeconds     int    `yaml:"max_ttl_seconds" json:"max_ttl_seconds"`
+	RatePerMinute     int    `yaml:"rate_per_minute" json:"rate_per_minute"`
+	Burst             int    `yaml:"burst" json:"burst"`
+}
+
 type ProjectConfig struct {
 	Key                    string   `yaml:"key" json:"key"`
 	Name                   string   `yaml:"name" json:"name"`
@@ -235,6 +246,7 @@ func applyEnvironment(config *Config) {
 		{"FRONTEND_USERNAME", &config.Frontend.Username},
 		{"FRONTEND_PASSWORD", &config.Frontend.Password},
 		{"IIIF_BASE_URL", &config.IIIF.BaseURL},
+		{"TEXT_LAYER_HMAC_SECRET", &config.Security.IntegrationAuth.HMACSecret},
 	}
 	for _, item := range stringValues {
 		if value, ok := os.LookupEnv(item.name); ok {
@@ -337,6 +349,21 @@ func applyDefaults(config *Config) {
 	}
 	if config.OCR.LanguageInstallation.TimeoutSeconds <= 0 {
 		config.OCR.LanguageInstallation.TimeoutSeconds = defaults.OCR.LanguageInstallation.TimeoutSeconds
+	}
+	if config.Security.IntegrationAuth.Issuer == "" {
+		config.Security.IntegrationAuth.Issuer = defaults.Security.IntegrationAuth.Issuer
+	}
+	if config.Security.IntegrationAuth.DefaultTTLSeconds <= 0 {
+		config.Security.IntegrationAuth.DefaultTTLSeconds = defaults.Security.IntegrationAuth.DefaultTTLSeconds
+	}
+	if config.Security.IntegrationAuth.MaxTTLSeconds <= 0 {
+		config.Security.IntegrationAuth.MaxTTLSeconds = defaults.Security.IntegrationAuth.MaxTTLSeconds
+	}
+	if config.Security.IntegrationAuth.RatePerMinute <= 0 {
+		config.Security.IntegrationAuth.RatePerMinute = defaults.Security.IntegrationAuth.RatePerMinute
+	}
+	if config.Security.IntegrationAuth.Burst < 0 {
+		config.Security.IntegrationAuth.Burst = defaults.Security.IntegrationAuth.Burst
 	}
 	if config.Conversion.EnableOCR {
 		config.OCR.Enabled = true
@@ -730,15 +757,17 @@ func Default() *Config {
 			return value
 		}(),
 		Security: struct {
-			EnableAuth           bool     `yaml:"enable_auth"`
-			LogLevel             string   `yaml:"log_level"`
-			CorsOrigins          []string `yaml:"cors_origins"`
-			MaxConcurrentUploads int      `yaml:"max_concurrent_uploads"`
+			EnableAuth           bool                  `yaml:"enable_auth"`
+			LogLevel             string                `yaml:"log_level"`
+			CorsOrigins          []string              `yaml:"cors_origins"`
+			MaxConcurrentUploads int                   `yaml:"max_concurrent_uploads"`
+			IntegrationAuth      IntegrationAuthConfig `yaml:"integration_auth"`
 		}{
 			EnableAuth:           false,
 			LogLevel:             "info",
 			CorsOrigins:          []string{"http://localhost:5173", "http://localhost:3000"},
 			MaxConcurrentUploads: 5,
+			IntegrationAuth:      IntegrationAuthConfig{Issuer: "project_iiif", DefaultTTLSeconds: 300, MaxTTLSeconds: 3600, RatePerMinute: 60, Burst: 20},
 		},
 		Frontend: struct {
 			Enabled         bool   `yaml:"enabled"`

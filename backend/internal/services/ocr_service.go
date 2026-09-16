@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
+	"crypto/sha256"
 	"encoding/csv"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -28,6 +30,7 @@ import (
 
 	"github.com/gen2brain/go-fitz"
 	"github.com/google/uuid"
+	"github.com/patrickmn/go-cache"
 	"github.com/pemistahl/lingua-go"
 	"golang.org/x/text/unicode/norm"
 )
@@ -44,9 +47,14 @@ type OCRBoundingBox struct {
 }
 
 type OCRWord struct {
-	Text       string         `json:"text" example:"SÁNCHEZ,"`
-	Confidence float64        `json:"confidence" example:"95.20067596435548"`
-	BBox       OCRBoundingBox `json:"bbox"`
+	Order          int            `json:"order,omitempty"`
+	BlockIndex     int            `json:"block_index,omitempty"`
+	ParagraphIndex int            `json:"paragraph_index,omitempty"`
+	LineIndex      int            `json:"line_index,omitempty"`
+	WordIndex      int            `json:"word_index,omitempty"`
+	Text           string         `json:"text" example:"SÁNCHEZ,"`
+	Confidence     float64        `json:"confidence" example:"95.20067596435548"`
+	BBox           OCRBoundingBox `json:"bbox"`
 }
 
 type OCRWordSearchResponse struct {
@@ -71,19 +79,29 @@ var (
 // UnmarshalJSON analiza la entrada y devuelve una representación validada.
 func (word *OCRWord) UnmarshalJSON(data []byte) error {
 	var value struct {
-		Text       string          `json:"text"`
-		Confidence float64         `json:"confidence"`
-		BBox       *OCRBoundingBox `json:"bbox"`
-		Left       *int            `json:"left"`
-		Top        *int            `json:"top"`
-		Width      *int            `json:"width"`
-		Height     *int            `json:"height"`
+		Order          int             `json:"order"`
+		BlockIndex     int             `json:"block_index"`
+		ParagraphIndex int             `json:"paragraph_index"`
+		LineIndex      int             `json:"line_index"`
+		WordIndex      int             `json:"word_index"`
+		Text           string          `json:"text"`
+		Confidence     float64         `json:"confidence"`
+		BBox           *OCRBoundingBox `json:"bbox"`
+		Left           *int            `json:"left"`
+		Top            *int            `json:"top"`
+		Width          *int            `json:"width"`
+		Height         *int            `json:"height"`
 	}
 	if err := json.Unmarshal(data, &value); err != nil {
 		return err
 	}
 	word.Text = value.Text
 	word.Confidence = value.Confidence
+	word.Order = value.Order
+	word.BlockIndex = value.BlockIndex
+	word.ParagraphIndex = value.ParagraphIndex
+	word.LineIndex = value.LineIndex
+	word.WordIndex = value.WordIndex
 	if value.BBox != nil {
 		word.BBox = *value.BBox
 		return nil
@@ -118,6 +136,7 @@ type OCRPage struct {
 	GeometryStatus string    `json:"geometry_status"`
 	GeometrySpace  string    `json:"geometry_space,omitempty"`
 	GeometryError  string    `json:"geometry_error,omitempty"`
+	LayerSHA256    string    `json:"layer_sha256,omitempty"`
 	Words          []OCRWord `json:"words,omitempty"`
 	Engine         string    `json:"engine"`
 	CreatedAt      time.Time `json:"created_at"`
@@ -164,6 +183,24 @@ type OCRDocumentSummary struct {
 	IndexedPages     int       `json:"indexed_pages"`
 	FailedPages      int       `json:"failed_pages"`
 	UpdatedAt        time.Time `json:"updated_at"`
+}
+
+type OCRGenerationRecord struct {
+	ID          string    `json:"id"`
+	Status      string    `json:"status"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
+	PagesTotal  int       `json:"pages_total"`
+	PagesReady  int       `json:"pages_ready"`
+	PagesFailed int       `json:"pages_failed"`
+	Geometry    string    `json:"geometry"`
+}
+
+type OCRGenerationIndex struct {
+	SchemaVersion    int                   `json:"schema_version"`
+	DocumentID       string                `json:"document_id"`
+	ActiveGeneration string                `json:"active_generation,omitempty"`
+	Generations      []OCRGenerationRecord `json:"generations"`
 }
 
 type OCRSearchResult struct {
@@ -246,6 +283,7 @@ func parseTesseractTSV(data []byte) (string, []OCRWord, float64, error) {
 	words := make([]OCRWord, 0)
 	var text strings.Builder
 	confidenceTotal := 0.0
+	lastBlock, lastParagraph, lastLine := -1, -1, -1
 	for {
 		fields, readErr := reader.Read()
 		if readErr == io.EOF {
@@ -273,12 +311,24 @@ func parseTesseractTSV(data []byte) (string, []OCRWord, float64, error) {
 		if leftErr != nil || topErr != nil || widthErr != nil || heightErr != nil || left < 0 || top < 0 || width <= 0 || height <= 0 {
 			continue
 		}
-		word := OCRWord{Text: wordText, Confidence: confidence, BBox: OCRBoundingBox{X0: left, X1: left + width, Y0: top, Y1: top + height}}
+		block, blockErr := strconv.Atoi(fields[header["block_num"]])
+		paragraph, paragraphErr := strconv.Atoi(fields[header["par_num"]])
+		line, lineErr := strconv.Atoi(fields[header["line_num"]])
+		wordIndex, wordErr := strconv.Atoi(fields[header["word_num"]])
+		if blockErr != nil || paragraphErr != nil || lineErr != nil || wordErr != nil {
+			continue
+		}
+		word := OCRWord{Order: len(words), BlockIndex: block, ParagraphIndex: paragraph, LineIndex: line, WordIndex: wordIndex, Text: wordText, Confidence: confidence, BBox: OCRBoundingBox{X0: left, X1: left + width, Y0: top, Y1: top + height}}
 		words = append(words, word)
 		if text.Len() > 0 {
-			text.WriteByte(' ')
+			if block != lastBlock || paragraph != lastParagraph || line != lastLine {
+				text.WriteByte('\n')
+			} else {
+				text.WriteByte(' ')
+			}
 		}
 		text.WriteString(wordText)
+		lastBlock, lastParagraph, lastLine = block, paragraph, line
 		confidenceTotal += confidence
 	}
 	confidence := 0.0
@@ -290,7 +340,7 @@ func parseTesseractTSV(data []byte) (string, []OCRWord, float64, error) {
 
 // readTesseractTSVHeader obtiene la información solicitada sin modificar el estado persistido.
 func readTesseractTSVHeader(reader *csv.Reader) (map[string]int, error) {
-	required := []string{"level", "left", "top", "width", "height", "conf", "text"}
+	required := []string{"level", "block_num", "par_num", "line_num", "word_num", "left", "top", "width", "height", "conf", "text"}
 	for {
 		record, err := reader.Read()
 		if err == io.EOF {
@@ -331,18 +381,29 @@ type OCRService struct {
 	storage            storage.Storage
 	engine             OCREngine
 	root               string
+	artifacts          ocrArtifactStore
 	queue              chan string
 	mu                 sync.RWMutex
 	jobs               map[string]*OCRJob
 	cancels            map[string]context.CancelFunc
 	vocabularyMu       sync.RWMutex
 	vocabularies       map[string][]ocrVocabularyEntry
+	generationMu       sync.Mutex
+	textLayerCache     *cache.Cache
 	installedLanguages func(context.Context) ([]string, error)
 }
 
 // NewOCRService crea e inicializa la dependencia con una configuración válida.
 func NewOCRService(cfg *config.Config, store storage.Storage) (*OCRService, error) {
-	service := &OCRService{config: cfg, storage: store, engine: TesseractEngine{}, root: filepath.Join(cfg.Storage.DataPath, "ocr"), jobs: map[string]*OCRJob{}, cancels: map[string]context.CancelFunc{}, vocabularies: map[string][]ocrVocabularyEntry{}, installedLanguages: listInstalledTesseractLanguages}
+	root := filepath.Join(cfg.Storage.DataPath, "ocr")
+	service := &OCRService{config: cfg, storage: store, engine: TesseractEngine{}, root: root, artifacts: newOCRArtifactStore(root, store), jobs: map[string]*OCRJob{}, cancels: map[string]context.CancelFunc{}, vocabularies: map[string][]ocrVocabularyEntry{}, installedLanguages: listInstalledTesseractLanguages}
+	if cfg.IIIF.CacheEnabled {
+		ttl := time.Duration(cfg.IIIF.CacheTTL) * time.Second
+		if ttl <= 0 {
+			ttl = time.Hour
+		}
+		service.textLayerCache = cache.New(ttl, ttl)
+	}
 	if err := os.MkdirAll(filepath.Join(service.root, "jobs"), 0755); err != nil {
 		return nil, err
 	}
@@ -454,6 +515,12 @@ func (s *OCRService) createJob(documentID string, request CreateOCRJobRequest, r
 		s.mu.Unlock()
 		return nil, fmt.Errorf("%w: %v", ErrOCRPersistence, err)
 	}
+	if err := s.upsertGeneration(job, false); err != nil {
+		s.mu.Lock()
+		delete(s.jobs, job.ID)
+		s.mu.Unlock()
+		return nil, fmt.Errorf("%w: %v", ErrOCRPersistence, err)
+	}
 	log.Printf("[OCR] job=%s document=%s regeneration=%t queued", job.ID, job.DocumentID, job.Regeneration)
 	s.queue <- job.ID
 	return cloneJob(job), nil
@@ -557,6 +624,7 @@ func (s *OCRService) processJob(id string) {
 	copy := cloneJob(job)
 	s.mu.Unlock()
 	_ = s.saveJob(copy)
+	_ = s.upsertGeneration(copy, false)
 	defer func() { cancel(); s.mu.Lock(); delete(s.cancels, id); s.mu.Unlock() }()
 	reader, ok := s.storage.(storage.DocumentPDFReader)
 	if !ok {
@@ -650,6 +718,9 @@ func (s *OCRService) processJob(id string) {
 		j.FinishedAt = &now
 		j.CurrentPage = 0
 	})
+	if completed, err := s.GetJob(id); err == nil {
+		_ = s.upsertGeneration(completed, true)
+	}
 	log.Printf("[OCR] job=%s document=%s status=%s completed", id, job.DocumentID, status)
 }
 
@@ -706,11 +777,12 @@ func (s *OCRService) processPage(parent context.Context, document *fitz.Document
 			page.GeometryError = err.Error()
 			page.SearchText = normalizeSearch(page.Text)
 			log.Printf("[OCR] job=%s document=%s page=%d/%d language=%s words=0 geometry=%s duration=%s tesseract_calls=%d error=%q", job.ID, job.DocumentID, pageIndex+1, job.TotalPages, page.Language, page.GeometryStatus, time.Since(startedAt).Round(time.Millisecond), attempts, err.Error())
+			finalizeOCRPage(page)
 			return page, nil
 		}
 		return nil, err
 	}
-	page.OCRText = cleanText(ocrText)
+	page.OCRText = cleanOCRText(ocrText)
 	page.Words = scaleOCRWords(words, ocrWidth, ocrHeight, canvasWidth, canvasHeight)
 	page.Confidence = confidence
 	if len(page.Words) > 0 {
@@ -738,6 +810,7 @@ func (s *OCRService) processPage(parent context.Context, document *fitz.Document
 		page.Source = "blank"
 	}
 	page.SearchText = normalizeSearch(page.Text)
+	finalizeOCRPage(page)
 	log.Printf("[OCR] job=%s document=%s page=%d/%d language=%s words=%d geometry=%s duration=%s tesseract_calls=%d ocr_image=%dx%d canvas=%dx%d", job.ID, job.DocumentID, pageIndex+1, job.TotalPages, page.Language, len(page.Words), page.GeometryStatus, time.Since(startedAt).Round(time.Millisecond), attempts, ocrWidth, ocrHeight, canvasWidth, canvasHeight)
 	return page, nil
 }
@@ -901,7 +974,7 @@ func linguaLanguages(codes []string) []lingua.Language {
 
 // GetSummary obtiene la información solicitada sin modificar el estado persistido.
 func (s *OCRService) GetSummary(documentID string) (*OCRDocumentSummary, error) {
-	data, err := os.ReadFile(filepath.Join(s.root, "documents", documentID+".json"))
+	data, err := s.artifacts.Get(summaryArtifactKey(documentID))
 	if err != nil {
 		return nil, errors.New("el documento aún no tiene OCR")
 	}
@@ -932,6 +1005,7 @@ func (s *OCRService) GetPage(documentID string, page int) (*OCRPage, error) {
 		result.Width, result.Height = canvasWidth, canvasHeight
 		result.GeometrySpace = "canvas"
 	}
+	finalizeOCRPage(result)
 	return result, nil
 }
 
@@ -1176,20 +1250,79 @@ func scaleCoordinate(value, sourceSize, targetSize int) int {
 	return int(math.Round(float64(value) * float64(targetSize) / float64(sourceSize)))
 }
 
+func cleanOCRText(value string) string {
+	lines := strings.Split(strings.ToValidUTF8(value, ""), "\n")
+	cleaned := make([]string, 0, len(lines))
+	for _, line := range lines {
+		line = strings.Join(strings.Fields(line), " ")
+		if line != "" {
+			cleaned = append(cleaned, line)
+		}
+	}
+	return strings.Join(cleaned, "\n")
+}
+
+func finalizeOCRPage(page *OCRPage) {
+	if page == nil {
+		return
+	}
+	valid := make([]OCRWord, 0, len(page.Words))
+	for _, word := range page.Words {
+		box := word.BBox
+		if page.Width > 0 {
+			box.X0 = maxInt(0, minInt(box.X0, page.Width-1))
+			box.X1 = maxInt(box.X0+1, minInt(box.X1, page.Width))
+		}
+		if page.Height > 0 {
+			box.Y0 = maxInt(0, minInt(box.Y0, page.Height-1))
+			box.Y1 = maxInt(box.Y0+1, minInt(box.Y1, page.Height))
+		}
+		if box.X1 <= box.X0 || box.Y1 <= box.Y0 {
+			continue
+		}
+		word.Order = len(valid)
+		word.BBox = box
+		valid = append(valid, word)
+	}
+	page.Words = valid
+	if len(valid) == 0 {
+		page.GeometryStatus = "page_only"
+		page.GeometrySpace = ""
+	}
+	page.LayerSHA256 = textLayerHash(page)
+}
+
+func textLayerHash(page *OCRPage) string {
+	canonical := struct {
+		DocumentID string    `json:"document_id"`
+		Generation string    `json:"generation"`
+		PageNumber int       `json:"page_number"`
+		CanvasID   string    `json:"canvas_id"`
+		Width      int       `json:"width"`
+		Height     int       `json:"height"`
+		Text       string    `json:"text"`
+		Words      []OCRWord `json:"words"`
+	}{page.DocumentID, page.Generation, page.PageNumber, page.CanvasV3, page.Width, page.Height, page.Text, page.Words}
+	data, _ := json.Marshal(canonical)
+	digest := sha256.Sum256(data)
+	return hex.EncodeToString(digest[:])
+}
+
 // Delete elimina o libera de forma controlada los recursos asociados.
 func (s *OCRService) Delete(documentID string) error {
 	if strings.TrimSpace(documentID) == "" || filepath.Base(documentID) != documentID {
 		return errors.New("identificador de documento inválido")
 	}
-	if err := os.Remove(filepath.Join(s.root, "documents", documentID+".json")); err != nil && !os.IsNotExist(err) {
+	if err := s.artifacts.DeletePrefix("pages/" + documentID); err != nil {
 		return err
 	}
-	if err := os.RemoveAll(filepath.Join(s.root, "pages", documentID)); err != nil {
+	if err := s.artifacts.DeletePrefix("vocabularies/" + documentID); err != nil {
 		return err
 	}
-	if err := os.RemoveAll(filepath.Join(s.root, "vocabularies", documentID)); err != nil {
+	if err := s.artifacts.DeletePrefix("generations/" + documentID); err != nil {
 		return err
 	}
+	_ = os.Remove(filepath.Join(s.root, "documents", documentID+".json"))
 	s.vocabularyMu.Lock()
 	for key := range s.vocabularies {
 		if strings.HasPrefix(key, documentID+"\x00") {
@@ -1286,24 +1419,21 @@ func (s *OCRService) saveVocabulary(vocabulary *ocrVocabulary) error {
 
 // writeVocabulary convierte y escribe la información en el formato requerido.
 func (s *OCRService) writeVocabulary(vocabulary *ocrVocabulary) error {
-	path := filepath.Join(s.root, "vocabularies", vocabulary.DocumentID, vocabulary.Generation+".json.gz")
-	return writeGzipJSONAtomic(path, vocabulary)
+	data, err := marshalGzipJSON(vocabulary)
+	if err != nil {
+		return err
+	}
+	return s.artifacts.Put(vocabularyArtifactKey(vocabulary.DocumentID, vocabulary.Generation), data, "application/gzip")
 }
 
 // readVocabulary obtiene la información solicitada sin modificar el estado persistido.
 func (s *OCRService) readVocabulary(documentID, generation string) (*ocrVocabulary, error) {
-	file, err := os.Open(filepath.Join(s.root, "vocabularies", documentID, generation+".json.gz"))
+	data, err := s.artifacts.Get(vocabularyArtifactKey(documentID, generation))
 	if err != nil {
 		return nil, err
 	}
-	defer file.Close()
-	reader, err := gzip.NewReader(file)
-	if err != nil {
-		return nil, err
-	}
-	defer reader.Close()
 	var result ocrVocabulary
-	if err := json.NewDecoder(reader).Decode(&result); err != nil {
+	if err := unmarshalGzipJSON(data, &result); err != nil {
 		return nil, err
 	}
 	if result.SchemaVersion != ocrVocabularySchemaVersion || result.DocumentID != documentID || result.Generation != generation {
@@ -1377,41 +1507,21 @@ func betterWordDisplay(candidate, current string) bool {
 
 // savePage crea o persiste la información validada por el servicio.
 func (s *OCRService) savePage(page *OCRPage) error {
-	path := filepath.Join(s.root, "pages", page.DocumentID, page.Generation, fmt.Sprintf("%06d.json.gz", page.PageNumber))
-	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
-		return err
-	}
-	file, err := os.Create(path)
+	data, err := marshalGzipJSON(page)
 	if err != nil {
 		return err
 	}
-	writer := gzip.NewWriter(file)
-	err = json.NewEncoder(writer).Encode(page)
-	closeErr := writer.Close()
-	fileErr := file.Close()
-	if err != nil {
-		return err
-	}
-	if closeErr != nil {
-		return closeErr
-	}
-	return fileErr
+	return s.artifacts.Put(pageArtifactKey(page.DocumentID, page.Generation, page.PageNumber), data, "application/gzip")
 }
 
 // readPage obtiene la información solicitada sin modificar el estado persistido.
 func (s *OCRService) readPage(documentID, generation string, page int) (*OCRPage, error) {
-	file, err := os.Open(filepath.Join(s.root, "pages", documentID, generation, fmt.Sprintf("%06d.json.gz", page)))
+	data, err := s.artifacts.Get(pageArtifactKey(documentID, generation, page))
 	if err != nil {
 		return nil, err
 	}
-	defer file.Close()
-	reader, err := gzip.NewReader(file)
-	if err != nil {
-		return nil, err
-	}
-	defer reader.Close()
 	var result OCRPage
-	if err := json.NewDecoder(reader).Decode(&result); err != nil {
+	if err := unmarshalGzipJSON(data, &result); err != nil {
 		return nil, err
 	}
 	return &result, nil
@@ -1419,11 +1529,87 @@ func (s *OCRService) readPage(documentID, generation string, page int) (*OCRPage
 
 // saveSummary crea o persiste la información validada por el servicio.
 func (s *OCRService) saveSummary(summary *OCRDocumentSummary) error {
-	path := filepath.Join(s.root, "documents", summary.DocumentID+".json")
-	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+	data, err := marshalJSON(summary)
+	if err != nil {
 		return err
 	}
-	return writeJSONAtomic(path, summary)
+	return s.artifacts.Put(summaryArtifactKey(summary.DocumentID), data, "application/json")
+}
+
+func (s *OCRService) loadGenerationIndex(documentID string) (*OCRGenerationIndex, error) {
+	data, err := s.artifacts.Get(generationIndexArtifactKey(documentID))
+	if err != nil {
+		lower := strings.ToLower(err.Error())
+		if os.IsNotExist(err) || strings.Contains(lower, "not found") || strings.Contains(lower, "nosuchkey") {
+			return &OCRGenerationIndex{SchemaVersion: 1, DocumentID: documentID, Generations: []OCRGenerationRecord{}}, nil
+		}
+		return nil, err
+	}
+	var index OCRGenerationIndex
+	if err := json.Unmarshal(data, &index); err != nil {
+		return nil, err
+	}
+	if index.Generations == nil {
+		index.Generations = []OCRGenerationRecord{}
+	}
+	return &index, nil
+}
+
+func (s *OCRService) saveGenerationIndex(index *OCRGenerationIndex) error {
+	data, err := marshalJSON(index)
+	if err != nil {
+		return err
+	}
+	return s.artifacts.Put(generationIndexArtifactKey(index.DocumentID), data, "application/json")
+}
+
+func (s *OCRService) upsertGeneration(job *OCRJob, active bool) error {
+	if job == nil {
+		return nil
+	}
+	s.generationMu.Lock()
+	defer s.generationMu.Unlock()
+	index, err := s.loadGenerationIndex(job.DocumentID)
+	if err != nil {
+		return err
+	}
+	record := OCRGenerationRecord{ID: job.Generation, Status: job.Status, CreatedAt: job.CreatedAt, UpdatedAt: time.Now().UTC(), PagesTotal: job.TotalPages, PagesReady: job.ProcessedPages - job.FailedPages, PagesFailed: job.FailedPages, Geometry: "mixed"}
+	found := false
+	for position := range index.Generations {
+		if index.Generations[position].ID == job.Generation {
+			record.CreatedAt = index.Generations[position].CreatedAt
+			index.Generations[position] = record
+			found = true
+			break
+		}
+	}
+	if !found {
+		index.Generations = append(index.Generations, record)
+	}
+	if active {
+		index.ActiveGeneration = job.Generation
+	}
+	sort.Slice(index.Generations, func(i, j int) bool {
+		return index.Generations[i].CreatedAt.After(index.Generations[j].CreatedAt)
+	})
+	return s.saveGenerationIndex(index)
+}
+
+func (s *OCRService) GetGenerationIndex(documentID string) (*OCRGenerationIndex, error) {
+	s.generationMu.Lock()
+	defer s.generationMu.Unlock()
+	return s.loadGenerationIndex(documentID)
+}
+
+func summaryArtifactKey(documentID string) string { return "documents/" + documentID + ".json" }
+func generationIndexArtifactKey(documentID string) string {
+	return "generations/" + documentID + "/index.json"
+}
+func vocabularyArtifactKey(documentID, generation string) string {
+	return "vocabularies/" + documentID + "/" + generation + ".json.gz"
+}
+func pageArtifactKey(documentID, generation string, page int) string {
+	return fmt.Sprintf("pages/%s/%s/%06d.json.gz", documentID, generation, page)
 }
 
 // saveJob crea o persiste la información validada por el servicio.
@@ -1505,6 +1691,7 @@ func (s *OCRService) failJob(id string, err error) {
 		job.FinishedAt = &now
 	})
 	if job, getErr := s.GetJob(id); getErr == nil {
+		_ = s.upsertGeneration(job, false)
 		log.Printf("[OCR] job=%s document=%s failed error=%q", id, job.DocumentID, err.Error())
 	}
 }
@@ -1518,6 +1705,7 @@ func (s *OCRService) finishCancelled(id string) {
 		job.FinishedAt = &now
 	})
 	if job, err := s.GetJob(id); err == nil {
+		_ = s.upsertGeneration(job, false)
 		log.Printf("[OCR] job=%s document=%s cancelled", id, job.DocumentID)
 	}
 }

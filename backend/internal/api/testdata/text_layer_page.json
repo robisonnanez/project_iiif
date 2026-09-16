@@ -1,0 +1,30 @@
+{
+  "schema_version": 1,
+  "document_id": "00000000-0000-4000-8000-000000000001",
+  "generation": "00000000-0000-4000-8000-000000000002",
+  "page_number": 1,
+  "canvas": {
+    "id": "https://iiif.example/canvas/1",
+    "width": 1241,
+    "height": 1754,
+    "image_id": "image-1",
+    "image_service_id": "https://iiif.example/iiif/3/image-1"
+  },
+  "geometry_space": "canvas",
+  "geometry_status": "word",
+  "source": "ocr",
+  "language": "spa",
+  "confidence": 96.1,
+  "text": "Texto",
+  "layer_sha256": "abc123",
+  "words": [{
+    "order": 0,
+    "block_index": 1,
+    "paragraph_index": 1,
+    "line_index": 1,
+    "word_index": 1,
+    "text": "Texto",
+    "confidence": 96.1,
+    "bbox": {"x0": 104, "y0": 88, "x1": 176, "y1": 111}
+  }]
+}

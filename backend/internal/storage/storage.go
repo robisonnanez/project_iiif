@@ -41,6 +41,16 @@ type ImageBlobChecker interface {
 	HasImageBlob(imageID string) (bool, error)
 }
 
+// OCRArtifactStorage is implemented by binary backends that can persist the
+// opaque, versioned artifacts produced by OCR. Keys are relative to the OCR
+// namespace and never contain credentials or user supplied paths.
+type OCRArtifactStorage interface {
+	PutOCRArtifact(key string, data []byte, mediaType string) error
+	GetOCRArtifact(key string) ([]byte, error)
+	ListOCRArtifacts(prefix string) ([]string, error)
+	DeleteOCRArtifacts(prefix string) error
+}
+
 // DocumentImageAssetWriter stores an image object and its metadata as one
 // logical operation. Implementations should avoid leaving metadata that points
 // to an object that was never stored.

@@ -11,6 +11,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"iiif-pdf-server/internal/config"
 	"iiif-pdf-server/internal/models"
@@ -30,7 +31,11 @@ type IIIFService struct {
 func NewIIIFService(config *config.Config, storage storage.Storage) *IIIFService {
 	var c *cache.Cache
 	if config.IIIF.CacheEnabled {
-		c = cache.New(cache.DefaultExpiration, cache.DefaultExpiration)
+		ttl := time.Duration(config.IIIF.CacheTTL) * time.Second
+		if ttl <= 0 {
+			ttl = time.Hour
+		}
+		c = cache.New(ttl, ttl)
 	}
 
 	return &IIIFService{
