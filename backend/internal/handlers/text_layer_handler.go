@@ -31,6 +31,15 @@ func NewTextLayerHandler(service textLayerService) *TextLayerHandler {
 	return &TextLayerHandler{service: service}
 }
 
+// Status godoc
+// @Summary Consultar disponibilidad de Text Layer
+// @Tags Text Layer
+// @Security IntegrationBearer
+// @Produce json
+// @Param id path string true "UUID del documento"
+// @Success 200 {object} api.TextLayerStatus
+// @Failure 400 {object} api.ErrorResponse
+// @Router /api/v1/documents/{id}/text-layer/status [get]
 func (h *TextLayerHandler) Status(c *gin.Context) {
 	if !validUUIDParam(c) {
 		return
@@ -43,6 +52,19 @@ func (h *TextLayerHandler) Status(c *gin.Context) {
 	writeJSON(c, http.StatusOK, response)
 }
 
+// Page godoc
+// @Summary Obtener texto y geometría de una página
+// @Tags Text Layer
+// @Security IntegrationBearer
+// @Produce json
+// @Param id path string true "UUID del documento"
+// @Param page path int true "Página base 1"
+// @Param generation query string false "UUID de generación OCR"
+// @Success 200 {object} api.TextLayerPage
+// @Failure 400 {object} api.ErrorResponse
+// @Failure 404 {object} api.ErrorResponse
+// @Failure 409 {object} api.ErrorResponse
+// @Router /api/v1/documents/{id}/text-layer/pages/{page} [get]
 func (h *TextLayerHandler) Page(c *gin.Context) {
 	startedAt := time.Now()
 	if !validUUIDParam(c) {
@@ -127,6 +149,15 @@ func compressTextLayer(accepted string, payload []byte) (string, []byte, error) 
 	return "", payload, nil
 }
 
+// Generations godoc
+// @Summary Listar generaciones OCR
+// @Tags Text Layer
+// @Security IntegrationBearer
+// @Produce json
+// @Param id path string true "UUID del documento"
+// @Success 200 {object} api.OCRGenerationList
+// @Failure 404 {object} api.ErrorResponse
+// @Router /api/v1/documents/{id}/ocr/generations [get]
 func (h *TextLayerHandler) Generations(c *gin.Context) {
 	if !validUUIDParam(c) {
 		return

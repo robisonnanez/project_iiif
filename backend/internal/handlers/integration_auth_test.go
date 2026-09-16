@@ -20,6 +20,7 @@ func newIntegrationAuthTest(t *testing.T) (*IntegrationAuth, string) {
 	cfg.ApplyDefaults()
 	cfg.Security.IntegrationAuth.Enabled = true
 	cfg.Security.IntegrationAuth.HMACSecret = "0123456789abcdef0123456789abcdef"
+	cfg.Frontend.RequireAuth = true
 	cfg.Security.IntegrationAuth.RatePerMinute = 1
 	cfg.Security.IntegrationAuth.Burst = 0
 	store := storage.NewFileStorage(filepath.Join(t.TempDir(), "data"))
@@ -39,8 +40,20 @@ func TestIntegrationAuthRejectsShortSecret(t *testing.T) {
 	cfg.ApplyDefaults()
 	cfg.Security.IntegrationAuth.Enabled = true
 	cfg.Security.IntegrationAuth.HMACSecret = "short"
+	cfg.Frontend.RequireAuth = true
 	if _, err := NewIntegrationAuth(cfg, storage.NewFileStorage(t.TempDir()), NewAuthHandler(cfg)); err == nil {
 		t.Fatal("expected short secret error")
+	}
+}
+
+func TestIntegrationAuthRequiresProtectedAdminSession(t *testing.T) {
+	cfg := &config.Config{}
+	cfg.ApplyDefaults()
+	cfg.Security.IntegrationAuth.Enabled = true
+	cfg.Security.IntegrationAuth.HMACSecret = "0123456789abcdef0123456789abcdef"
+	cfg.Frontend.RequireAuth = false
+	if _, err := NewIntegrationAuth(cfg, storage.NewFileStorage(t.TempDir()), NewAuthHandler(cfg)); err == nil {
+		t.Fatal("expected require_auth validation error")
 	}
 }
 

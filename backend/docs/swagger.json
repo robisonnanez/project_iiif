@@ -302,6 +302,57 @@
                 }
             }
         },
+        "/api/v1/admin/integration-tokens": {
+            "post": {
+                "security": [
+                    {
+                        "SessionCookie": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Auth"
+                ],
+                "summary": "Emitir token temporal para integraciones",
+                "parameters": [
+                    {
+                        "description": "Consumidor, ámbito y TTL",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "type": "object"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/api.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/api.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/admin/migrations/local-to-db/start": {
             "post": {
                 "security": [
@@ -1094,6 +1145,45 @@
                 }
             }
         },
+        "/api/v1/documents/{id}/ocr/generations": {
+            "get": {
+                "security": [
+                    {
+                        "IntegrationBearer": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Text Layer"
+                ],
+                "summary": "Listar generaciones OCR",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "UUID del documento",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/api.OCRGenerationList"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/api.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/documents/{id}/ocr/pages/{page}": {
             "get": {
                 "description": "Devuelve el texto completo y, cuando existe geometría, palabras con bbox x0/x1/y0/y1 expresado en coordenadas del Canvas IIIF. Los OCR históricos sin geometría continúan con geometry_status=page_only.",
@@ -1342,6 +1432,109 @@
                         "description": "Bad Request",
                         "schema": {
                             "$ref": "#/definitions/handlers.errorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/documents/{id}/text-layer/pages/{page}": {
+            "get": {
+                "security": [
+                    {
+                        "IntegrationBearer": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Text Layer"
+                ],
+                "summary": "Obtener texto y geometría de una página",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "UUID del documento",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Página base 1",
+                        "name": "page",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "UUID de generación OCR",
+                        "name": "generation",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/api.TextLayerPage"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/api.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/api.ErrorResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/api.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/documents/{id}/text-layer/status": {
+            "get": {
+                "security": [
+                    {
+                        "IntegrationBearer": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Text Layer"
+                ],
+                "summary": "Consultar disponibilidad de Text Layer",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "UUID del documento",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/api.TextLayerStatus"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/api.ErrorResponse"
                         }
                     }
                 }
@@ -1739,6 +1932,229 @@
         }
     },
     "definitions": {
+        "api.BoundingBox": {
+            "type": "object",
+            "properties": {
+                "x0": {
+                    "type": "integer"
+                },
+                "x1": {
+                    "type": "integer"
+                },
+                "y0": {
+                    "type": "integer"
+                },
+                "y1": {
+                    "type": "integer"
+                }
+            }
+        },
+        "api.Canvas": {
+            "type": "object",
+            "properties": {
+                "height": {
+                    "type": "integer"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "image_id": {
+                    "type": "string"
+                },
+                "image_service_id": {
+                    "type": "string"
+                },
+                "width": {
+                    "type": "integer"
+                }
+            }
+        },
+        "api.ErrorDetail": {
+            "type": "object",
+            "properties": {
+                "code": {
+                    "type": "string"
+                },
+                "details": {
+                    "type": "object",
+                    "additionalProperties": {}
+                },
+                "message": {
+                    "type": "string"
+                }
+            }
+        },
+        "api.ErrorResponse": {
+            "type": "object",
+            "properties": {
+                "error": {
+                    "$ref": "#/definitions/api.ErrorDetail"
+                }
+            }
+        },
+        "api.OCRGeneration": {
+            "type": "object",
+            "properties": {
+                "active": {
+                    "type": "boolean"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "geometry": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "pages_failed": {
+                    "type": "integer"
+                },
+                "pages_ready": {
+                    "type": "integer"
+                },
+                "pages_total": {
+                    "type": "integer"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "updated_at": {
+                    "type": "string"
+                }
+            }
+        },
+        "api.OCRGenerationList": {
+            "type": "object",
+            "properties": {
+                "active_generation": {
+                    "type": "string"
+                },
+                "document_id": {
+                    "type": "string"
+                },
+                "generations": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/api.OCRGeneration"
+                    }
+                },
+                "schema_version": {
+                    "type": "integer"
+                }
+            }
+        },
+        "api.TextLayerPage": {
+            "type": "object",
+            "properties": {
+                "canvas": {
+                    "$ref": "#/definitions/api.Canvas"
+                },
+                "confidence": {
+                    "type": "number"
+                },
+                "document_id": {
+                    "type": "string"
+                },
+                "generation": {
+                    "type": "string"
+                },
+                "geometry_space": {
+                    "type": "string"
+                },
+                "geometry_status": {
+                    "type": "string"
+                },
+                "language": {
+                    "type": "string"
+                },
+                "layer_sha256": {
+                    "type": "string"
+                },
+                "page_number": {
+                    "type": "integer"
+                },
+                "schema_version": {
+                    "type": "integer"
+                },
+                "source": {
+                    "type": "string"
+                },
+                "text": {
+                    "type": "string"
+                },
+                "words": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/api.TextLayerWord"
+                    }
+                }
+            }
+        },
+        "api.TextLayerStatus": {
+            "type": "object",
+            "properties": {
+                "active_generation": {
+                    "type": "string"
+                },
+                "available": {
+                    "type": "boolean"
+                },
+                "document_id": {
+                    "type": "string"
+                },
+                "geometry": {
+                    "type": "string"
+                },
+                "pages_failed": {
+                    "type": "integer"
+                },
+                "pages_ready": {
+                    "type": "integer"
+                },
+                "pages_total": {
+                    "type": "integer"
+                },
+                "schema_version": {
+                    "type": "integer"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "updated_at": {
+                    "type": "string"
+                }
+            }
+        },
+        "api.TextLayerWord": {
+            "type": "object",
+            "properties": {
+                "bbox": {
+                    "$ref": "#/definitions/api.BoundingBox"
+                },
+                "block_index": {
+                    "type": "integer"
+                },
+                "confidence": {
+                    "type": "number"
+                },
+                "line_index": {
+                    "type": "integer"
+                },
+                "order": {
+                    "type": "integer"
+                },
+                "paragraph_index": {
+                    "type": "integer"
+                },
+                "text": {
+                    "type": "string"
+                },
+                "word_index": {
+                    "type": "integer"
+                }
+            }
+        },
         "buildinfo.Info": {
             "type": "object",
             "properties": {
@@ -2913,6 +3329,9 @@
                 "language": {
                     "type": "string"
                 },
+                "layer_sha256": {
+                    "type": "string"
+                },
                 "native_text": {
                     "type": "string"
                 },
@@ -2957,13 +3376,28 @@
                 "bbox": {
                     "$ref": "#/definitions/services.OCRBoundingBox"
                 },
+                "block_index": {
+                    "type": "integer"
+                },
                 "confidence": {
                     "type": "number",
                     "example": 95.20067596435548
                 },
+                "line_index": {
+                    "type": "integer"
+                },
+                "order": {
+                    "type": "integer"
+                },
+                "paragraph_index": {
+                    "type": "integer"
+                },
                 "text": {
                     "type": "string",
                     "example": "SÁNCHEZ,"
+                },
+                "word_index": {
+                    "type": "integer"
                 }
             }
         },
@@ -2995,6 +3429,11 @@
         }
     },
     "securityDefinitions": {
+        "IntegrationBearer": {
+            "type": "apiKey",
+            "name": "Authorization",
+            "in": "header"
+        },
         "SessionCookie": {
             "type": "apiKey",
             "name": "project_iiif_session",

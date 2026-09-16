@@ -15,6 +15,16 @@ if [[ -n "${PROJECT_IIIF_USERNAME:-}" && -n "${PROJECT_IIIF_PASSWORD:-}" ]]; the
     "$BASE_URL/auth/login" >/dev/null
   catalog="$(curl --fail --silent --show-error -b "$COOKIE_JAR" "$BASE_URL/api/v1/admin/ocr/languages")"
   frontend="$(curl --fail --silent --show-error -b "$COOKIE_JAR" "$BASE_URL/dashboard/build-meta.json")"
+  if [[ -n "${PROJECT_IIIF_DOCUMENT_ID:-}" ]]; then
+    text_layer_status="$(curl --fail --silent --show-error -b "$COOKIE_JAR" "$BASE_URL/api/v1/documents/$PROJECT_IIIF_DOCUMENT_ID/text-layer/status")"
+    TEXT_LAYER_STATUS="$text_layer_status" python3 - <<'PY'
+import json, os
+status = json.loads(os.environ["TEXT_LAYER_STATUS"])
+assert status.get("schema_version") == 1, status
+assert status.get("document_id") == os.environ["PROJECT_IIIF_DOCUMENT_ID"], status
+print(f"text-layer=ok estado={status.get('status')} generación={status.get('active_generation', 'ninguna')}")
+PY
+  fi
   CATALOG="$catalog" VERSION_INFO="$version" FRONTEND_INFO="$frontend" python3 - <<'PY'
 import json, os
 catalog = json.loads(os.environ["CATALOG"])

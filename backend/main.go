@@ -26,6 +26,9 @@ import (
 // @securityDefinitions.apikey SessionCookie
 // @in cookie
 // @name project_iiif_session
+// @securityDefinitions.apikey IntegrationBearer
+// @in header
+// @name Authorization
 // main inicia el ejecutable y coordina sus dependencias.
 func main() {
 	// Cargar configuración

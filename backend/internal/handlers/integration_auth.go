@@ -50,9 +50,23 @@ func NewIntegrationAuth(cfg *config.Config, store storage.Storage, sessions *Aut
 	if settings.Enabled && len([]byte(settings.HMACSecret)) < 32 {
 		return nil, errors.New("security.integration_auth.hmac_secret debe tener al menos 32 caracteres")
 	}
+	if settings.Enabled && !cfg.Frontend.RequireAuth {
+		return nil, errors.New("frontend.require_auth debe estar activo para emitir tokens de integración")
+	}
 	return &IntegrationAuth{config: settings, store: store, sessions: sessions, windows: map[string]rateWindow{}}, nil
 }
 
+// IssueToken godoc
+// @Summary Emitir token temporal para integraciones
+// @Tags Auth
+// @Security SessionCookie
+// @Accept json
+// @Produce json
+// @Param request body object true "Consumidor, ámbito y TTL"
+// @Success 201 {object} map[string]interface{}
+// @Failure 400 {object} api.ErrorResponse
+// @Failure 403 {object} api.ErrorResponse
+// @Router /api/v1/admin/integration-tokens [post]
 func (a *IntegrationAuth) IssueToken(c *gin.Context) {
 	if !a.config.Enabled {
 		writeContractError(c, http.StatusServiceUnavailable, "integration_auth_disabled", "la autenticación de integración está desactivada", nil)
