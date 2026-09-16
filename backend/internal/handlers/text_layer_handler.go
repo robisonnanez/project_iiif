@@ -1,13 +1,20 @@
 package handlers
 
 import (
+	"bytes"
+	"compress/gzip"
+	"encoding/json"
 	"errors"
+	"log"
 	"net/http"
 	"strconv"
+	"strings"
+	"time"
 
 	contract "iiif-pdf-server/internal/api"
 	"iiif-pdf-server/internal/services"
 
+	"github.com/andybalholm/brotli"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 )
@@ -37,6 +44,7 @@ func (h *TextLayerHandler) Status(c *gin.Context) {
 }
 
 func (h *TextLayerHandler) Page(c *gin.Context) {
+	startedAt := time.Now()
 	if !validUUIDParam(c) {
 		return
 	}
@@ -57,7 +65,66 @@ func (h *TextLayerHandler) Page(c *gin.Context) {
 		writeTextLayerError(c, err, c.Param("id"), page)
 		return
 	}
-	writeJSON(c, http.StatusOK, response)
+	writeTextLayerPage(c, response, startedAt)
+}
+
+func writeTextLayerPage(c *gin.Context, response *contract.TextLayerPage, startedAt time.Time) {
+	etag := `"` + response.LayerSHA256 + `"`
+	c.Header("ETag", etag)
+	c.Header("Cache-Control", "private")
+	c.Header("Vary", "Accept-Encoding, Authorization")
+	if c.GetHeader("If-None-Match") == etag {
+		log.Printf("[TEXT_LAYER] document=%s generation=%s page=%d status=304 cache_hit=true latency=%s", response.DocumentID, response.Generation, response.PageNumber, time.Since(startedAt).Round(time.Millisecond))
+		c.Status(http.StatusNotModified)
+		return
+	}
+	payload, err := json.Marshal(response)
+	if err != nil {
+		writeContractError(c, http.StatusInternalServerError, "internal_error", "no se pudo serializar la capa", nil)
+		return
+	}
+	if len(payload) > 10<<20 {
+		log.Printf("[TEXT_LAYER] oversized=true document=%s generation=%s page=%d bytes=%d", response.DocumentID, response.Generation, response.PageNumber, len(payload))
+	}
+	encoding, encoded, err := compressTextLayer(c.GetHeader("Accept-Encoding"), payload)
+	if err != nil {
+		writeContractError(c, http.StatusInternalServerError, "internal_error", "no se pudo comprimir la capa", nil)
+		return
+	}
+	if encoding != "" {
+		c.Header("Content-Encoding", encoding)
+	}
+	log.Printf("[TEXT_LAYER] document=%s generation=%s page=%d status=200 bytes=%d encoding=%s latency=%s", response.DocumentID, response.Generation, response.PageNumber, len(payload), encoding, time.Since(startedAt).Round(time.Millisecond))
+	c.Data(http.StatusOK, "application/json; charset=utf-8", encoded)
+}
+
+func compressTextLayer(accepted string, payload []byte) (string, []byte, error) {
+	accepted = strings.ToLower(accepted)
+	var buffer bytes.Buffer
+	if strings.Contains(accepted, "br") {
+		writer := brotli.NewWriterLevel(&buffer, 4)
+		if _, err := writer.Write(payload); err != nil {
+			return "", nil, err
+		}
+		if err := writer.Close(); err != nil {
+			return "", nil, err
+		}
+		return "br", buffer.Bytes(), nil
+	}
+	if strings.Contains(accepted, "gzip") {
+		writer, err := gzip.NewWriterLevel(&buffer, gzip.BestSpeed)
+		if err != nil {
+			return "", nil, err
+		}
+		if _, err := writer.Write(payload); err != nil {
+			return "", nil, err
+		}
+		if err := writer.Close(); err != nil {
+			return "", nil, err
+		}
+		return "gzip", buffer.Bytes(), nil
+	}
+	return "", payload, nil
 }
 
 func (h *TextLayerHandler) Generations(c *gin.Context) {

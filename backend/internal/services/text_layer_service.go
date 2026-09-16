@@ -89,6 +89,14 @@ func (s *OCRService) GetTextLayerPage(documentID, generation string, pageNumber 
 		}
 		generation = summary.ActiveGeneration
 	}
+	cacheKey := fmt.Sprintf("%s\x00%s\x00%d", documentID, generation, pageNumber)
+	if s.textLayerCache != nil {
+		if cached, found := s.textLayerCache.Get(cacheKey); found {
+			if page, ok := cached.(*contract.TextLayerPage); ok {
+				return page, nil
+			}
+		}
+	}
 	page, err := s.getPageGeneration(documentID, generation, pageNumber)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -100,7 +108,11 @@ func (s *OCRService) GetTextLayerPage(documentID, generation string, pageNumber 
 	for _, word := range page.Words {
 		words = append(words, contract.TextLayerWord{Order: word.Order, BlockIndex: word.BlockIndex, ParagraphIndex: word.ParagraphIndex, LineIndex: word.LineIndex, WordIndex: word.WordIndex, Text: word.Text, Confidence: word.Confidence, BBox: contract.BoundingBox{X0: word.BBox.X0, Y0: word.BBox.Y0, X1: word.BBox.X1, Y1: word.BBox.Y1}})
 	}
-	return &contract.TextLayerPage{SchemaVersion: contract.TextLayerSchemaVersion, DocumentID: page.DocumentID, Generation: page.Generation, PageNumber: page.PageNumber, Canvas: contract.Canvas{ID: page.CanvasV3, Width: page.Width, Height: page.Height, ImageID: page.ImageID, ImageServiceID: page.IIIFImage}, GeometrySpace: "canvas", GeometryStatus: page.GeometryStatus, Source: page.Source, Language: page.Language, Confidence: page.Confidence, Text: page.Text, LayerSHA256: page.LayerSHA256, Words: words}, nil
+	response := &contract.TextLayerPage{SchemaVersion: contract.TextLayerSchemaVersion, DocumentID: page.DocumentID, Generation: page.Generation, PageNumber: page.PageNumber, Canvas: contract.Canvas{ID: page.CanvasV3, Width: page.Width, Height: page.Height, ImageID: page.ImageID, ImageServiceID: page.IIIFImage}, GeometrySpace: "canvas", GeometryStatus: page.GeometryStatus, Source: page.Source, Language: page.Language, Confidence: page.Confidence, Text: page.Text, LayerSHA256: page.LayerSHA256, Words: words}
+	if s.textLayerCache != nil {
+		s.textLayerCache.SetDefault(cacheKey, response)
+	}
+	return response, nil
 }
 
 func (s *OCRService) getPageGeneration(documentID, generation string, page int) (*OCRPage, error) {

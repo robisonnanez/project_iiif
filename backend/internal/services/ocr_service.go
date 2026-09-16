@@ -30,6 +30,7 @@ import (
 
 	"github.com/gen2brain/go-fitz"
 	"github.com/google/uuid"
+	"github.com/patrickmn/go-cache"
 	"github.com/pemistahl/lingua-go"
 	"golang.org/x/text/unicode/norm"
 )
@@ -388,6 +389,7 @@ type OCRService struct {
 	vocabularyMu       sync.RWMutex
 	vocabularies       map[string][]ocrVocabularyEntry
 	generationMu       sync.Mutex
+	textLayerCache     *cache.Cache
 	installedLanguages func(context.Context) ([]string, error)
 }
 
@@ -395,6 +397,13 @@ type OCRService struct {
 func NewOCRService(cfg *config.Config, store storage.Storage) (*OCRService, error) {
 	root := filepath.Join(cfg.Storage.DataPath, "ocr")
 	service := &OCRService{config: cfg, storage: store, engine: TesseractEngine{}, root: root, artifacts: newOCRArtifactStore(root, store), jobs: map[string]*OCRJob{}, cancels: map[string]context.CancelFunc{}, vocabularies: map[string][]ocrVocabularyEntry{}, installedLanguages: listInstalledTesseractLanguages}
+	if cfg.IIIF.CacheEnabled {
+		ttl := time.Duration(cfg.IIIF.CacheTTL) * time.Second
+		if ttl <= 0 {
+			ttl = time.Hour
+		}
+		service.textLayerCache = cache.New(ttl, ttl)
+	}
 	if err := os.MkdirAll(filepath.Join(service.root, "jobs"), 0755); err != nil {
 		return nil, err
 	}
