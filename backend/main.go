@@ -98,6 +98,7 @@ func main() {
 	frontendHandler := handlers.NewFrontendHandler(cfg)
 	adminHandler := handlers.NewAdminHandler(cfg, documentService)
 	ocrHandler := handlers.NewOCRHandler(ocrService, ocrLanguageService)
+	textLayerHandler := handlers.NewTextLayerHandler(ocrService)
 	authHandler := handlers.NewAuthHandler(cfg)
 
 	// Ruta de bienvenida
@@ -205,6 +206,9 @@ func main() {
 		documentV1.GET("/:id/ocr/pages/:page/words", ocrHandler.FindPageWords)
 		documentV1.GET("/:id/ocr/search", ocrHandler.SearchDocument)
 		documentV1.GET("/:id/ocr/autocomplete", ocrHandler.AutocompleteDocument)
+		documentV1.GET("/:id/ocr/generations", textLayerHandler.Generations)
+		documentV1.GET("/:id/text-layer/status", textLayerHandler.Status)
+		documentV1.GET("/:id/text-layer/pages/:page", textLayerHandler.Page)
 	}
 	apiV1OCR := router.Group("/api/v1/ocr")
 	apiV1OCR.GET("/search", ocrHandler.Search)
