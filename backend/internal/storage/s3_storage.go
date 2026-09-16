@@ -184,6 +184,44 @@ func (s *S3Storage) HasImageBlob(imageID string) (bool, error) {
 	return s.objectExists(image.ImagePath)
 }
 
+func (s *S3Storage) PutOCRArtifact(key string, data []byte, mediaType string) error {
+	return s.putObject(path.Join("ocr", strings.TrimLeft(key, "/")), data, mediaType)
+}
+
+func (s *S3Storage) GetOCRArtifact(key string) ([]byte, error) {
+	objectKey := path.Join("ocr", strings.TrimLeft(key, "/"))
+	asset, err := s.getObject(objectKey, s.reference(objectKey))
+	if err != nil {
+		return nil, err
+	}
+	return asset.Data, nil
+}
+
+func (s *S3Storage) ListOCRArtifacts(prefix string) ([]string, error) {
+	prefix = path.Join("ocr", strings.TrimLeft(prefix, "/"))
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	items := make([]string, 0)
+	var token *string
+	for {
+		result, err := s.client.ListObjectsV2(ctx, &s3.ListObjectsV2Input{Bucket: aws.String(s.bucket), Prefix: aws.String(prefix), ContinuationToken: token})
+		if err != nil {
+			return nil, err
+		}
+		for _, object := range result.Contents {
+			items = append(items, strings.TrimPrefix(aws.ToString(object.Key), "ocr/"))
+		}
+		if !aws.ToBool(result.IsTruncated) || result.NextContinuationToken == nil {
+			return items, nil
+		}
+		token = result.NextContinuationToken
+	}
+}
+
+func (s *S3Storage) DeleteOCRArtifacts(prefix string) error {
+	return s.deletePrefix(path.Join("ocr", strings.TrimLeft(prefix, "/")))
+}
+
 // DeleteDocument elimina o libera de forma controlada los recursos asociados.
 func (s *S3Storage) DeleteDocument(id string) error {
 	doc, err := s.Storage.GetDocument(id)

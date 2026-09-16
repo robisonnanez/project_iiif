@@ -166,6 +166,24 @@ type OCRDocumentSummary struct {
 	UpdatedAt        time.Time `json:"updated_at"`
 }
 
+type OCRGenerationRecord struct {
+	ID          string    `json:"id"`
+	Status      string    `json:"status"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
+	PagesTotal  int       `json:"pages_total"`
+	PagesReady  int       `json:"pages_ready"`
+	PagesFailed int       `json:"pages_failed"`
+	Geometry    string    `json:"geometry"`
+}
+
+type OCRGenerationIndex struct {
+	SchemaVersion    int                   `json:"schema_version"`
+	DocumentID       string                `json:"document_id"`
+	ActiveGeneration string                `json:"active_generation,omitempty"`
+	Generations      []OCRGenerationRecord `json:"generations"`
+}
+
 type OCRSearchResult struct {
 	DocumentID string  `json:"document_id"`
 	PageNumber int     `json:"page_number"`
@@ -331,18 +349,21 @@ type OCRService struct {
 	storage            storage.Storage
 	engine             OCREngine
 	root               string
+	artifacts          ocrArtifactStore
 	queue              chan string
 	mu                 sync.RWMutex
 	jobs               map[string]*OCRJob
 	cancels            map[string]context.CancelFunc
 	vocabularyMu       sync.RWMutex
 	vocabularies       map[string][]ocrVocabularyEntry
+	generationMu       sync.Mutex
 	installedLanguages func(context.Context) ([]string, error)
 }
 
 // NewOCRService crea e inicializa la dependencia con una configuración válida.
 func NewOCRService(cfg *config.Config, store storage.Storage) (*OCRService, error) {
-	service := &OCRService{config: cfg, storage: store, engine: TesseractEngine{}, root: filepath.Join(cfg.Storage.DataPath, "ocr"), jobs: map[string]*OCRJob{}, cancels: map[string]context.CancelFunc{}, vocabularies: map[string][]ocrVocabularyEntry{}, installedLanguages: listInstalledTesseractLanguages}
+	root := filepath.Join(cfg.Storage.DataPath, "ocr")
+	service := &OCRService{config: cfg, storage: store, engine: TesseractEngine{}, root: root, artifacts: newOCRArtifactStore(root, store), jobs: map[string]*OCRJob{}, cancels: map[string]context.CancelFunc{}, vocabularies: map[string][]ocrVocabularyEntry{}, installedLanguages: listInstalledTesseractLanguages}
 	if err := os.MkdirAll(filepath.Join(service.root, "jobs"), 0755); err != nil {
 		return nil, err
 	}
@@ -454,6 +475,12 @@ func (s *OCRService) createJob(documentID string, request CreateOCRJobRequest, r
 		s.mu.Unlock()
 		return nil, fmt.Errorf("%w: %v", ErrOCRPersistence, err)
 	}
+	if err := s.upsertGeneration(job, false); err != nil {
+		s.mu.Lock()
+		delete(s.jobs, job.ID)
+		s.mu.Unlock()
+		return nil, fmt.Errorf("%w: %v", ErrOCRPersistence, err)
+	}
 	log.Printf("[OCR] job=%s document=%s regeneration=%t queued", job.ID, job.DocumentID, job.Regeneration)
 	s.queue <- job.ID
 	return cloneJob(job), nil
@@ -557,6 +584,7 @@ func (s *OCRService) processJob(id string) {
 	copy := cloneJob(job)
 	s.mu.Unlock()
 	_ = s.saveJob(copy)
+	_ = s.upsertGeneration(copy, false)
 	defer func() { cancel(); s.mu.Lock(); delete(s.cancels, id); s.mu.Unlock() }()
 	reader, ok := s.storage.(storage.DocumentPDFReader)
 	if !ok {
@@ -650,6 +678,9 @@ func (s *OCRService) processJob(id string) {
 		j.FinishedAt = &now
 		j.CurrentPage = 0
 	})
+	if completed, err := s.GetJob(id); err == nil {
+		_ = s.upsertGeneration(completed, true)
+	}
 	log.Printf("[OCR] job=%s document=%s status=%s completed", id, job.DocumentID, status)
 }
 
@@ -901,7 +932,7 @@ func linguaLanguages(codes []string) []lingua.Language {
 
 // GetSummary obtiene la información solicitada sin modificar el estado persistido.
 func (s *OCRService) GetSummary(documentID string) (*OCRDocumentSummary, error) {
-	data, err := os.ReadFile(filepath.Join(s.root, "documents", documentID+".json"))
+	data, err := s.artifacts.Get(summaryArtifactKey(documentID))
 	if err != nil {
 		return nil, errors.New("el documento aún no tiene OCR")
 	}
@@ -1181,15 +1212,16 @@ func (s *OCRService) Delete(documentID string) error {
 	if strings.TrimSpace(documentID) == "" || filepath.Base(documentID) != documentID {
 		return errors.New("identificador de documento inválido")
 	}
-	if err := os.Remove(filepath.Join(s.root, "documents", documentID+".json")); err != nil && !os.IsNotExist(err) {
+	if err := s.artifacts.DeletePrefix("pages/" + documentID); err != nil {
 		return err
 	}
-	if err := os.RemoveAll(filepath.Join(s.root, "pages", documentID)); err != nil {
+	if err := s.artifacts.DeletePrefix("vocabularies/" + documentID); err != nil {
 		return err
 	}
-	if err := os.RemoveAll(filepath.Join(s.root, "vocabularies", documentID)); err != nil {
+	if err := s.artifacts.DeletePrefix("generations/" + documentID); err != nil {
 		return err
 	}
+	_ = os.Remove(filepath.Join(s.root, "documents", documentID+".json"))
 	s.vocabularyMu.Lock()
 	for key := range s.vocabularies {
 		if strings.HasPrefix(key, documentID+"\x00") {
@@ -1286,24 +1318,21 @@ func (s *OCRService) saveVocabulary(vocabulary *ocrVocabulary) error {
 
 // writeVocabulary convierte y escribe la información en el formato requerido.
 func (s *OCRService) writeVocabulary(vocabulary *ocrVocabulary) error {
-	path := filepath.Join(s.root, "vocabularies", vocabulary.DocumentID, vocabulary.Generation+".json.gz")
-	return writeGzipJSONAtomic(path, vocabulary)
+	data, err := marshalGzipJSON(vocabulary)
+	if err != nil {
+		return err
+	}
+	return s.artifacts.Put(vocabularyArtifactKey(vocabulary.DocumentID, vocabulary.Generation), data, "application/gzip")
 }
 
 // readVocabulary obtiene la información solicitada sin modificar el estado persistido.
 func (s *OCRService) readVocabulary(documentID, generation string) (*ocrVocabulary, error) {
-	file, err := os.Open(filepath.Join(s.root, "vocabularies", documentID, generation+".json.gz"))
+	data, err := s.artifacts.Get(vocabularyArtifactKey(documentID, generation))
 	if err != nil {
 		return nil, err
 	}
-	defer file.Close()
-	reader, err := gzip.NewReader(file)
-	if err != nil {
-		return nil, err
-	}
-	defer reader.Close()
 	var result ocrVocabulary
-	if err := json.NewDecoder(reader).Decode(&result); err != nil {
+	if err := unmarshalGzipJSON(data, &result); err != nil {
 		return nil, err
 	}
 	if result.SchemaVersion != ocrVocabularySchemaVersion || result.DocumentID != documentID || result.Generation != generation {
@@ -1377,41 +1406,21 @@ func betterWordDisplay(candidate, current string) bool {
 
 // savePage crea o persiste la información validada por el servicio.
 func (s *OCRService) savePage(page *OCRPage) error {
-	path := filepath.Join(s.root, "pages", page.DocumentID, page.Generation, fmt.Sprintf("%06d.json.gz", page.PageNumber))
-	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
-		return err
-	}
-	file, err := os.Create(path)
+	data, err := marshalGzipJSON(page)
 	if err != nil {
 		return err
 	}
-	writer := gzip.NewWriter(file)
-	err = json.NewEncoder(writer).Encode(page)
-	closeErr := writer.Close()
-	fileErr := file.Close()
-	if err != nil {
-		return err
-	}
-	if closeErr != nil {
-		return closeErr
-	}
-	return fileErr
+	return s.artifacts.Put(pageArtifactKey(page.DocumentID, page.Generation, page.PageNumber), data, "application/gzip")
 }
 
 // readPage obtiene la información solicitada sin modificar el estado persistido.
 func (s *OCRService) readPage(documentID, generation string, page int) (*OCRPage, error) {
-	file, err := os.Open(filepath.Join(s.root, "pages", documentID, generation, fmt.Sprintf("%06d.json.gz", page)))
+	data, err := s.artifacts.Get(pageArtifactKey(documentID, generation, page))
 	if err != nil {
 		return nil, err
 	}
-	defer file.Close()
-	reader, err := gzip.NewReader(file)
-	if err != nil {
-		return nil, err
-	}
-	defer reader.Close()
 	var result OCRPage
-	if err := json.NewDecoder(reader).Decode(&result); err != nil {
+	if err := unmarshalGzipJSON(data, &result); err != nil {
 		return nil, err
 	}
 	return &result, nil
@@ -1419,11 +1428,87 @@ func (s *OCRService) readPage(documentID, generation string, page int) (*OCRPage
 
 // saveSummary crea o persiste la información validada por el servicio.
 func (s *OCRService) saveSummary(summary *OCRDocumentSummary) error {
-	path := filepath.Join(s.root, "documents", summary.DocumentID+".json")
-	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+	data, err := marshalJSON(summary)
+	if err != nil {
 		return err
 	}
-	return writeJSONAtomic(path, summary)
+	return s.artifacts.Put(summaryArtifactKey(summary.DocumentID), data, "application/json")
+}
+
+func (s *OCRService) loadGenerationIndex(documentID string) (*OCRGenerationIndex, error) {
+	data, err := s.artifacts.Get(generationIndexArtifactKey(documentID))
+	if err != nil {
+		lower := strings.ToLower(err.Error())
+		if os.IsNotExist(err) || strings.Contains(lower, "not found") || strings.Contains(lower, "nosuchkey") {
+			return &OCRGenerationIndex{SchemaVersion: 1, DocumentID: documentID, Generations: []OCRGenerationRecord{}}, nil
+		}
+		return nil, err
+	}
+	var index OCRGenerationIndex
+	if err := json.Unmarshal(data, &index); err != nil {
+		return nil, err
+	}
+	if index.Generations == nil {
+		index.Generations = []OCRGenerationRecord{}
+	}
+	return &index, nil
+}
+
+func (s *OCRService) saveGenerationIndex(index *OCRGenerationIndex) error {
+	data, err := marshalJSON(index)
+	if err != nil {
+		return err
+	}
+	return s.artifacts.Put(generationIndexArtifactKey(index.DocumentID), data, "application/json")
+}
+
+func (s *OCRService) upsertGeneration(job *OCRJob, active bool) error {
+	if job == nil {
+		return nil
+	}
+	s.generationMu.Lock()
+	defer s.generationMu.Unlock()
+	index, err := s.loadGenerationIndex(job.DocumentID)
+	if err != nil {
+		return err
+	}
+	record := OCRGenerationRecord{ID: job.Generation, Status: job.Status, CreatedAt: job.CreatedAt, UpdatedAt: time.Now().UTC(), PagesTotal: job.TotalPages, PagesReady: job.ProcessedPages - job.FailedPages, PagesFailed: job.FailedPages, Geometry: "mixed"}
+	found := false
+	for position := range index.Generations {
+		if index.Generations[position].ID == job.Generation {
+			record.CreatedAt = index.Generations[position].CreatedAt
+			index.Generations[position] = record
+			found = true
+			break
+		}
+	}
+	if !found {
+		index.Generations = append(index.Generations, record)
+	}
+	if active {
+		index.ActiveGeneration = job.Generation
+	}
+	sort.Slice(index.Generations, func(i, j int) bool {
+		return index.Generations[i].CreatedAt.After(index.Generations[j].CreatedAt)
+	})
+	return s.saveGenerationIndex(index)
+}
+
+func (s *OCRService) GetGenerationIndex(documentID string) (*OCRGenerationIndex, error) {
+	s.generationMu.Lock()
+	defer s.generationMu.Unlock()
+	return s.loadGenerationIndex(documentID)
+}
+
+func summaryArtifactKey(documentID string) string { return "documents/" + documentID + ".json" }
+func generationIndexArtifactKey(documentID string) string {
+	return "generations/" + documentID + "/index.json"
+}
+func vocabularyArtifactKey(documentID, generation string) string {
+	return "vocabularies/" + documentID + "/" + generation + ".json.gz"
+}
+func pageArtifactKey(documentID, generation string, page int) string {
+	return fmt.Sprintf("pages/%s/%s/%06d.json.gz", documentID, generation, page)
 }
 
 // saveJob crea o persiste la información validada por el servicio.
@@ -1505,6 +1590,7 @@ func (s *OCRService) failJob(id string, err error) {
 		job.FinishedAt = &now
 	})
 	if job, getErr := s.GetJob(id); getErr == nil {
+		_ = s.upsertGeneration(job, false)
 		log.Printf("[OCR] job=%s document=%s failed error=%q", id, job.DocumentID, err.Error())
 	}
 }
@@ -1518,6 +1604,7 @@ func (s *OCRService) finishCancelled(id string) {
 		job.FinishedAt = &now
 	})
 	if job, err := s.GetJob(id); err == nil {
+		_ = s.upsertGeneration(job, false)
 		log.Printf("[OCR] job=%s document=%s cancelled", id, job.DocumentID)
 	}
 }
