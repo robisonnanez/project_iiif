@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
+	"crypto/sha256"
 	"encoding/csv"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -44,9 +46,14 @@ type OCRBoundingBox struct {
 }
 
 type OCRWord struct {
-	Text       string         `json:"text" example:"SÁNCHEZ,"`
-	Confidence float64        `json:"confidence" example:"95.20067596435548"`
-	BBox       OCRBoundingBox `json:"bbox"`
+	Order          int            `json:"order,omitempty"`
+	BlockIndex     int            `json:"block_index,omitempty"`
+	ParagraphIndex int            `json:"paragraph_index,omitempty"`
+	LineIndex      int            `json:"line_index,omitempty"`
+	WordIndex      int            `json:"word_index,omitempty"`
+	Text           string         `json:"text" example:"SÁNCHEZ,"`
+	Confidence     float64        `json:"confidence" example:"95.20067596435548"`
+	BBox           OCRBoundingBox `json:"bbox"`
 }
 
 type OCRWordSearchResponse struct {
@@ -71,19 +78,29 @@ var (
 // UnmarshalJSON analiza la entrada y devuelve una representación validada.
 func (word *OCRWord) UnmarshalJSON(data []byte) error {
 	var value struct {
-		Text       string          `json:"text"`
-		Confidence float64         `json:"confidence"`
-		BBox       *OCRBoundingBox `json:"bbox"`
-		Left       *int            `json:"left"`
-		Top        *int            `json:"top"`
-		Width      *int            `json:"width"`
-		Height     *int            `json:"height"`
+		Order          int             `json:"order"`
+		BlockIndex     int             `json:"block_index"`
+		ParagraphIndex int             `json:"paragraph_index"`
+		LineIndex      int             `json:"line_index"`
+		WordIndex      int             `json:"word_index"`
+		Text           string          `json:"text"`
+		Confidence     float64         `json:"confidence"`
+		BBox           *OCRBoundingBox `json:"bbox"`
+		Left           *int            `json:"left"`
+		Top            *int            `json:"top"`
+		Width          *int            `json:"width"`
+		Height         *int            `json:"height"`
 	}
 	if err := json.Unmarshal(data, &value); err != nil {
 		return err
 	}
 	word.Text = value.Text
 	word.Confidence = value.Confidence
+	word.Order = value.Order
+	word.BlockIndex = value.BlockIndex
+	word.ParagraphIndex = value.ParagraphIndex
+	word.LineIndex = value.LineIndex
+	word.WordIndex = value.WordIndex
 	if value.BBox != nil {
 		word.BBox = *value.BBox
 		return nil
@@ -118,6 +135,7 @@ type OCRPage struct {
 	GeometryStatus string    `json:"geometry_status"`
 	GeometrySpace  string    `json:"geometry_space,omitempty"`
 	GeometryError  string    `json:"geometry_error,omitempty"`
+	LayerSHA256    string    `json:"layer_sha256,omitempty"`
 	Words          []OCRWord `json:"words,omitempty"`
 	Engine         string    `json:"engine"`
 	CreatedAt      time.Time `json:"created_at"`
@@ -264,6 +282,7 @@ func parseTesseractTSV(data []byte) (string, []OCRWord, float64, error) {
 	words := make([]OCRWord, 0)
 	var text strings.Builder
 	confidenceTotal := 0.0
+	lastBlock, lastParagraph, lastLine := -1, -1, -1
 	for {
 		fields, readErr := reader.Read()
 		if readErr == io.EOF {
@@ -291,12 +310,24 @@ func parseTesseractTSV(data []byte) (string, []OCRWord, float64, error) {
 		if leftErr != nil || topErr != nil || widthErr != nil || heightErr != nil || left < 0 || top < 0 || width <= 0 || height <= 0 {
 			continue
 		}
-		word := OCRWord{Text: wordText, Confidence: confidence, BBox: OCRBoundingBox{X0: left, X1: left + width, Y0: top, Y1: top + height}}
+		block, blockErr := strconv.Atoi(fields[header["block_num"]])
+		paragraph, paragraphErr := strconv.Atoi(fields[header["par_num"]])
+		line, lineErr := strconv.Atoi(fields[header["line_num"]])
+		wordIndex, wordErr := strconv.Atoi(fields[header["word_num"]])
+		if blockErr != nil || paragraphErr != nil || lineErr != nil || wordErr != nil {
+			continue
+		}
+		word := OCRWord{Order: len(words), BlockIndex: block, ParagraphIndex: paragraph, LineIndex: line, WordIndex: wordIndex, Text: wordText, Confidence: confidence, BBox: OCRBoundingBox{X0: left, X1: left + width, Y0: top, Y1: top + height}}
 		words = append(words, word)
 		if text.Len() > 0 {
-			text.WriteByte(' ')
+			if block != lastBlock || paragraph != lastParagraph || line != lastLine {
+				text.WriteByte('\n')
+			} else {
+				text.WriteByte(' ')
+			}
 		}
 		text.WriteString(wordText)
+		lastBlock, lastParagraph, lastLine = block, paragraph, line
 		confidenceTotal += confidence
 	}
 	confidence := 0.0
@@ -308,7 +339,7 @@ func parseTesseractTSV(data []byte) (string, []OCRWord, float64, error) {
 
 // readTesseractTSVHeader obtiene la información solicitada sin modificar el estado persistido.
 func readTesseractTSVHeader(reader *csv.Reader) (map[string]int, error) {
-	required := []string{"level", "left", "top", "width", "height", "conf", "text"}
+	required := []string{"level", "block_num", "par_num", "line_num", "word_num", "left", "top", "width", "height", "conf", "text"}
 	for {
 		record, err := reader.Read()
 		if err == io.EOF {
@@ -737,11 +768,12 @@ func (s *OCRService) processPage(parent context.Context, document *fitz.Document
 			page.GeometryError = err.Error()
 			page.SearchText = normalizeSearch(page.Text)
 			log.Printf("[OCR] job=%s document=%s page=%d/%d language=%s words=0 geometry=%s duration=%s tesseract_calls=%d error=%q", job.ID, job.DocumentID, pageIndex+1, job.TotalPages, page.Language, page.GeometryStatus, time.Since(startedAt).Round(time.Millisecond), attempts, err.Error())
+			finalizeOCRPage(page)
 			return page, nil
 		}
 		return nil, err
 	}
-	page.OCRText = cleanText(ocrText)
+	page.OCRText = cleanOCRText(ocrText)
 	page.Words = scaleOCRWords(words, ocrWidth, ocrHeight, canvasWidth, canvasHeight)
 	page.Confidence = confidence
 	if len(page.Words) > 0 {
@@ -769,6 +801,7 @@ func (s *OCRService) processPage(parent context.Context, document *fitz.Document
 		page.Source = "blank"
 	}
 	page.SearchText = normalizeSearch(page.Text)
+	finalizeOCRPage(page)
 	log.Printf("[OCR] job=%s document=%s page=%d/%d language=%s words=%d geometry=%s duration=%s tesseract_calls=%d ocr_image=%dx%d canvas=%dx%d", job.ID, job.DocumentID, pageIndex+1, job.TotalPages, page.Language, len(page.Words), page.GeometryStatus, time.Since(startedAt).Round(time.Millisecond), attempts, ocrWidth, ocrHeight, canvasWidth, canvasHeight)
 	return page, nil
 }
@@ -963,6 +996,7 @@ func (s *OCRService) GetPage(documentID string, page int) (*OCRPage, error) {
 		result.Width, result.Height = canvasWidth, canvasHeight
 		result.GeometrySpace = "canvas"
 	}
+	finalizeOCRPage(result)
 	return result, nil
 }
 
@@ -1205,6 +1239,64 @@ func scaleOCRWords(words []OCRWord, sourceWidth, sourceHeight, targetWidth, targ
 // scaleCoordinate encapsula esta operación interna y conserva las invariantes del componente.
 func scaleCoordinate(value, sourceSize, targetSize int) int {
 	return int(math.Round(float64(value) * float64(targetSize) / float64(sourceSize)))
+}
+
+func cleanOCRText(value string) string {
+	lines := strings.Split(strings.ToValidUTF8(value, ""), "\n")
+	cleaned := make([]string, 0, len(lines))
+	for _, line := range lines {
+		line = strings.Join(strings.Fields(line), " ")
+		if line != "" {
+			cleaned = append(cleaned, line)
+		}
+	}
+	return strings.Join(cleaned, "\n")
+}
+
+func finalizeOCRPage(page *OCRPage) {
+	if page == nil {
+		return
+	}
+	valid := make([]OCRWord, 0, len(page.Words))
+	for _, word := range page.Words {
+		box := word.BBox
+		if page.Width > 0 {
+			box.X0 = maxInt(0, minInt(box.X0, page.Width-1))
+			box.X1 = maxInt(box.X0+1, minInt(box.X1, page.Width))
+		}
+		if page.Height > 0 {
+			box.Y0 = maxInt(0, minInt(box.Y0, page.Height-1))
+			box.Y1 = maxInt(box.Y0+1, minInt(box.Y1, page.Height))
+		}
+		if box.X1 <= box.X0 || box.Y1 <= box.Y0 {
+			continue
+		}
+		word.Order = len(valid)
+		word.BBox = box
+		valid = append(valid, word)
+	}
+	page.Words = valid
+	if len(valid) == 0 {
+		page.GeometryStatus = "page_only"
+		page.GeometrySpace = ""
+	}
+	page.LayerSHA256 = textLayerHash(page)
+}
+
+func textLayerHash(page *OCRPage) string {
+	canonical := struct {
+		DocumentID string    `json:"document_id"`
+		Generation string    `json:"generation"`
+		PageNumber int       `json:"page_number"`
+		CanvasID   string    `json:"canvas_id"`
+		Width      int       `json:"width"`
+		Height     int       `json:"height"`
+		Text       string    `json:"text"`
+		Words      []OCRWord `json:"words"`
+	}{page.DocumentID, page.Generation, page.PageNumber, page.CanvasV3, page.Width, page.Height, page.Text, page.Words}
+	data, _ := json.Marshal(canonical)
+	digest := sha256.Sum256(data)
+	return hex.EncodeToString(digest[:])
 }
 
 // Delete elimina o libera de forma controlada los recursos asociados.

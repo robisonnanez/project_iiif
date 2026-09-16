@@ -207,12 +207,48 @@ func TestParseTesseractTSV(t *testing.T) {
 	if first.Text != "SÁNCHEZ," || first.Confidence != 95.20067596435548 {
 		t.Fatalf("first word = %#v", first)
 	}
+	if first.Order != 0 || first.BlockIndex != 1 || first.ParagraphIndex != 1 || first.LineIndex != 1 || first.WordIndex != 1 {
+		t.Fatalf("reading order = %#v", first)
+	}
 	wantBox := (OCRBoundingBox{X0: 940, X1: 1016, Y0: 1543, Y1: 1557})
 	if first.BBox != wantBox {
 		t.Fatalf("bbox = %#v, want %#v", first.BBox, wantBox)
 	}
 	if confidence <= 0 || confidence >= 100 {
 		t.Fatalf("confidence promedio = %v", confidence)
+	}
+}
+
+func TestParseTesseractTSVPreservesDeterministicLineBreaks(t *testing.T) {
+	input := "level\tpage_num\tblock_num\tpar_num\tline_num\tword_num\tleft\ttop\twidth\theight\tconf\ttext\n" +
+		"5\t1\t1\t1\t1\t1\t1\t1\t10\t10\t90\tLínea\n" +
+		"5\t1\t1\t1\t1\t2\t12\t1\t10\t10\t90\tuno.\n" +
+		"5\t1\t1\t1\t2\t1\t1\t20\t10\t10\t90\tLínea\n" +
+		"5\t1\t1\t1\t2\t2\t12\t20\t10\t10\t90\tdos.\n"
+	text, words, _, err := parseTesseractTSV([]byte(input))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if text != "Línea uno.\nLínea dos." {
+		t.Fatalf("text = %q", text)
+	}
+	if len(words) != 4 || words[2].Order != 2 || words[2].LineIndex != 2 {
+		t.Fatalf("words = %#v", words)
+	}
+}
+
+func TestTextLayerHashIsStableAndChangesWithGeneration(t *testing.T) {
+	page := &OCRPage{DocumentID: "doc", Generation: "g1", PageNumber: 1, CanvasV3: "canvas/1", Width: 100, Height: 200, Text: "Árbol.", Words: []OCRWord{{Text: "Árbol.", BBox: OCRBoundingBox{X0: 1, Y0: 2, X1: 20, Y1: 10}}}}
+	finalizeOCRPage(page)
+	first := page.LayerSHA256
+	finalizeOCRPage(page)
+	if page.LayerSHA256 != first || len(first) != 64 {
+		t.Fatalf("unstable hash: %q / %q", first, page.LayerSHA256)
+	}
+	page.Generation = "g2"
+	finalizeOCRPage(page)
+	if page.LayerSHA256 == first {
+		t.Fatal("generation must change hash")
 	}
 }
 
