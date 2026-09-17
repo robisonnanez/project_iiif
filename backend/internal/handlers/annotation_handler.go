@@ -80,7 +80,11 @@ func (h *AnnotationHandler) Create(c *gin.Context) {
 	if !ok {
 		return
 	}
-	if _, err := uuid.Parse(c.Param("document_id")); err != nil {
+	documentID := c.Param("document_id")
+	if documentID == "" {
+		documentID = c.Param("id")
+	}
+	if _, err := uuid.Parse(documentID); err != nil {
 		writeContractError(c, http.StatusBadRequest, "invalid_request", "document_id debe ser UUID", nil)
 		return
 	}
@@ -95,7 +99,7 @@ func (h *AnnotationHandler) Create(c *gin.Context) {
 		return
 	}
 	annotation, replayed, err := h.service.Create(c.Request.Context(), services.CreateAnnotationInput{
-		ProjectKey: claims.Project, TenantID: claims.Tenant, DocumentID: c.Param("document_id"), PageID: c.Param("page_id"),
+		ProjectKey: claims.Project, TenantID: claims.Tenant, DocumentID: documentID, PageID: c.Param("page_id"),
 		ClientReferenceID: request.ClientReferenceID, OCRGenerationID: request.OCRGenerationID,
 		LayerSHA256: request.LayerSHA256, SelectedText: request.SelectedText, Note: request.Note,
 		Selector: request.Selector, Color: request.Color,

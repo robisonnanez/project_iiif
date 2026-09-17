@@ -220,7 +220,7 @@ func main() {
 		documentV1.GET("/:id/ocr/generations", integrationAuth.RequireRead(), textLayerHandler.Generations)
 		documentV1.GET("/:id/text-layer/status", integrationAuth.RequireRead(), textLayerHandler.Status)
 		documentV1.GET("/:id/text-layer/pages/:page", integrationAuth.RequireRead(), textLayerHandler.Page)
-		documentV1.POST("/:document_id/pages/:page_id/annotations", integrationAuth.RequireScope("annotations:write"), annotationHandler.Create)
+		documentV1.POST("/:id/pages/:page_id/annotations", integrationAuth.RequireScope("annotations:write"), annotationHandler.Create)
 	}
 	annotationV1 := router.Group("/api/v1/annotations")
 	{
