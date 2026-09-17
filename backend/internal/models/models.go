@@ -61,6 +61,59 @@ type BinaryAsset struct {
 	ByteSize  int64  `json:"byteSize"`
 }
 
+// AnnotationRectangle stores geometry normalized against the original IIIF canvas.
+type AnnotationRectangle struct {
+	X      float64 `json:"x"`
+	Y      float64 `json:"y"`
+	Width  float64 `json:"width"`
+	Height float64 `json:"height"`
+}
+
+type AnnotationCanvas struct {
+	ID     string `json:"id"`
+	Width  int    `json:"width"`
+	Height int    `json:"height"`
+}
+
+type AnnotationQuote struct {
+	Exact  string `json:"exact"`
+	Prefix string `json:"prefix"`
+	Suffix string `json:"suffix"`
+}
+
+type AnnotationSelector struct {
+	Type            string                `json:"type"`
+	CoordinateSpace string                `json:"coordinate_space"`
+	Canvas          AnnotationCanvas      `json:"canvas"`
+	Rectangles      []AnnotationRectangle `json:"rectangles"`
+	Quote           AnnotationQuote       `json:"quote"`
+}
+
+// DocumentAnnotation is the durable, tenant-scoped annotation aggregate.
+// User identity deliberately does not form part of this model.
+type DocumentAnnotation struct {
+	ID                 string             `json:"id"`
+	ProjectKey         string             `json:"-"`
+	TenantID           string             `json:"-"`
+	DocumentID         string             `json:"document_id"`
+	PageID             string             `json:"page_id"`
+	PageNumber         int                `json:"page_number"`
+	OCRGenerationID    string             `json:"generation"`
+	LayerSHA256        string             `json:"layer_sha256"`
+	ClientReferenceID  string             `json:"client_reference_id,omitempty"`
+	RequestFingerprint string             `json:"-"`
+	SelectedText       string             `json:"selected_text"`
+	Note               *string            `json:"note"`
+	Selector           AnnotationSelector `json:"selector"`
+	Color              *string            `json:"color"`
+	Version            int64              `json:"version"`
+	GenerationActive   bool               `json:"generation_active"`
+	Historical         bool               `json:"historical"`
+	CreatedAt          time.Time          `json:"created_at"`
+	UpdatedAt          time.Time          `json:"updated_at"`
+	DeletedAt          *time.Time         `json:"-"`
+}
+
 type ConversionSettings struct {
 	Format    string `json:"format"`
 	Quality   int    `json:"quality"`
