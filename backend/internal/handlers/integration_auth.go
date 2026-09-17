@@ -19,7 +19,11 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-const textLayerReadScope = "text-layer:read"
+const (
+	textLayerReadScope    = "text-layer:read"
+	annotationsReadScope  = "annotations:read"
+	annotationsWriteScope = "annotations:write"
+)
 
 type integrationClaims struct {
 	Issuer     string `json:"iss"`
@@ -78,6 +82,7 @@ func (a *IntegrationAuth) IssueToken(c *gin.Context) {
 		Tenant     string `json:"tenant"`
 		DocumentID string `json:"document_id"`
 		TTLSeconds int    `json:"ttl_seconds"`
+		Scope      string `json:"scope"`
 	}
 	if err := c.ShouldBindJSON(&request); err != nil {
 		writeContractError(c, http.StatusBadRequest, "invalid_request", "payload de token inválido", nil)
@@ -86,6 +91,21 @@ func (a *IntegrationAuth) IssueToken(c *gin.Context) {
 	request.ConsumerID, request.Project, request.Tenant, request.DocumentID = strings.TrimSpace(request.ConsumerID), strings.TrimSpace(request.Project), strings.TrimSpace(request.Tenant), strings.TrimSpace(request.DocumentID)
 	if request.ConsumerID == "" || request.Project == "" {
 		writeContractError(c, http.StatusBadRequest, "invalid_request", "consumer_id y project son obligatorios", nil)
+		return
+	}
+	request.Scope = strings.TrimSpace(request.Scope)
+	if request.Scope == "" {
+		request.Scope = textLayerReadScope
+	}
+	allowedScopes := map[string]bool{textLayerReadScope: true, annotationsReadScope: true, annotationsWriteScope: true}
+	for _, scope := range strings.Fields(request.Scope) {
+		if !allowedScopes[scope] {
+			writeContractError(c, http.StatusBadRequest, "invalid_request", "scope no permitido", gin.H{"scope": scope})
+			return
+		}
+	}
+	if (scopeContains(request.Scope, annotationsReadScope) || scopeContains(request.Scope, annotationsWriteScope)) && request.Tenant == "" {
+		writeContractError(c, http.StatusBadRequest, "invalid_request", "tenant es obligatorio para scopes de anotaciones", nil)
 		return
 	}
 	ttl := request.TTLSeconds
@@ -105,7 +125,7 @@ func (a *IntegrationAuth) IssueToken(c *gin.Context) {
 		request.Tenant = document.TenantKey
 	}
 	now := time.Now().UTC()
-	claims := integrationClaims{Issuer: a.config.Issuer, Subject: request.ConsumerID, IssuedAt: now.Unix(), ExpiresAt: now.Add(time.Duration(ttl) * time.Second).Unix(), Scope: textLayerReadScope, Project: request.Project, Tenant: request.Tenant, DocumentID: request.DocumentID}
+	claims := integrationClaims{Issuer: a.config.Issuer, Subject: request.ConsumerID, IssuedAt: now.Unix(), ExpiresAt: now.Add(time.Duration(ttl) * time.Second).Unix(), Scope: request.Scope, Project: request.Project, Tenant: request.Tenant, DocumentID: request.DocumentID}
 	token, err := a.sign(claims)
 	if err != nil {
 		writeContractError(c, http.StatusInternalServerError, "internal_error", "no se pudo emitir el token", nil)
@@ -138,7 +158,7 @@ func (a *IntegrationAuth) RequireRead() gin.HandlerFunc {
 			c.Abort()
 			return
 		}
-		if !strings.Contains(" "+claims.Scope+" ", " "+textLayerReadScope+" ") {
+		if !scopeContains(claims.Scope, textLayerReadScope) {
 			writeContractError(c, http.StatusForbidden, "forbidden", "scope insuficiente", nil)
 			c.Abort()
 			return
@@ -182,6 +202,62 @@ func (a *IntegrationAuth) RequireRead() gin.HandlerFunc {
 		c.Next()
 		log.Printf("[AUDIT] consumer=%s route=%s document=%s page=%s status=%d latency=%s", claims.Subject, c.FullPath(), documentID, c.Param("page"), c.Writer.Status(), time.Since(startedAt).Round(time.Millisecond))
 	}
+}
+
+// RequireScope validates an IntegrationBearer token without loading a global
+// resource first. Annotation queries apply tenant and project inside storage.
+func (a *IntegrationAuth) RequireScope(required string) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		startedAt := time.Now()
+		if !a.config.Enabled {
+			writeContractError(c, http.StatusServiceUnavailable, "integration_auth_disabled", "la autenticación de integración está desactivada", nil)
+			c.Abort()
+			return
+		}
+		value := strings.TrimSpace(c.GetHeader("Authorization"))
+		if !strings.HasPrefix(strings.ToLower(value), "bearer ") {
+			writeContractError(c, http.StatusUnauthorized, "invalid_token", "Bearer token requerido", nil)
+			c.Abort()
+			return
+		}
+		claims, err := a.verify(strings.TrimSpace(value[7:]))
+		if err != nil {
+			writeContractError(c, http.StatusUnauthorized, "invalid_token", "Bearer token inválido o expirado", nil)
+			c.Abort()
+			return
+		}
+		if !scopeContains(claims.Scope, required) {
+			writeContractError(c, http.StatusForbidden, "insufficient_scope", "scope insuficiente", gin.H{"required_scope": required})
+			c.Abort()
+			return
+		}
+		if claims.Project == "" || claims.Tenant == "" {
+			writeContractError(c, http.StatusUnauthorized, "invalid_token", "el token no identifica tenant y proyecto", nil)
+			c.Abort()
+			return
+		}
+		key := claims.Subject + "\x00" + required
+		if !a.allow(key) {
+			c.Header("Retry-After", "60")
+			writeContractError(c, http.StatusTooManyRequests, "rate_limited", "límite de solicitudes excedido", nil)
+			c.Abort()
+			return
+		}
+		c.Set("integration_consumer", claims.Subject)
+		c.Set("integration_claims", claims)
+		c.Next()
+		log.Printf("[AUDIT_AUTH] consumer=%s tenant=%s project=%s scope=%s route=%s status=%d latency=%s",
+			claims.Subject, claims.Tenant, claims.Project, required, c.FullPath(), c.Writer.Status(), time.Since(startedAt).Round(time.Millisecond))
+	}
+}
+
+func scopeContains(scopes, required string) bool {
+	for _, scope := range strings.Fields(scopes) {
+		if scope == required {
+			return true
+		}
+	}
+	return false
 }
 
 func (a *IntegrationAuth) allow(key string) bool {

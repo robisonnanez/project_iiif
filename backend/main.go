@@ -85,8 +85,9 @@ func main() {
 		AllowOriginFunc: func(origin string) bool {
 			return isOriginAllowed(origin, cfg.Security.CorsOrigins)
 		},
-		AllowMethods:     []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
-		AllowHeaders:     []string{"Origin", "Content-Type", "Accept", "Authorization"},
+		AllowMethods:     []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
+		AllowHeaders:     []string{"Origin", "Content-Type", "Accept", "Authorization", "Idempotency-Key", "If-Match"},
+		ExposeHeaders:    []string{"ETag"},
 		AllowCredentials: true,
 		MaxAge:           12 * 3600, // 12 horas
 	}
@@ -102,6 +103,8 @@ func main() {
 	adminHandler := handlers.NewAdminHandler(cfg, documentService)
 	ocrHandler := handlers.NewOCRHandler(ocrService, ocrLanguageService)
 	textLayerHandler := handlers.NewTextLayerHandler(ocrService)
+	annotationService := services.NewAnnotationService(storage.ResolveAnnotationStorage(store), store, ocrService)
+	annotationHandler := handlers.NewAnnotationHandler(annotationService)
 	authHandler := handlers.NewAuthHandler(cfg)
 	integrationAuth, err := handlers.NewIntegrationAuth(cfg, store, authHandler)
 	if err != nil {
@@ -217,6 +220,14 @@ func main() {
 		documentV1.GET("/:id/ocr/generations", integrationAuth.RequireRead(), textLayerHandler.Generations)
 		documentV1.GET("/:id/text-layer/status", integrationAuth.RequireRead(), textLayerHandler.Status)
 		documentV1.GET("/:id/text-layer/pages/:page", integrationAuth.RequireRead(), textLayerHandler.Page)
+		documentV1.POST("/:document_id/pages/:page_id/annotations", integrationAuth.RequireScope("annotations:write"), annotationHandler.Create)
+	}
+	annotationV1 := router.Group("/api/v1/annotations")
+	{
+		annotationV1.POST("/batch", integrationAuth.RequireScope("annotations:read"), annotationHandler.Batch)
+		annotationV1.GET("/:annotation_id", integrationAuth.RequireScope("annotations:read"), annotationHandler.Get)
+		annotationV1.PATCH("/:annotation_id", integrationAuth.RequireScope("annotations:write"), annotationHandler.Patch)
+		annotationV1.DELETE("/:annotation_id", integrationAuth.RequireScope("annotations:write"), annotationHandler.Delete)
 	}
 	apiV1OCR := router.Group("/api/v1/ocr")
 	apiV1OCR.GET("/search", integrationAuth.RequireRead(), ocrHandler.Search)
