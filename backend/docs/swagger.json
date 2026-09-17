@@ -862,6 +862,274 @@
                 }
             }
         },
+        "/api/v1/annotations/batch": {
+            "post": {
+                "security": [
+                    {
+                        "IntegrationBearer": []
+                    }
+                ],
+                "description": "Devuelve únicamente recursos visibles para el tenant y proyecto del token. Máximo 100 IDs.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Annotations"
+                ],
+                "summary": "Consultar anotaciones por lote",
+                "parameters": [
+                    {
+                        "description": "IDs solicitados y filtro opcional de página",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/handlers.AnnotationBatchRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.AnnotationBatchResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/api.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/api.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/api.ErrorResponse"
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/api.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/annotations/{annotation_id}": {
+            "get": {
+                "security": [
+                    {
+                        "IntegrationBearer": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Annotations"
+                ],
+                "summary": "Consultar una anotación",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "UUID v7 de la anotación",
+                        "name": "annotation_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/models.DocumentAnnotation"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/api.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/api.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/api.ErrorResponse"
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/api.ErrorResponse"
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "security": [
+                    {
+                        "IntegrationBearer": []
+                    }
+                ],
+                "tags": [
+                    "Annotations"
+                ],
+                "summary": "Eliminar lógicamente una anotación",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "UUID v7 de la anotación",
+                        "name": "annotation_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "No Content"
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/api.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/api.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/api.ErrorResponse"
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/api.ErrorResponse"
+                        }
+                    }
+                }
+            },
+            "patch": {
+                "security": [
+                    {
+                        "IntegrationBearer": []
+                    }
+                ],
+                "description": "note y color son independientes. selector, selected_text, ocr_generation_id y layer_sha256 deben enviarse juntos.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Annotations"
+                ],
+                "summary": "Actualizar una anotación con concurrencia optimista",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "UUID v7 de la anotación",
+                        "name": "annotation_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "ETag actual, por ejemplo \\",
+                        "name": "If-Match",
+                        "in": "header",
+                        "required": true
+                    },
+                    {
+                        "description": "Campos editables",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "type": "object"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/models.DocumentAnnotation"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/api.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/api.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/api.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/api.ErrorResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/api.ErrorResponse"
+                        }
+                    },
+                    "412": {
+                        "description": "Precondition Failed",
+                        "schema": {
+                            "$ref": "#/definitions/api.ErrorResponse"
+                        }
+                    },
+                    "422": {
+                        "description": "Unprocessable Entity",
+                        "schema": {
+                            "$ref": "#/definitions/api.ErrorResponse"
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/api.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/documents": {
             "get": {
                 "description": "Lista documentos con filtros opcionales por proyecto y tenant.",
@@ -991,6 +1259,114 @@
                         "description": "Internal Server Error",
                         "schema": {
                             "$ref": "#/definitions/handlers.errorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/documents/{document_id}/pages/{page_id}/annotations": {
+            "post": {
+                "security": [
+                    {
+                        "IntegrationBearer": []
+                    }
+                ],
+                "description": "Persiste una selección sobre la generación OCR activa de una página estable.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Annotations"
+                ],
+                "summary": "Crear una anotación de documento",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "UUID del documento",
+                        "name": "document_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "ID estable de document_images",
+                        "name": "page_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "UUID de referencia generado por el cliente",
+                        "name": "Idempotency-Key",
+                        "in": "header",
+                        "required": true
+                    },
+                    {
+                        "description": "Anotación",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/handlers.CreateAnnotationRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Repetición idempotente",
+                        "schema": {
+                            "$ref": "#/definitions/models.DocumentAnnotation"
+                        }
+                    },
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "$ref": "#/definitions/models.DocumentAnnotation"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/api.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/api.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/api.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/api.ErrorResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/api.ErrorResponse"
+                        }
+                    },
+                    "422": {
+                        "description": "Unprocessable Entity",
+                        "schema": {
+                            "$ref": "#/definitions/api.ErrorResponse"
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/api.ErrorResponse"
                         }
                     }
                 }
@@ -2293,6 +2669,63 @@
                 }
             }
         },
+        "handlers.AnnotationBatchRequest": {
+            "type": "object",
+            "properties": {
+                "ids": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "page_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "handlers.AnnotationBatchResponse": {
+            "type": "object",
+            "properties": {
+                "annotations": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/models.DocumentAnnotation"
+                    }
+                }
+            }
+        },
+        "handlers.CreateAnnotationRequest": {
+            "type": "object",
+            "properties": {
+                "client_reference_id": {
+                    "type": "string",
+                    "example": "0199b252-3c6f-7f6a-9a13-6b7c8d9e0001"
+                },
+                "color": {
+                    "type": "string",
+                    "example": "yellow"
+                },
+                "layer_sha256": {
+                    "type": "string",
+                    "example": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+                },
+                "note": {
+                    "type": "string",
+                    "example": "Comentario privado"
+                },
+                "ocr_generation_id": {
+                    "type": "string",
+                    "example": "7c6a7b52-b427-4e3b-a3dc-8cb593dc8511"
+                },
+                "selected_text": {
+                    "type": "string",
+                    "example": "fragmento seleccionado"
+                },
+                "selector": {
+                    "$ref": "#/definitions/models.AnnotationSelector"
+                }
+            }
+        },
         "handlers.editableConfigPayload": {
             "type": "object",
             "properties": {
@@ -2738,6 +3171,127 @@
                 "username": {
                     "type": "string",
                     "example": "admin"
+                }
+            }
+        },
+        "models.AnnotationCanvas": {
+            "type": "object",
+            "properties": {
+                "height": {
+                    "type": "integer"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "width": {
+                    "type": "integer"
+                }
+            }
+        },
+        "models.AnnotationQuote": {
+            "type": "object",
+            "properties": {
+                "exact": {
+                    "type": "string"
+                },
+                "prefix": {
+                    "type": "string"
+                },
+                "suffix": {
+                    "type": "string"
+                }
+            }
+        },
+        "models.AnnotationRectangle": {
+            "type": "object",
+            "properties": {
+                "height": {
+                    "type": "number"
+                },
+                "width": {
+                    "type": "number"
+                },
+                "x": {
+                    "type": "number"
+                },
+                "y": {
+                    "type": "number"
+                }
+            }
+        },
+        "models.AnnotationSelector": {
+            "type": "object",
+            "properties": {
+                "canvas": {
+                    "$ref": "#/definitions/models.AnnotationCanvas"
+                },
+                "coordinate_space": {
+                    "type": "string"
+                },
+                "quote": {
+                    "$ref": "#/definitions/models.AnnotationQuote"
+                },
+                "rectangles": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/models.AnnotationRectangle"
+                    }
+                },
+                "type": {
+                    "type": "string"
+                }
+            }
+        },
+        "models.DocumentAnnotation": {
+            "type": "object",
+            "properties": {
+                "client_reference_id": {
+                    "type": "string"
+                },
+                "color": {
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "document_id": {
+                    "type": "string"
+                },
+                "generation": {
+                    "type": "string"
+                },
+                "generation_active": {
+                    "type": "boolean"
+                },
+                "historical": {
+                    "type": "boolean"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "layer_sha256": {
+                    "type": "string"
+                },
+                "note": {
+                    "type": "string"
+                },
+                "page_id": {
+                    "type": "string"
+                },
+                "page_number": {
+                    "type": "integer"
+                },
+                "selected_text": {
+                    "type": "string"
+                },
+                "selector": {
+                    "$ref": "#/definitions/models.AnnotationSelector"
+                },
+                "updated_at": {
+                    "type": "string"
+                },
+                "version": {
+                    "type": "integer"
                 }
             }
         },
