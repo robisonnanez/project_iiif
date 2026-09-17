@@ -98,3 +98,52 @@ func TestIntegrationAuthRejectsCrossTenant(t *testing.T) {
 		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
 	}
 }
+
+func TestIntegrationAuthAnnotationScopes(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	auth, _ := newIntegrationAuthTest(t)
+	now := time.Now()
+	tests := []struct {
+		name, tokenScope, required string
+		expires                    time.Time
+		want                       int
+	}{
+		{"read accepted", annotationsReadScope, annotationsReadScope, now.Add(time.Minute), http.StatusNoContent},
+		{"write cannot read", annotationsWriteScope, annotationsReadScope, now.Add(time.Minute), http.StatusForbidden},
+		{"read cannot write", annotationsReadScope, annotationsWriteScope, now.Add(time.Minute), http.StatusForbidden},
+		{"expired", annotationsReadScope, annotationsReadScope, now.Add(-time.Second), http.StatusUnauthorized},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			token, err := auth.sign(integrationClaims{Issuer: auth.config.Issuer, Subject: "consumer", IssuedAt: now.Add(-time.Minute).Unix(), ExpiresAt: test.expires.Unix(), Scope: test.tokenScope, Project: "project-a", Tenant: "tenant-a"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			router := gin.New()
+			router.GET("/annotations", auth.RequireScope(test.required), func(c *gin.Context) { c.Status(http.StatusNoContent) })
+			request := httptest.NewRequest(http.MethodGet, "/annotations", nil)
+			request.Header.Set("Authorization", "Bearer "+token)
+			response := httptest.NewRecorder()
+			router.ServeHTTP(response, request)
+			if response.Code != test.want {
+				t.Fatalf("status=%d want=%d body=%s", response.Code, test.want, response.Body.String())
+			}
+		})
+	}
+}
+
+func TestIntegrationAuthAnnotationRequiresTenant(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	auth, _ := newIntegrationAuthTest(t)
+	now := time.Now()
+	token, _ := auth.sign(integrationClaims{Issuer: auth.config.Issuer, Subject: "consumer", IssuedAt: now.Unix(), ExpiresAt: now.Add(time.Minute).Unix(), Scope: annotationsReadScope, Project: "project-a"})
+	router := gin.New()
+	router.GET("/annotations", auth.RequireScope(annotationsReadScope), func(c *gin.Context) { c.Status(http.StatusNoContent) })
+	request := httptest.NewRequest(http.MethodGet, "/annotations", nil)
+	request.Header.Set("Authorization", "Bearer "+token)
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+	if response.Code != http.StatusUnauthorized {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+}

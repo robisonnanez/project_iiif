@@ -237,6 +237,45 @@ definitions:
       tenants_token_configured:
         type: boolean
     type: object
+  handlers.AnnotationBatchRequest:
+    properties:
+      ids:
+        items:
+          type: string
+        type: array
+      page_id:
+        type: string
+    type: object
+  handlers.AnnotationBatchResponse:
+    properties:
+      annotations:
+        items:
+          $ref: '#/definitions/models.DocumentAnnotation'
+        type: array
+    type: object
+  handlers.CreateAnnotationRequest:
+    properties:
+      client_reference_id:
+        example: 0199b252-3c6f-7f6a-9a13-6b7c8d9e0001
+        type: string
+      color:
+        example: yellow
+        type: string
+      layer_sha256:
+        example: 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+        type: string
+      note:
+        example: Comentario privado
+        type: string
+      ocr_generation_id:
+        example: 7c6a7b52-b427-4e3b-a3dc-8cb593dc8511
+        type: string
+      selected_text:
+        example: fragmento seleccionado
+        type: string
+      selector:
+        $ref: '#/definitions/models.AnnotationSelector'
+    type: object
   handlers.editableConfigPayload:
     properties:
       binary_storage:
@@ -533,6 +572,85 @@ definitions:
       username:
         example: admin
         type: string
+    type: object
+  models.AnnotationCanvas:
+    properties:
+      height:
+        type: integer
+      id:
+        type: string
+      width:
+        type: integer
+    type: object
+  models.AnnotationQuote:
+    properties:
+      exact:
+        type: string
+      prefix:
+        type: string
+      suffix:
+        type: string
+    type: object
+  models.AnnotationRectangle:
+    properties:
+      height:
+        type: number
+      width:
+        type: number
+      x:
+        type: number
+      "y":
+        type: number
+    type: object
+  models.AnnotationSelector:
+    properties:
+      canvas:
+        $ref: '#/definitions/models.AnnotationCanvas'
+      coordinate_space:
+        type: string
+      quote:
+        $ref: '#/definitions/models.AnnotationQuote'
+      rectangles:
+        items:
+          $ref: '#/definitions/models.AnnotationRectangle'
+        type: array
+      type:
+        type: string
+    type: object
+  models.DocumentAnnotation:
+    properties:
+      client_reference_id:
+        type: string
+      color:
+        type: string
+      created_at:
+        type: string
+      document_id:
+        type: string
+      generation:
+        type: string
+      generation_active:
+        type: boolean
+      historical:
+        type: boolean
+      id:
+        type: string
+      layer_sha256:
+        type: string
+      note:
+        type: string
+      page_id:
+        type: string
+      page_number:
+        type: integer
+      selected_text:
+        type: string
+      selector:
+        $ref: '#/definitions/models.AnnotationSelector'
+      updated_at:
+        type: string
+      version:
+        type: integer
     type: object
   models.IIIFAnnotation:
     properties:
@@ -1543,6 +1661,180 @@ paths:
       summary: Programar reinicio del servicio
       tags:
       - Admin
+  /api/v1/annotations/{annotation_id}:
+    delete:
+      parameters:
+      - description: UUID v7 de la anotación
+        in: path
+        name: annotation_id
+        required: true
+        type: string
+      responses:
+        "204":
+          description: No Content
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/api.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/api.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/api.ErrorResponse'
+        "503":
+          description: Service Unavailable
+          schema:
+            $ref: '#/definitions/api.ErrorResponse'
+      security:
+      - IntegrationBearer: []
+      summary: Eliminar lógicamente una anotación
+      tags:
+      - Annotations
+    get:
+      parameters:
+      - description: UUID v7 de la anotación
+        in: path
+        name: annotation_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/models.DocumentAnnotation'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/api.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/api.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/api.ErrorResponse'
+        "503":
+          description: Service Unavailable
+          schema:
+            $ref: '#/definitions/api.ErrorResponse'
+      security:
+      - IntegrationBearer: []
+      summary: Consultar una anotación
+      tags:
+      - Annotations
+    patch:
+      consumes:
+      - application/json
+      description: note y color son independientes. selector, selected_text, ocr_generation_id
+        y layer_sha256 deben enviarse juntos.
+      parameters:
+      - description: UUID v7 de la anotación
+        in: path
+        name: annotation_id
+        required: true
+        type: string
+      - description: ETag actual, por ejemplo \
+        in: header
+        name: If-Match
+        required: true
+        type: string
+      - description: Campos editables
+        in: body
+        name: request
+        required: true
+        schema:
+          type: object
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/models.DocumentAnnotation'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/api.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/api.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/api.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/api.ErrorResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/api.ErrorResponse'
+        "412":
+          description: Precondition Failed
+          schema:
+            $ref: '#/definitions/api.ErrorResponse'
+        "422":
+          description: Unprocessable Entity
+          schema:
+            $ref: '#/definitions/api.ErrorResponse'
+        "503":
+          description: Service Unavailable
+          schema:
+            $ref: '#/definitions/api.ErrorResponse'
+      security:
+      - IntegrationBearer: []
+      summary: Actualizar una anotación con concurrencia optimista
+      tags:
+      - Annotations
+  /api/v1/annotations/batch:
+    post:
+      consumes:
+      - application/json
+      description: Devuelve únicamente recursos visibles para el tenant y proyecto
+        del token. Máximo 100 IDs.
+      parameters:
+      - description: IDs solicitados y filtro opcional de página
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/handlers.AnnotationBatchRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.AnnotationBatchResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/api.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/api.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/api.ErrorResponse'
+        "503":
+          description: Service Unavailable
+          schema:
+            $ref: '#/definitions/api.ErrorResponse'
+      security:
+      - IntegrationBearer: []
+      summary: Consultar anotaciones por lote
+      tags:
+      - Annotations
   /api/v1/documents:
     get:
       description: Lista documentos con filtros opcionales por proyecto y tenant.
@@ -1571,6 +1863,78 @@ paths:
       summary: Listar documentos
       tags:
       - Documentos
+  /api/v1/documents/{document_id}/pages/{page_id}/annotations:
+    post:
+      consumes:
+      - application/json
+      description: Persiste una selección sobre la generación OCR activa de una página
+        estable.
+      parameters:
+      - description: UUID del documento
+        in: path
+        name: document_id
+        required: true
+        type: string
+      - description: ID estable de document_images
+        in: path
+        name: page_id
+        required: true
+        type: string
+      - description: UUID de referencia generado por el cliente
+        in: header
+        name: Idempotency-Key
+        required: true
+        type: string
+      - description: Anotación
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/handlers.CreateAnnotationRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Repetición idempotente
+          schema:
+            $ref: '#/definitions/models.DocumentAnnotation'
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/models.DocumentAnnotation'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/api.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/api.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/api.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/api.ErrorResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/api.ErrorResponse'
+        "422":
+          description: Unprocessable Entity
+          schema:
+            $ref: '#/definitions/api.ErrorResponse'
+        "503":
+          description: Service Unavailable
+          schema:
+            $ref: '#/definitions/api.ErrorResponse'
+      security:
+      - IntegrationBearer: []
+      summary: Crear una anotación de documento
+      tags:
+      - Annotations
   /api/v1/documents/{id}:
     delete:
       parameters:
