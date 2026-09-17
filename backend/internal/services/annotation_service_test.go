@@ -41,8 +41,10 @@ func (r *fakeAnnotationRepository) CreateAnnotation(_ context.Context, annotatio
 	}
 	copy := *annotation
 	copy.CreatedAt, copy.UpdatedAt = time.Now().UTC(), time.Now().UTC()
-	r.items[copy.ID] = &copy
-	return &copy, false, nil
+	stored := copy
+	r.items[copy.ID] = &stored
+	returned := copy
+	return &returned, false, nil
 }
 
 func (r *fakeAnnotationRepository) GetAnnotationByClientReference(_ context.Context, tenant, clientReference string) (*models.DocumentAnnotation, error) {
